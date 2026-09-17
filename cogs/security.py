@@ -1,16 +1,21 @@
+import asyncio
 import datetime
 import logging
 import random
 import re
 import time
+from collections import defaultdict, deque
+from threading import RLock
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from database import SETTINGS_DEFAULTS, get_guild_settings, update_guild_settings
+
 
 logger = logging.getLogger("SecurityCog")
-
 
 # فحص روابط التصيد وسرقة الحسابات
 SCAM_REGEX = re.compile(
@@ -18,6 +23,13 @@ SCAM_REGEX = re.compile(
     r"discord\.gift|nitro-gift|steamcommunity-link)[^\s]+",
     re.I,
 )
+
+THREAT_LIMIT = 3
+THREAT_WINDOW = 10.0
+THREAT_RETENTION = 60.0
+AUDIT_ENTRY_MAX_AGE = 20.0
+LOCKDOWN_INTERVAL = 0.35
+INCIDENT_BUFFER_SIZE = 50
 
 
 class MathCaptchaModal(discord.ui.Modal, title="بوابة التحقق البشري الذكية"):
@@ -36,7 +48,7 @@ class MathCaptchaModal(discord.ui.Modal, title="بوابة التحقق البش
     async def on_submit(self, itx: discord.Interaction):
         if self.input.value.strip() == self.answer:
             role = itx.guild.get_role(self.role_id)
-            if role and role < itx.guild.me.top_role:
+            if role and itx.guild.me and role < itx.guild.me.top_role:
                 await itx.user.add_roles(role)
                 return await itx.response.send_message(
                     "✅ تم التحقق البشري بنجاح ومُنحت رتبة الدخول!",
@@ -59,9 +71,7 @@ class CaptchaView(discord.ui.View):
         # A role-specific ID prevents one server's CAPTCHA view from routing
         # interactions to another server's verified role.
         button = next(
-            item
-            for item in self.children
-            if isinstance(item, discord.ui.Button)
+            item for item in self.children if isinstance(item, discord.ui.Button)
         )
         button.custom_id = f"btn_sec_cap:{role_id}"
 
@@ -80,78 +90,373 @@ class CaptchaView(discord.ui.View):
 
 
 class Security(commands.Cog):
+    """محرك دفاع تهديدات متعدد المستويات مع إعدادات حية وسجل حوادث."""
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.rate_limits: dict[str, list[float]] = {}
 
-    def check_abuse(
+        # (guild_id, actor_id) -> recent destructive action timestamps.
+        self._threats: dict[tuple[int, int], deque[float]] = defaultdict(deque)
+        self._mitigated: dict[tuple[int, int], float] = {}
+        self._whitelist: dict[int, set[int]] = defaultdict(set)
+
+        # This is intentionally a real deque so the dashboard and diagnostics
+        # can inspect a bounded, in-memory incident history.
+        self.incidents: deque[dict[str, Any]] = deque(maxlen=INCIDENT_BUFFER_SIZE)
+        self._incident_lock = RLock()
+
+        self._lockdown_queue: Optional[asyncio.Queue] = None
+        self._lockdown_worker: Optional[asyncio.Task] = None
+
+    # ------------------------------------------------------------------
+    # Dynamic configuration and incident stream
+    # ------------------------------------------------------------------
+    async def security_settings(self, guild_id: int) -> dict[str, Any]:
+        """Read security values through database.py's TTL/LRU cache."""
+        try:
+            snapshot = await get_guild_settings(int(guild_id))
+            values = snapshot["settings"]
+            return {
+                "anti_nuke": bool(values["anti_nuke"]),
+                "anti_alt_days": int(values["anti_alt_days"]),
+                "captcha_enabled": bool(values["captcha_enabled"]),
+                "captcha_role_id": values["captcha_role_id"],
+            }
+        except Exception:
+            # Security listeners must stay alive if SQLite is briefly
+            # unavailable. The safe defaults keep anti-nuke enabled and use
+            # the original three-day account-age threshold.
+            logger.exception(
+                "[SECURITY_CONFIG] تعذر قراءة إعدادات السيرفر %s",
+                guild_id,
+            )
+            return {
+                "anti_nuke": bool(SETTINGS_DEFAULTS["anti_nuke"]),
+                "anti_alt_days": int(SETTINGS_DEFAULTS["anti_alt_days"]),
+                "captcha_enabled": bool(SETTINGS_DEFAULTS["captcha_enabled"]),
+                "captcha_role_id": SETTINGS_DEFAULTS["captcha_role_id"],
+            }
+
+    def get_incidents(self, guild_id: Optional[int] = None) -> list[dict[str, Any]]:
+        """Return a consistent snapshot of the thread-safe ring buffer."""
+        with self._incident_lock:
+            rows = list(self.incidents)
+        if guild_id is not None:
+            rows = [row for row in rows if row["guild_id"] == int(guild_id)]
+        return [dict(row) for row in rows]
+
+    def _record_incident(
         self,
-        uid: int,
-        action: str,
-        limit: int = 3,
-        window: int = 60,
-    ) -> bool:
-        """فحص تكرار العمليات الإدارية الحساسة خلال نافذة زمنية محددة"""
-        key = f"{uid}_{action}"
-        now = time.time()
-        timestamps = [
-            timestamp
-            for timestamp in self.rate_limits.setdefault(key, [])
-            if now - timestamp < window
-        ] + [now]
-        self.rate_limits[key] = timestamps
-        return len(timestamps) >= limit
+        guild_id: int,
+        culprit: Any,
+        action_type: str,
+        mitigation_taken: str,
+    ) -> dict[str, Any]:
+        culprit_id = int(getattr(culprit, "id", culprit))
+        culprit_name = getattr(culprit, "display_name", None) or getattr(
+            culprit, "name", None
+        )
+        if not culprit_name:
+            culprit_name = str(culprit_id)
+        incident = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "guild_id": int(guild_id),
+            "culprit_id": culprit_id,
+            "culprit_name": str(culprit_name),
+            "action_type": str(action_type),
+            "mitigation_taken": str(mitigation_taken),
+        }
+        with self._incident_lock:
+            self.incidents.append(incident)
+        logger.warning(
+            "[SECURITY_INCIDENT] guild=%s culprit=%s action=%s mitigation=%s",
+            guild_id,
+            culprit_id,
+            action_type,
+            mitigation_taken,
+        )
+        return incident
+
+    def whitelist_member(self, guild_id: int, user_id: int) -> None:
+        """Add an explicitly trusted operator to the in-memory whitelist."""
+        self._whitelist[int(guild_id)].add(int(user_id))
+
+    def remove_whitelisted_member(self, guild_id: int, user_id: int) -> None:
+        self._whitelist[int(guild_id)].discard(int(user_id))
+
+    def _is_whitelisted(self, guild: discord.Guild, user_id: int) -> bool:
+        bot_id = getattr(self.bot.user, "id", None)
+        return (
+            int(user_id) == int(guild.owner_id)
+            or (bot_id is not None and int(user_id) == int(bot_id))
+            or int(user_id) in self._whitelist.get(int(guild.id), set())
+        )
+
+    # ------------------------------------------------------------------
+    # Emergency lockdown queue
+    # ------------------------------------------------------------------
+    def _ensure_lockdown_worker(self) -> None:
+        if self._lockdown_worker and not self._lockdown_worker.done():
+            return
+        self._lockdown_queue = asyncio.Queue(maxsize=64)
+        self._lockdown_worker = asyncio.create_task(self._lockdown_worker_loop())
+
+    async def emergency_lockdown(self, guild_id: int, locked: bool) -> dict[str, Any]:
+        """Queue public-channel permission changes without blocking the caller."""
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return {"queued": False, "channels": 0, "locked": bool(locked)}
+
+        everyone = guild.default_role
+        channels = []
+        for channel in guild.text_channels:
+            try:
+                if channel.permissions_for(everyone).view_channel:
+                    channels.append(channel.id)
+            except (AttributeError, discord.DiscordException):
+                logger.debug("تعذر فحص خصوصية القناة %s", channel.id, exc_info=True)
+
+        self._ensure_lockdown_worker()
+        job = (int(guild.id), bool(locked), channels)
+        try:
+            self._lockdown_queue.put_nowait(job)
+        except asyncio.QueueFull:
+            logger.error("[SECURITY_LOCKDOWN] طابور الإغلاق ممتلئ للسيرفر %s", guild.id)
+            return {"queued": False, "channels": len(channels), "locked": bool(locked)}
+
+        self._record_incident(
+            guild.id,
+            getattr(self.bot, "user", 0) or 0,
+            "emergency_lockdown",
+            f"queued:{'locked' if locked else 'unlocked'}:{len(channels)}",
+        )
+        return {"queued": True, "channels": len(channels), "locked": bool(locked)}
+
+    async def _lockdown_worker_loop(self) -> None:
+        assert self._lockdown_queue is not None
+        while True:
+            guild_id, locked, channel_ids = await self._lockdown_queue.get()
+            try:
+                guild = self.bot.get_guild(guild_id)
+                if guild is None:
+                    continue
+                everyone = guild.default_role
+                for channel_id in channel_ids:
+                    channel = guild.get_channel(channel_id)
+                    if channel is None:
+                        continue
+                    try:
+                        overwrite = channel.overwrites_for(everyone)
+                        overwrite.send_messages = False if locked else None
+                        overwrite.send_messages_in_threads = False if locked else None
+                        await channel.set_permissions(
+                            everyone,
+                            overwrite=overwrite,
+                            reason=(
+                                "Emergency security lockdown"
+                                if locked
+                                else "Emergency security lockdown cleared"
+                            ),
+                        )
+                    except (discord.Forbidden, discord.HTTPException):
+                        logger.warning(
+                            "[SECURITY_LOCKDOWN] فشل تحديث القناة %s في %s",
+                            channel_id,
+                            guild_id,
+                            exc_info=True,
+                        )
+                    await asyncio.sleep(LOCKDOWN_INTERVAL)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("[SECURITY_LOCKDOWN] خطأ في طابور الإغلاق")
+            finally:
+                self._lockdown_queue.task_done()
+
+    def cog_unload(self):
+        if self._lockdown_worker and not self._lockdown_worker.done():
+            self._lockdown_worker.cancel()
+
+    # ------------------------------------------------------------------
+    # Threat tracking and mitigation
+    # ------------------------------------------------------------------
+    def _track_threat(self, guild_id: int, actor_id: int) -> int:
+        now = time.monotonic()
+        key = (int(guild_id), int(actor_id))
+        timestamps = self._threats[key]
+        while timestamps and now - timestamps[0] > THREAT_WINDOW:
+            timestamps.popleft()
+        timestamps.append(now)
+        # Keep the dictionaries bounded even if an attacker changes IDs.
+        for stale_key, last in list(self._mitigated.items()):
+            if now - last > THREAT_RETENTION:
+                self._mitigated.pop(stale_key, None)
+                self._threats.pop(stale_key, None)
+        return len(timestamps)
+
+    async def _handle_admin_action(
+        self,
+        guild: discord.Guild,
+        actor: discord.abc.User,
+        action_type: str,
+    ) -> None:
+        if actor is None or self._is_whitelisted(guild, actor.id):
+            return
+        member = guild.get_member(actor.id)
+        if member is None or not member.guild_permissions.administrator:
+            return
+
+        count = self._track_threat(guild.id, actor.id)
+        self._record_incident(guild.id, actor, action_type, f"observed:{count}")
+        if count <= THREAT_LIMIT:
+            return
+
+        key = (guild.id, actor.id)
+        now = time.monotonic()
+        if now - self._mitigated.get(key, 0) < THREAT_RETENTION:
+            return
+        self._mitigated[key] = now
+
+        lockdown = await self.emergency_lockdown(guild.id, True)
+        reason = f"تجاوز {THREAT_LIMIT} إجراءات إدارية خلال {int(THREAT_WINDOW)} ثوان"
+        await self.quarantine_admin(guild, member, reason, action_type, lockdown)
+
+    async def _audit_actor(
+        self,
+        guild: discord.Guild,
+        action: discord.AuditLogAction,
+        target_id: int,
+    ):
+        try:
+            async for entry in guild.audit_logs(limit=5, action=action):
+                target = getattr(entry, "target", None)
+                if getattr(target, "id", None) != int(target_id):
+                    continue
+                created_at = getattr(entry, "created_at", None)
+                if created_at is not None:
+                    age = (discord.utils.utcnow() - created_at).total_seconds()
+                    if age > AUDIT_ENTRY_MAX_AGE or age < -5:
+                        continue
+                return entry.user
+        except (discord.Forbidden, discord.HTTPException, asyncio.TimeoutError):
+            logger.warning(
+                "[SECURITY_AUDIT] تعذر قراءة سجل التدقيق للسيرفر %s",
+                guild.id,
+                exc_info=True,
+            )
+        return None
 
     async def quarantine_admin(
         self,
         guild: discord.Guild,
         member: discord.Member,
         reason: str,
+        action_type: str = "admin_abuse",
+        lockdown: Optional[dict[str, Any]] = None,
     ):
-        """تجريد المشرف فوراً من كافة صلاحياته لمنع استمرار الهجوم"""
-        try:
-            await member.edit(
-                roles=[],
-                reason=f"Anti-Nuke Triggered: {reason}",
-            )
-            channel = guild.system_channel
-            if channel:
-                embed = discord.Embed(
-                    title="🚨 تدخل أمني طارئ (Anti-Nuke)",
-                    color=0x992D22,
-                )
-                embed.add_field(
-                    name="المخرب",
-                    value=f"{member.mention} ({member.id})",
-                    inline=True,
-                )
-                embed.add_field(
-                    name="السبب",
-                    value=reason,
-                    inline=False,
-                )
-                await channel.send(
-                    "@everyone ⚠️ تم عزل المشرف وإلغاء صلاحياته فوراً "
-                    "لحماية السيرفر!",
-                    embed=embed,
-                )
-        except Exception as error:
-            logger.exception("[SECURITY_CRITICAL] فشل عزل المشرف: %s", error)
+        """Strip Administrator roles, ban the actor, and record every outcome."""
+        if self._is_whitelisted(guild, member.id) or member.id == guild.owner_id:
+            return
 
+        mitigation = []
+        admin_roles = [
+            role
+            for role in member.roles
+            if not role.is_default() and role.permissions.administrator
+        ]
+        try:
+            if admin_roles:
+                retained = [
+                    role for role in member.roles if role not in admin_roles
+                ]
+                await member.edit(
+                    roles=retained,
+                    reason=f"Anti-Nuke: {reason}",
+                )
+                mitigation.append(f"admin_roles_stripped:{len(admin_roles)}")
+            else:
+                mitigation.append("admin_roles_stripped:0")
+        except (discord.Forbidden, discord.HTTPException):
+            mitigation.append("admin_roles_strip_failed")
+            logger.warning(
+                "[SECURITY_CRITICAL] فشل تجريد رتب %s في %s",
+                member.id,
+                guild.id,
+                exc_info=True,
+            )
+
+        try:
+            await guild.ban(
+                member,
+                reason=f"Anti-Nuke: {reason}",
+                delete_message_seconds=0,
+            )
+            mitigation.append("account_banned")
+        except (discord.Forbidden, discord.HTTPException):
+            mitigation.append("account_ban_failed")
+            logger.warning(
+                "[SECURITY_CRITICAL] فشل حظر الحساب %s في %s",
+                member.id,
+                guild.id,
+                exc_info=True,
+            )
+
+        if lockdown and lockdown.get("queued"):
+            mitigation.append(f"lockdown_queued:{lockdown['channels']}")
+        self._record_incident(
+            guild.id,
+            member,
+            action_type,
+            ",".join(mitigation),
+        )
+
+    # ------------------------------------------------------------------
+    # Existing protection listeners, now dynamically configured
+    # ------------------------------------------------------------------
     @commands.Cog.listener()
     async def on_member_join(self, mem: discord.Member):
-        # 1. فحص عمر الحساب (Account Age Gate < 3 أيام)
-        if (discord.utils.utcnow() - mem.created_at).days < 3:
+        config = await self.security_settings(mem.guild.id)
+        age_days = (discord.utils.utcnow() - mem.created_at).total_seconds() / 86400
+        if config["anti_alt_days"] > 0 and age_days < config["anti_alt_days"]:
             try:
-                await mem.kick(reason="حساب جديد مشبوه (عمره أقل من 3 أيام)")
+                await mem.kick(
+                    reason=(
+                        f"حساب جديد مشبوه (عمره أقل من {config['anti_alt_days']} أيام)"
+                    )
+                )
                 channel = mem.guild.system_channel
                 if channel:
                     await channel.send(
                         f"🛡️ تم طرد الحساب المشبوه {mem.mention} تلقائياً "
                         "(تاريخ الإنشاء حديث)."
                     )
-            except Exception:
-                pass
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "[SECURITY_ALT] فشل التعامل مع الحساب الجديد %s",
+                    mem.id,
+                    exc_info=True,
+                )
+            return
+
+        if config["captcha_enabled"] and config["captcha_role_id"]:
+            role = mem.guild.get_role(int(config["captcha_role_id"]))
+            if role and mem.guild.me and role < mem.guild.me.top_role:
+                channel = mem.guild.system_channel
+                if channel:
+                    view = CaptchaView(role.id)
+                    self.bot.add_view(view)
+                    try:
+                        await channel.send(
+                            f"🛡️ {mem.mention} أكمل التحقق البشري للحصول على رتبة الدخول.",
+                            view=view,
+                            delete_after=600,
+                        )
+                    except (discord.Forbidden, discord.HTTPException):
+                        logger.warning(
+                            "[SECURITY_CAPTCHA] فشل إرسال التحقق للسيرفر %s",
+                            mem.guild.id,
+                            exc_info=True,
+                        )
 
     @commands.Cog.listener()
     async def on_message(self, msg: discord.Message):
@@ -161,7 +466,6 @@ class Security(commands.Cog):
             or msg.author.guild_permissions.manage_guild
         ):
             return
-        # 2. فحص روابط التصيد والاحتيال والنيترو الوهمي
         if SCAM_REGEX.search(msg.content):
             try:
                 await msg.delete()
@@ -175,86 +479,59 @@ class Security(commands.Cog):
                     "لحماية الأعضاء!",
                     delete_after=6,
                 )
-            except Exception:
-                pass
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "[SECURITY_LINK] تعذر حذف أو كتم رسالة مشبوهة",
+                    exc_info=True,
+                )
 
-    # -------------------------------------------------------------
-    # رصد هجمات التخريب السريع (Audit Logs Monitors)
-    # -------------------------------------------------------------
     @commands.Cog.listener()
-    async def on_guild_channel_delete(
-        self,
-        channel: discord.abc.GuildChannel,
-    ):
-        guild = channel.guild
-        async for entry in guild.audit_logs(
-            limit=1,
-            action=discord.AuditLogAction.channel_delete,
-        ):
-            user = entry.user
-            if (
-                not user
-                or user.id == guild.owner_id
-                or user.id == self.bot.user.id
-            ):
-                return
-            if self.check_abuse(user.id, "ch_del", limit=3, window=60):
-                member = guild.get_member(user.id)
-                if member:
-                    await self.quarantine_admin(
-                        guild,
-                        member,
-                        "حذف أكثر من قناتين خلال دقيقة واحدة",
-                    )
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        if not (await self.security_settings(channel.guild.id))["anti_nuke"]:
+            return
+        actor = await self._audit_actor(
+            channel.guild,
+            discord.AuditLogAction.channel_delete,
+            channel.id,
+        )
+        if actor:
+            await self._handle_admin_action(channel.guild, actor, "channel_delete")
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
-        guild = role.guild
-        async for entry in guild.audit_logs(
-            limit=1,
-            action=discord.AuditLogAction.role_delete,
-        ):
-            user = entry.user
-            if (
-                not user
-                or user.id == guild.owner_id
-                or user.id == self.bot.user.id
-            ):
-                return
-            if self.check_abuse(user.id, "rl_del", limit=3, window=60):
-                member = guild.get_member(user.id)
-                if member:
-                    await self.quarantine_admin(
-                        guild,
-                        member,
-                        "حذف رتب متعددة بسرعة فائقة",
-                    )
+        if not (await self.security_settings(role.guild.id))["anti_nuke"]:
+            return
+        actor = await self._audit_actor(
+            role.guild,
+            discord.AuditLogAction.role_delete,
+            role.id,
+        )
+        if actor:
+            await self._handle_admin_action(role.guild, actor, "role_delete")
 
     @commands.Cog.listener()
-    async def on_member_ban(
-        self,
-        guild: discord.Guild,
-        member: discord.User,
-    ):
-        async for entry in guild.audit_logs(
-            limit=1,
-            action=discord.AuditLogAction.ban,
-        ):
-            user = entry.user
-            if (
-                not user
-                or user.id == guild.owner_id
-                or user.id == self.bot.user.id
-            ):
-                return
-            if self.check_abuse(user.id, "mass_ban", limit=3, window=60):
-                moderator = guild.get_member(user.id)
-                if moderator:
-                    await self.quarantine_admin(
-                        guild,
-                        moderator,
-                        "محاولة حظر جماعي للأعضاء (Mass Ban)",
-                    )
+    async def on_member_remove(self, member: discord.Member):
+        if not (await self.security_settings(member.guild.id))["anti_nuke"]:
+            return
+        actor = await self._audit_actor(
+            member.guild,
+            discord.AuditLogAction.kick,
+            member.id,
+        )
+        if actor:
+            await self._handle_admin_action(member.guild, actor, "member_kick")
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, member: discord.User):
+        if not (await self.security_settings(guild.id))["anti_nuke"]:
+            return
+        actor = await self._audit_actor(
+            guild,
+            discord.AuditLogAction.ban,
+            member.id,
+        )
+        if actor:
+            await self._handle_admin_action(guild, actor, "member_ban")
 
     @app_commands.command(
         name="setup_captcha",
@@ -281,6 +558,20 @@ class Security(commands.Cog):
             )
             return
 
+        try:
+            await update_guild_settings(
+                guild.id,
+                captcha_enabled=True,
+                captcha_role_id=verified_role.id,
+            )
+        except Exception:
+            logger.exception("[SECURITY_CAPTCHA] فشل حفظ إعدادات الكابتشا")
+            await itx.response.send_message(
+                "❌ تعذر حفظ إعدادات الكابتشا في قاعدة البيانات.",
+                ephemeral=True,
+            )
+            return
+
         embed = discord.Embed(
             title="🛡️ بوابة التحقق البشري والأمان الفائق",
             description=(
@@ -293,12 +584,9 @@ class Security(commands.Cog):
         embed.set_footer(text="نظام الحماية المركزي النشط")
         view = CaptchaView(verified_role.id)
         self.bot.add_view(view)
-        await itx.channel.send(
-            embed=embed,
-            view=view,
-        )
+        await itx.channel.send(embed=embed, view=view)
         await itx.response.send_message(
-            "✅ تم نشر بوابة الكابتشا بنجاح.",
+            "✅ تم نشر بوابة الكابتشا وحفظ إعداداتها بنجاح.",
             ephemeral=True,
         )
 

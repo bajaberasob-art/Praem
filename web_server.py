@@ -373,6 +373,18 @@ async def api_guild_meta(req):
     return web.json_response(guild_meta(guild))
 
 
+@routes.get('/api/guild/{guild_id}/security/incidents')
+async def api_security_incidents(req):
+    _, guild = await authorize(req)
+    security = bot_ref.get_cog("Security") if bot_ref else None
+    if security is None:
+        return json_error(503, "security_unavailable")
+    return web.json_response({
+        "guild_id": str(guild.id),
+        "incidents": security.get_incidents(guild.id),
+    })
+
+
 @routes.get('/api/guild/{guild_id}/settings')
 async def api_get_settings(req):
     _, guild = await authorize(req)

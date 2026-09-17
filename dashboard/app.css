@@ -736,3 +736,33 @@ textarea {
   font-size: 0.7rem;
   color: #fca5a5;
 }
+.incident-list {
+  display: grid;
+  gap: 9px;
+}
+.incident-row {
+  padding: 12px 14px;
+  border: 1px solid #3f1d27;
+  border-radius: 12px;
+  background: linear-gradient(105deg, #160d13, #0b1018);
+}
+.incident-row-head,
+.incident-row-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.incident-row-head strong {
+  color: #fda4af;
+  font-size: 0.9rem;
+}
+.incident-row-head time,
+.incident-row-meta {
+  color: #94a3b8;
+  font-size: 0.76rem;
+}
+.incident-row-meta {
+  margin-top: 7px;
+  flex-wrap: wrap;
+}

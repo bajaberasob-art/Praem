@@ -22,6 +22,7 @@
     session: null,
     guild: null,
     meta: null,
+    incidents: [],
     baseline: null,
     draft: null,
     revision: null,
@@ -431,6 +432,51 @@
       content,
     );
   }
+  function incidentsCard() {
+    const body = el("div", { class: "incident-list" });
+    if (!state.incidents.length) {
+      body.append(
+        el("div", {
+          class: "empty-row",
+          text: "لا توجد حوادث أمنية مسجلة مؤخراً",
+        }),
+      );
+    } else {
+      state.incidents
+        .slice()
+        .reverse()
+        .forEach((incident) => {
+          const date = new Date(incident.timestamp);
+          const when = Number.isNaN(date.getTime())
+            ? incident.timestamp
+            : date.toLocaleString("ar", {
+                dateStyle: "short",
+                timeStyle: "short",
+              });
+          body.append(
+            el(
+              "article",
+              { class: "incident-row" },
+              el(
+                "div",
+                { class: "incident-row-head" },
+                el("strong", { text: incident.action_type }),
+                el("time", { dateTime: incident.timestamp, text: when }),
+              ),
+              el(
+                "div",
+                { class: "incident-row-meta" },
+                el("span", {
+                  text: `${incident.culprit_name} (${incident.culprit_id})`,
+                }),
+                el("span", { text: incident.mitigation_taken }),
+              ),
+            ),
+          );
+        });
+    }
+    return card("سجل الحوادث الأمنية", body);
+  }
   function renderPage() {
     const main = $("#main");
     main.replaceChildren();
@@ -536,6 +582,7 @@
     );
     main.append(
       card("الاقتصاد", econ),
+      incidentsCard(),
       el("footer", {
         class: "footer",
         text: "الإعدادات تُحفظ في قاعدة بيانات البوت وتُطبّق على الميزات المرتبطة بها",
@@ -685,14 +732,20 @@
     renderShell();
     closeSSE();
     try {
-      const [mr, sr] = await Promise.all([
+      const [mr, sr, ir] = await Promise.all([
         api(`api/guild/${id}/meta`),
         api(`api/guild/${id}/settings`),
+        api(`api/guild/${id}/security/incidents`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings] = await Promise.all([mr.json(), sr.json()]);
+      const [meta, settings, incidents] = await Promise.all([
+        mr.json(),
+        sr.json(),
+        ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
+      ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
+      state.incidents = incidents.incidents || [];
       state.baseline = clone(settings.settings);
       state.draft = clone(settings.settings);
       state.revision = settings.revision;

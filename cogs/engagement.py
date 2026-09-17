@@ -15,6 +15,8 @@ from database import (
     record_rules_agreement,
     save_role_panel,
     save_rules_panel,
+    get_self_role_panels,
+    save_self_role_panel,
 )
 
 
@@ -137,12 +139,17 @@ class TicketLauncher(discord.ui.View):
 
 
 class RoleSelector(discord.ui.Select):
-    def __init__(self, roles):
+    def __init__(self, roles, role_specs=None):
+        specs = {
+            int(spec["id"]): spec
+            for spec in (role_specs or [])
+            if isinstance(spec, dict) and str(spec.get("id", "")).isdigit()
+        }
         options = [
             discord.SelectOption(
-                label=role.name,
+                label=str(specs.get(role.id, {}).get("label") or role.name)[:100],
                 value=str(role.id),
-                emoji="🏷️",
+                emoji=specs.get(role.id, {}).get("emoji") or "🏷️",
             )
             for role in roles[:25]
         ]
@@ -240,6 +247,7 @@ class Engagement(commands.Cog):
         self._invite_lock = asyncio.Lock()
         self._restored_role_panels: set[int] = set()
         self._restored_rules_panels: set[int] = set()
+        self._restored_self_role_panels: set[int] = set()
 
     async def engagement_settings(self, guild_id: int) -> dict[str, Any]:
         try:
@@ -271,6 +279,16 @@ class Engagement(commands.Cog):
                 "unverified_role_id": None,
                 "rules_channel_id": None,
             }
+
+    async def get_onboarding_snapshot(self, guild_id: int) -> dict[str, Any]:
+        snapshot = await get_guild_settings(int(guild_id))
+        fields = await self.engagement_settings(guild_id)
+        return {
+            "revision": snapshot["revision"],
+            "updated_at": snapshot["updated_at"],
+            "settings": fields,
+            "self_roles": await get_self_role_panels(guild_id),
+        }
 
     @staticmethod
     def format_ordinal(count: int) -> str:
@@ -414,6 +432,29 @@ class Engagement(commands.Cog):
                         self._restored_rules_panels.add(panel["message_id"])
             except (discord.Forbidden, discord.HTTPException):
                 logger.warning("[RULES_PANEL] تعذر استعادة لوحة في %s", guild.id)
+            try:
+                for panel in await get_self_role_panels(guild.id):
+                    if panel["message_id"] in self._restored_self_role_panels:
+                        continue
+                    channel = guild.get_channel(panel["channel_id"])
+                    specs = panel.get("role_specs") or []
+                    roles = [
+                        guild.get_role(int(spec["id"]))
+                        for spec in specs
+                        if isinstance(spec, dict) and str(spec.get("id", "")).isdigit()
+                    ]
+                    roles = [
+                        role
+                        for role in roles
+                        if role and not role.managed and guild.me and role < guild.me.top_role
+                    ]
+                    if channel and roles:
+                        view = discord.ui.View(timeout=None)
+                        view.add_item(RoleSelector(roles, specs))
+                        self.bot.add_view(view, message_id=panel["message_id"])
+                        self._restored_self_role_panels.add(panel["message_id"])
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("[SELF_ROLE_PANEL] تعذر استعادة لوحة في %s", guild.id)
 
     async def agree_to_rules(self, itx: discord.Interaction) -> dict[str, Any]:
         guild, member = itx.guild, itx.user
@@ -554,6 +595,66 @@ class Engagement(commands.Cog):
         except (discord.Forbidden, discord.HTTPException):
             return {"ok": False, "error": "send_failed"}
         return {"ok": True, "guild_id": guild.id, "channel_id": channel.id, "message_id": message.id}
+
+    async def deploy_self_role_panel(
+        self,
+        guild_id: int,
+        target_channel_id: int,
+        title: str,
+        description: str,
+        color: str,
+        emoji: str,
+        role_specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return {"ok": False, "error": "guild_not_found"}
+        channel = guild.get_channel(int(target_channel_id))
+        if channel is None or not callable(getattr(channel, "send", None)):
+            return {"ok": False, "error": "channel_not_found"}
+        if not isinstance(role_specs, list) or not 1 <= len(role_specs) <= 25:
+            return {"ok": False, "error": "roles_invalid"}
+        clean_specs = []
+        roles = []
+        for spec in role_specs:
+            if not isinstance(spec, dict) or not str(spec.get("id", "")).isdigit():
+                return {"ok": False, "error": "roles_invalid"}
+            role = guild.get_role(int(spec["id"]))
+            if role is None or role.managed or not guild.me or role >= guild.me.top_role:
+                return {"ok": False, "error": "role_not_assignable"}
+            clean_specs.append({
+                "id": role.id,
+                "label": str(spec.get("label") or role.name)[:100],
+                "emoji": str(spec.get("emoji") or "🏷️")[:32],
+            })
+            roles.append(role)
+        normalized_color = str(color or "#5865f2").strip()
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", normalized_color):
+            normalized_color = "#5865f2"
+        try:
+            embed = discord.Embed(
+                title=f"{str(emoji or '🏷️')[:8]} {str(title or 'الرتب الذاتية')[:256]}",
+                description=str(description or "اختر الرتب المناسبة لك:")[:4000],
+                color=int(normalized_color[1:], 16),
+            )
+            view = discord.ui.View(timeout=None)
+            view.add_item(RoleSelector(roles, clean_specs))
+            message = await channel.send(embed=embed, view=view)
+            panel = await save_self_role_panel(
+                guild.id,
+                channel.id,
+                message.id,
+                str(title or "الرتب الذاتية")[:256],
+                str(description or "")[:4000],
+                normalized_color,
+                str(emoji or "🏷️")[:8],
+                clean_specs,
+            )
+            self._restored_self_role_panels.add(message.id)
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("[SELF_ROLE_PANEL] فشل نشر لوحة في %s", guild.id, exc_info=True)
+            return {"ok": False, "error": "send_failed"}
+        return {"ok": True, "panel": panel}
 
     @app_commands.command(
         name="setup_tickets",

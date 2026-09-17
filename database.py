@@ -232,6 +232,26 @@ async def init_db() -> None:
                     PRIMARY KEY (guild_id, channel_id, message_id)
                 );
             """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS self_role_panels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    color TEXT NOT NULL DEFAULT '#5865f2',
+                    emoji TEXT NOT NULL DEFAULT '🏷️',
+                    role_specs TEXT NOT NULL DEFAULT '[]',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (guild_id, message_id)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_self_role_panels_guild "
+                "ON self_role_panels(guild_id);"
+            )
 
             await db.commit()
             logger.info("[DB] جميع الجداول والفهارس تعمل بكفاءة عالية.")
@@ -679,6 +699,78 @@ async def get_rules_panels(guild_id: int) -> list[dict[str, Any]]:
             (int(guild_id),),
         ) as cur:
             return [dict(row) for row in await cur.fetchall()]
+
+
+async def save_self_role_panel(
+    guild_id: int,
+    channel_id: int,
+    message_id: int,
+    title: str,
+    description: str,
+    color: str,
+    emoji: str,
+    role_specs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    encoded_specs = json.dumps(role_specs, ensure_ascii=False)
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO self_role_panels
+                (guild_id, channel_id, message_id, title, description, color, emoji, role_specs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, message_id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                title = excluded.title,
+                description = excluded.description,
+                color = excluded.color,
+                emoji = excluded.emoji,
+                role_specs = excluded.role_specs,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id, guild_id, channel_id, message_id, title, description, color, emoji,
+                      role_specs, created_at, updated_at
+            """,
+            (
+                int(guild_id),
+                int(channel_id),
+                int(message_id),
+                str(title),
+                str(description),
+                str(color),
+                str(emoji),
+                encoded_specs,
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+    result = dict(row) if row else {}
+    try:
+        result["role_specs"] = json.loads(result.get("role_specs") or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        result["role_specs"] = []
+    return result
+
+
+async def get_self_role_panels(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, title, description,
+                   color, emoji, role_specs, created_at, updated_at
+            FROM self_role_panels
+            WHERE guild_id = ?
+            ORDER BY id DESC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            rows = []
+            for row in await cur.fetchall():
+                item = dict(row)
+                try:
+                    item["role_specs"] = json.loads(item.get("role_specs") or "[]")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    item["role_specs"] = []
+                rows.append(item)
+            return rows
 
 
 async def get_recent_warnings(guild_id: int, limit: int = 50) -> List[Dict[str, Any]]:

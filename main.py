@@ -3,14 +3,15 @@ import logging
 import os
 import sys
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
 from database import init_db
+from web_server import start_web_server
 
 
-# إعداد سجل العمليات المنظم
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -20,125 +21,229 @@ logger = logging.getLogger("CoreRunner")
 
 TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
 if not TOKEN:
-    logger.critical("الرمز السري DISCORD_TOKEN أو DISCORD_BOT_TOKEN مفقود في Secrets.")
+    logger.critical(
+        "⚠️ مفتاح DISCORD_TOKEN أو DISCORD_BOT_TOKEN مفقود "
+        "تماماً داخل Replit Secrets!"
+    )
     sys.exit(1)
 
-# تفعيل كافة الصلاحيات والأحداث اللازمة
 intents = discord.Intents.all()
 
 
-class CentralBot(commands.Bot):
+class EnterpriseBot(commands.Bot):
     def __init__(self):
         super().__init__(
             command_prefix="!",
             intents=intents,
             help_command=None,
-            application_id=None,
+            max_messages=1000,
         )
+        self.session: aiohttp.ClientSession | None = None
+        self.presence_step = 0
 
     async def setup_hook(self):
-        # تهيئة قاعدة البيانات أولاً لضمان جاهزية الجداول
-        await init_db()
+        self.session = aiohttp.ClientSession()
 
-        # تحميل حزم الـ Cogs المعيارية
-        cogs = [
+        try:
+            await init_db()
+            logger.info("📦 تم التحقق من سلامة قاعدة البيانات بنجاح.")
+        except Exception as error:
+            logger.error(f"❌ فشل فحص قاعدة البيانات: {error}")
+
+        try:
+            await start_web_server(self)
+            logger.info(
+                "🌐 لوحة التحكم (Web Dashboard) نشطة على المنفذ 8080."
+            )
+        except Exception as error:
+            logger.error(f"⚠️ تعذر إطلاق خادم الويب: {error}")
+
+        modules = [
             "cogs.moderation",
             "cogs.engagement",
             "cogs.economy",
             "cogs.utilities",
+            "cogs.security",
+            "cogs.tournaments",
+            "cogs.community",
+            "cogs.ai_tools",
         ]
-        for cog in cogs:
-            try:
-                await self.load_extension(cog)
-                logger.info(f"✅ تم تحميل النظام: {cog}")
-            except Exception as error:
-                logger.error(f"❌ تعذر تحميل {cog}: {error}")
 
-        # بدء دورة تحديث الحالة الحية
-        self.update_presence.start()
+        for module in modules:
+            try:
+                await self.load_extension(module)
+                logger.info(f"✅ تم تحميل الوحدة بنجاح: {module}")
+            except commands.ExtensionAlreadyLoaded:
+                pass
+            except Exception as error:
+                logger.error(f"❌ خطأ أثناء تحميل {module}: {error}")
+
+        self.rotate_status.start()
+
+    async def close(self):
+        logger.info("🛑 جاري إنهاء الجلسات وإيقاف البوت بأمان...")
+        if self.session and not self.session.closed:
+            await self.session.close()
+        await super().close()
 
     async def on_ready(self):
-        logger.info("========================================")
+        logger.info("=" * 45)
         logger.info(
-            f" الأنظمة المركزية نشطة: {self.user.name} (ID: {self.user.id})"
+            f"🚀 المحرك المركزي جاهز للخدمة: "
+            f"{self.user.name} (ID: {self.user.id})"
         )
-        logger.info(f" زمن الاستجابة: {round(self.latency * 1000)}ms")
-        logger.info("========================================")
+        logger.info(
+            f"📡 السيرفرات النشطة: {len(self.guilds)} | الأعضاء: "
+            f"{sum(guild.member_count for guild in self.guilds if guild.member_count)}"
+        )
+        logger.info(
+            f"⚡ زمن الاستجابة الشبكي (Ping): "
+            f"{round(self.latency * 1000)}ms"
+        )
+        logger.info("=" * 45)
+
         try:
             synced = await self.tree.sync()
-            logger.info(f"🚀 تمت مزامنة {len(synced)} أمر Slash بنجاح.")
+            logger.info(
+                f"✨ تمت مزامنة {len(synced)} أمر Slash عالمياً بنجاح."
+            )
+        except discord.HTTPException as error:
+            logger.error(
+                "⚠️ فشل الاتصال بخوادم ديسكورد لمزامنة الأوامر: "
+                f"{error}"
+            )
         except Exception as error:
-            logger.error(f"⚠️ فشلت مزامنة الأوامر: {error}")
+            logger.error(f"⚠️ خطأ غير متوقع في المزامنة: {error}")
 
-    @tasks.loop(minutes=5)
-    async def update_presence(self):
-        """تحديث نشاط البوت تلقائياً بحسب إحصائيات السيرفرات الحية"""
+    @tasks.loop(seconds=30)
+    async def rotate_status(self):
         if not self.is_ready():
             return
+
         total_members = sum(
-            guild.member_count for guild in self.guilds if guild.member_count
+            guild.member_count
+            for guild in self.guilds
+            if guild.member_count
         )
-        status_text = f"{total_members} عضو | /dashboard"
+        statuses = [
+            (
+                discord.ActivityType.watching,
+                f"{total_members:,} عضو | /help",
+            ),
+            (
+                discord.ActivityType.competing,
+                f"{len(self.guilds)} سيرفر | Shield Active 🛡️",
+            ),
+            (
+                discord.ActivityType.listening,
+                "لوحة التحكم | Port 8080 ⚡",
+            ),
+        ]
+
+        activity_type, activity_name = statuses[
+            self.presence_step % len(statuses)
+        ]
         await self.change_presence(
             activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name=status_text,
+                type=activity_type,
+                name=activity_name,
             ),
             status=discord.Status.online,
         )
+        self.presence_step += 1
 
-    @update_presence.before_loop
-    async def before_presence(self):
+    @rotate_status.before_loop
+    async def before_rotate(self):
         await self.wait_until_ready()
 
 
-bot = CentralBot()
+bot = EnterpriseBot()
 
 
-# -------------------------------------------------------------
-# معالج الأخطاء العام لكافة أوامر Slash
-# -------------------------------------------------------------
 @bot.tree.error
 async def on_app_command_error(
     itx: discord.Interaction,
     error: app_commands.AppCommandError,
 ):
-    if isinstance(error, app_commands.MissingPermissions):
-        message = "⛔ لا تملك الصلاحيات الكافية لتنفيذ هذا الأمر."
-    elif isinstance(error, app_commands.BotMissingPermissions):
-        message = "❌ البوت يفتقر إلى الصلاحيات الإدارية المطلوبة في هذا الروم."
-    elif isinstance(error, app_commands.CommandOnCooldown):
+    if isinstance(error, app_commands.CommandOnCooldown):
         message = (
-            f"⏳ يرجى الانتظار `{error.retry_after:.1f}` ثانية قبل إعادة المحاولة."
+            f"⏳ يرجى الانتظار `{error.retry_after:.1f}` ثانية "
+            "قبل إعادة استخدام هذا الأمر."
+        )
+    elif isinstance(error, app_commands.MissingPermissions):
+        missing = ", ".join(
+            f"`{permission}`"
+            for permission in error.missing_permissions
+        )
+        message = (
+            "⛔ لا تمتلك الصلاحيات الكافية لتنفيذ هذا الإجراء: "
+            f"{missing}"
+        )
+    elif isinstance(error, app_commands.BotMissingPermissions):
+        missing = ", ".join(
+            f"`{permission}`"
+            for permission in error.missing_permissions
+        )
+        message = (
+            "❌ يفتقر البوت إلى الصلاحيات المطلوبة في هذه القناة: "
+            f"{missing}"
+        )
+    elif isinstance(error, app_commands.NoPrivateMessage):
+        message = (
+            "🔒 هذا الأمر متاح للاستخدام داخل السيرفرات فقط "
+            "وليس في الرسائل الخاصة."
         )
     else:
+        command_name = itx.command.name if itx.command else "مجهول"
         logger.error(
-            f"خطأ غير معالج في الأمر "
-            f"{itx.command.name if itx.command else 'Unknown'}: {error}"
+            f"خطأ غير معالج في الأمر [{command_name}]: {error}"
         )
-        message = "⚠️ حدث خطأ تقني غير متوقع أثناء معالجة الطلب."
+        message = (
+            "⚠️ حدث خطأ تقني غير متوقع أثناء معالجة الطلب، "
+            "تم تدوين الخطأ لمراجعته."
+        )
 
-    if itx.response.is_done():
-        await itx.followup.send(message, ephemeral=True)
-    else:
-        await itx.response.send_message(message, ephemeral=True)
+    try:
+        if itx.response.is_done():
+            await itx.followup.send(message, ephemeral=True)
+        else:
+            await itx.response.send_message(message, ephemeral=True)
+    except Exception:
+        pass
 
 
-# -------------------------------------------------------------
-# دورة التشغيل والإغلاق الآمن (Graceful Execution)
-# -------------------------------------------------------------
 async def main():
     async with bot:
-        try:
-            await bot.start(TOKEN)
-        except discord.LoginFailure:
-            logger.critical("فشل تسجيل الدخول: الـ DISCORD_TOKEN غير صالح.")
-        except Exception as error:
-            logger.critical(f"انقطاع غير متوقع في المحرك: {error}")
+        retry_delay = 5
+        while not bot.is_closed():
+            try:
+                await bot.start(TOKEN)
+            except discord.LoginFailure:
+                logger.critical(
+                    "🚨 رمز DISCORD_TOKEN غير صالح أو تم تغييره، "
+                    "تم إيقاف المحرك فوراً."
+                )
+                break
+            except (
+                discord.ConnectionClosed,
+                aiohttp.ClientConnectorError,
+            ) as error:
+                logger.warning(
+                    "⚠️ فقدان مؤقت للاتصال بخوادم ديسكورد "
+                    f"({error}). إعادة المحاولة خلال "
+                    f"{retry_delay} ثوانٍ..."
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60)
+            except Exception as error:
+                logger.critical(
+                    f"❌ انقطاع غير معالج في الحلقة التشغيلية: {error}"
+                )
+                await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("تم إيقاف تشغيل النظام يدوياً.")
+        logger.info("🚪 تم إيقاف تشغيل الخادم يدوياً بواسطة المطور.")

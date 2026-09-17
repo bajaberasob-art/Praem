@@ -79,16 +79,26 @@
     "unverified_role_id",
     "rules_channel_id",
   ];
+  const settingsKeys = keys.filter((key) => !onboardingKeys.includes(key));
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const changes = () =>
     !state.baseline || !state.draft
       ? {}
       : Object.fromEntries(
-          keys
+          settingsKeys
+            .filter((k) => state.baseline[k] !== state.draft[k])
+            .map((k) => [k, state.draft[k]]),
+        );
+  const onboardingChanges = () =>
+    !state.baseline || !state.draft
+      ? {}
+      : Object.fromEntries(
+          onboardingKeys
             .filter((k) => state.baseline[k] !== state.draft[k])
             .map((k) => [k, state.draft[k]]),
         );
   const dirty = () => Object.keys(changes()).length > 0;
+  const onboardingDirty = () => Object.keys(onboardingChanges()).length > 0;
   // اعتماد نسخة أحدث من الخادم مع الإبقاء على تعديلات المستخدم فقط (لا على القيم القديمة غير المعدّلة)
   function adopt(snapshot, keepLocal = true) {
     const local = keepLocal ? changes() : {};
@@ -417,20 +427,40 @@
     display();
     return field(label, wrap, key);
   }
-  function preview() {
-    let t = state.draft.welcome_message || "";
-    const guild = state.guild;
-    t = t
+  function appendSafeMarkdown(parent, source) {
+    const lines = String(source || "").split("\n");
+    const tokenPattern = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|`[^`\n]+`)/g;
+    lines.forEach((line, lineIndex) => {
+      let cursor = 0;
+      for (const match of line.matchAll(tokenPattern)) {
+        const start = match.index || 0;
+        if (start > cursor) parent.append(document.createTextNode(line.slice(cursor, start)));
+        const token = match[0];
+        const inner = token.slice(token.startsWith("`") ? 1 : 2, token.startsWith("`") ? -1 : -2);
+        const tag = token.startsWith("`") ? "code" : token.startsWith("*") || token.startsWith("_") ? "strong" : "em";
+        parent.append(el(tag, { text: inner }));
+        cursor = start + token.length;
+      }
+      if (cursor < line.length) parent.append(document.createTextNode(line.slice(cursor)));
+      if (lineIndex < lines.length - 1) parent.append(el("br"));
+    });
+  }
+  function onboardingTemplate() {
+    const guild = state.guild || {};
+    return String(state.draft?.welcome_message || "")
       .replace(/\{user\}/g, "@عضو_جديد")
-      .replace(/\{server\}/g, guild.name)
-      .replace(
-        /\{count\}/g,
-        guild.members == null ? "1000" : String(guild.members),
-      );
+      .replace(/\{username\}/g, "عضو جديد")
+      .replace(/\{server\}/g, guild.name || "السيرفر")
+      .replace(/\{count\}/g, guild.members == null ? "1,284th" : `${Number(guild.members).toLocaleString("en-US")}th`)
+      .replace(/\{inviter\}/g, "دعوة تجريبية");
+  }
+  function preview() {
+    const body = el("div", { class: "embed" });
+    appendSafeMarkdown(body, onboardingTemplate() || "اكتب رسالة الترحيب لرؤية المعاينة.");
     return el(
       "div",
       { id: "preview" },
-      el("div", { class: "preview-title", text: "معاينة مباشرة" }),
+      el("div", { class: "preview-title" }, el("span", { text: "معاينة Discord مباشرة" }), el("small", { text: "تتحدث بعد كل تعديل" })),
       el(
         "div",
         { class: "discord" },
@@ -440,11 +470,9 @@
           el("span", { class: "bot-face", text: "ب" }),
           el("b", { text: "البوت" }),
           el("span", { class: "bot-tag", text: "BOT" }),
+          el("span", { class: "msg-time", text: "الآن" }),
         ),
-        el("div", {
-          class: "embed",
-          text: t || "اكتب رسالة الترحيب لرؤية المعاينة.",
-        }),
+        body,
       ),
     );
   }
@@ -784,6 +812,321 @@
       if (error.message !== "unauth") toast("تعذر الاتصال بمحرك الأمان");
     }
   }
+  function scheduleOnboardingPreview() {
+    clearTimeout(state.onboardingPreviewTimer);
+    state.onboardingPreviewTimer = setTimeout(() => {
+      const current = $("#preview");
+      if (current) current.replaceWith(preview());
+    }, 120);
+  }
+  function insertTemplateVariable(textarea, token) {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    textarea.value = `${textarea.value.slice(0, start)}${token}${textarea.value.slice(end)}`;
+    textarea.selectionStart = textarea.selectionEnd = start + token.length;
+    state.draft.welcome_message = textarea.value;
+    navigator.vibrate?.(10);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+  }
+  function variableChips(textarea) {
+    const wrap = el("div", { class: "variable-chips", "aria-label": "متغيرات الرسالة" });
+    [
+      ["{user}", "منشن العضو"],
+      ["{server}", "اسم السيرفر"],
+      ["{count}", "ترتيب العضو"],
+      ["{inviter}", "صاحب الدعوة"],
+    ].forEach(([token, label]) => {
+      wrap.append(
+        el("button", {
+          class: "variable-chip",
+          type: "button",
+          title: label,
+          text: token,
+          onClick: () => insertTemplateVariable(textarea, token),
+        }),
+      );
+    });
+    return wrap;
+  }
+  function roleName(id) {
+    return state.meta?.roles?.find((role) => String(role.id) === String(id))?.name || "بدون رتبة";
+  }
+  function normalizePanelColor(value) {
+    return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : "#5865f2";
+  }
+  function ensureSelfRoleBuilder() {
+    if (state.selfRoleBuilder) return state.selfRoleBuilder;
+    const saved = state.onboarding?.self_roles?.[0];
+    state.selfRoleBuilder = {
+      target_channel_id: String(
+        saved?.channel_id || state.draft?.welcome_channel_id || state.meta?.channels?.[0]?.id || "",
+      ),
+      title: saved?.title || "اختر رتبتك",
+      description: saved?.description || "اختر الرتب التي تناسبك من القائمة التالية:",
+      color: normalizePanelColor(saved?.color),
+      emoji: saved?.emoji || "🏷️",
+      roles: (saved?.role_specs || []).map((role) => ({
+        id: String(role.id),
+        label: String(role.label || role.name || role.id),
+        emoji: String(role.emoji || "🏷️"),
+      })),
+    };
+    return state.selfRoleBuilder;
+  }
+  function nativeSelect(label, value, options, onChange) {
+    const select = el("select", { class: "studio-select", "aria-label": label });
+    options.forEach((option) =>
+      select.append(el("option", { value: String(option.value), text: option.label })),
+    );
+    select.value = String(value ?? "");
+    select.onchange = () => onChange(select.value);
+    return select;
+  }
+  function selfRolePreview(builder) {
+    const panel = el(
+      "div",
+      { class: "self-role-preview-panel", style: `--panel-accent:${normalizePanelColor(builder.color)}` },
+      el("div", { class: "self-role-preview-kicker", text: "DISCORD / ROLE SELECTOR" }),
+      el("h3", { text: `${builder.emoji || "🏷️"} ${builder.title || "اختر رتبتك"}` }),
+      el("p", { text: builder.description || "اختر الرتب التي تناسبك:" }),
+    );
+    const grid = el("div", { class: "role-button-grid" });
+    (builder.roles.length ? builder.roles : [{ id: "preview", label: "رتبة تجريبية", emoji: "✨" }]).forEach(
+      (role) => {
+        grid.append(
+          el("button", {
+            class: "role-preview-button",
+            type: "button",
+            text: `${role.emoji || "🏷️"} ${role.label || roleName(role.id)}`,
+          }),
+        );
+      },
+    );
+    panel.append(grid);
+    return panel;
+  }
+  function selfRolesBuilder() {
+    const builder = ensureSelfRoleBuilder();
+    const roles = state.meta?.roles || [];
+    const availableRoles = roles.filter(
+      (role) =>
+        role.assignable !== false &&
+        !role.managed &&
+        !role.default &&
+        !builder.roles.some((selected) => String(selected.id) === String(role.id)),
+    );
+    const roleRows = el("div", { class: "builder-role-list" });
+    if (!builder.roles.length)
+      roleRows.append(el("div", { class: "builder-empty", text: "أضف رتبة واحدة على الأقل لتفعيل النشر." }));
+    builder.roles.forEach((role, index) => {
+      const label = el("input", {
+        class: "builder-role-input",
+        type: "text",
+        maxlength: "100",
+        value: role.label || roleName(role.id),
+        "aria-label": `اسم الرتبة ${index + 1}`,
+      });
+      const emoji = el("input", {
+        class: "builder-emoji-input",
+        type: "text",
+        maxlength: "8",
+        value: role.emoji || "🏷️",
+        "aria-label": `إيموجي الرتبة ${index + 1}`,
+      });
+      label.oninput = () => (role.label = label.value);
+      emoji.oninput = () => (role.emoji = emoji.value);
+      roleRows.append(
+        el(
+          "div",
+          { class: "builder-role-row" },
+          el("span", { class: "role-dot", style: `background:${roles.find((r) => String(r.id) === String(role.id))?.color || "#64748b"}` }),
+          emoji,
+          label,
+          el("small", { class: "builder-role-source", text: roleName(role.id) }),
+          el("button", {
+            class: "icon-button",
+            type: "button",
+            "aria-label": "إزالة الرتبة",
+            text: "×",
+            onClick: () => {
+              builder.roles.splice(index, 1);
+              renderPage();
+            },
+          }),
+        ),
+      );
+    });
+    const channelOptions = (state.meta?.channels || []).map((channel) => ({
+      value: channel.id,
+      label: `# ${channel.name}`,
+    }));
+    const rolePicker = nativeSelect(
+      "إضافة رتبة للوحة",
+      "",
+      [{ value: "", label: "إضافة رتبة…" }, ...availableRoles.map((role) => ({ value: role.id, label: role.name }))],
+      (value) => {
+        if (!value) return;
+        const role = roles.find((item) => String(item.id) === String(value));
+        if (!role) return;
+        builder.roles.push({ id: String(role.id), label: role.name, emoji: "🏷️" });
+        navigator.vibrate?.(10);
+        renderPage();
+      },
+    );
+    const title = el("input", {
+      class: "builder-input",
+      type: "text",
+      maxlength: "256",
+      value: builder.title,
+      "aria-label": "عنوان لوحة الرتب",
+    });
+    const description = el("textarea", {
+      class: "builder-textarea",
+      maxlength: "4000",
+      "aria-label": "وصف لوحة الرتب",
+    });
+    description.value = builder.description;
+    const color = el("input", {
+      class: "builder-color",
+      type: "color",
+      value: normalizePanelColor(builder.color),
+      "aria-label": "لون لوحة الرتب",
+    });
+    const emoji = el("input", {
+      class: "builder-emoji-input panel-emoji",
+      type: "text",
+      maxlength: "8",
+      value: builder.emoji,
+      "aria-label": "إيموجي لوحة الرتب",
+    });
+    title.oninput = () => {
+      builder.title = title.value;
+      const current = $(".self-role-preview-panel");
+      if (current) current.replaceWith(selfRolePreview(builder));
+    };
+    description.oninput = () => {
+      builder.description = description.value;
+      const current = $(".self-role-preview-panel");
+      if (current) current.replaceWith(selfRolePreview(builder));
+    };
+    color.oninput = () => {
+      builder.color = normalizePanelColor(color.value);
+      const current = $(".self-role-preview-panel");
+      if (current) current.replaceWith(selfRolePreview(builder));
+    };
+    emoji.oninput = () => {
+      builder.emoji = emoji.value;
+      const current = $(".self-role-preview-panel");
+      if (current) current.replaceWith(selfRolePreview(builder));
+    };
+    const targetChannel = nativeSelect(
+      "قناة لوحة الرتب",
+      builder.target_channel_id,
+      channelOptions.length ? channelOptions : [{ value: "", label: "لا توجد قنوات" }],
+      (value) => (builder.target_channel_id = value),
+    );
+    const deploy = el("button", {
+      class: "btn builder-deploy",
+      type: "button",
+      text: "نشر لوحة الرتب في Discord",
+      onClick: deploySelfRoles,
+    });
+    const form = el(
+      "div",
+      { class: "self-role-builder-form" },
+      el("div", { class: "builder-form-row" }, el("label", { text: "القناة" }), targetChannel),
+      el("div", { class: "builder-form-row" }, el("label", { text: "العنوان" }), title),
+      el("div", { class: "builder-form-row" }, el("label", { text: "الوصف" }), description),
+      el("div", { class: "builder-inline-fields" }, el("div", { class: "builder-form-row" }, el("label", { text: "الإيموجي" }), emoji), el("div", { class: "builder-form-row" }, el("label", { text: "اللون" }), color)),
+      el("div", { class: "builder-form-row" }, el("label", { text: "الرتب" }), rolePicker),
+      roleRows,
+      deploy,
+    );
+    const previewPane = el("div", { class: "self-role-builder-preview" }, el("div", { class: "preview-title", text: "المعاينة" }), selfRolePreview(builder));
+    const existing = el("div", { class: "deployed-panels" });
+    const panels = state.onboarding?.self_roles || [];
+    if (panels.length) {
+      existing.append(el("div", { class: "deployed-heading", text: "لوحات منشورة" }));
+      panels.slice(0, 4).forEach((panel) => {
+        existing.append(
+          el("div", { class: "deployed-panel" },
+            el("span", { class: "deployed-panel-icon", text: panel.emoji || "🏷️" }),
+            el("span", { class: "ell", text: panel.title || "لوحة رتب" }),
+            el("small", { text: `${panel.role_specs?.length || 0} رتب · رسالة ${panel.message_id}` }),
+          ),
+        );
+      });
+    }
+    return el("div", { class: "self-role-builder" }, form, previewPane, existing);
+  }
+  function onboardingView() {
+    const section = el("section", { id: "view-onboarding", class: "onboarding-view" });
+    const message = el("textarea", {
+      id: "in-onboarding-message",
+      maxlength: "1000",
+      placeholder: "مرحباً {user} في {server} — أنت العضو {count}.",
+    });
+    message.value = state.draft.welcome_message || "";
+    const messageCount = el("div", { class: "counter", text: `${message.value.length} / 1000` });
+    message.oninput = () => {
+      state.draft.welcome_message = message.value;
+      messageCount.textContent = `${message.value.length} / 1000`;
+      renderDynamic();
+      scheduleOnboardingPreview();
+    };
+    const onboardingFields = el("div", { class: "fields onboarding-fields" });
+    onboardingFields.append(
+      selector("welcome_channel_id", "قناة الترحيب", "channel"),
+      toggle("welcome_dm_enabled", "إرسال ترحيب خاص للعضو"),
+      selector("rules_channel_id", "قناة القوانين", "channel"),
+      selector("verified_role_id", "رتبة العضو الموثق", "role"),
+      selector("unverified_role_id", "رتبة العضو غير الموثق", "role"),
+      el("div", { class: "field wide role-matrix-field" },
+        el("label", { text: "مصفوفة الأدوار التلقائية" }),
+        el("div", { class: "role-matrix" },
+          el("div", { class: "role-matrix-card human" }, el("span", { class: "matrix-icon", text: "◉" }), el("div", { class: "matrix-copy" }, el("strong", { text: "الأعضاء البشر" }), el("small", { text: roleName(state.draft.member_auto_role_id) })), selector("member_auto_role_id", "رتبة الأعضاء", "role")),
+          el("div", { class: "role-matrix-card bot" }, el("span", { class: "matrix-icon", text: "⌘" }), el("div", { class: "matrix-copy" }, el("strong", { text: "البوتات" }), el("small", { text: roleName(state.draft.bot_auto_role_id) })), selector("bot_auto_role_id", "رتبة البوتات", "role")),
+          el("div", { class: "role-matrix-card all" }, el("span", { class: "matrix-icon", text: "✦" }), el("div", { class: "matrix-copy" }, el("strong", { text: "رتبة افتراضية للجميع" }), el("small", { text: roleName(state.draft.auto_role_id) })), selector("auto_role_id", "رتبة عامة", "role")),
+        ),
+      ),
+    );
+    const leave = el("textarea", {
+      id: "in-onboarding-leave",
+      maxlength: "1000",
+      placeholder: "{username} غادر {server}.",
+    });
+    leave.value = state.draft.leave_message || "";
+    const leaveCount = el("div", { class: "counter", text: `${leave.value.length} / 1000` });
+    leave.oninput = () => {
+      state.draft.leave_message = leave.value;
+      leaveCount.textContent = `${leave.value.length} / 1000`;
+      renderDynamic();
+    };
+    const messageField = field("قالب رسالة الترحيب", message, "welcome_message", "يدعم Markdown محدوداً، وسيتم تجاهل أي HTML.");
+    messageField.classList.add("wide", "message-template-field");
+    messageField.append(variableChips(message), messageCount, preview());
+    const leaveField = field("رسالة المغادرة", leave, "leave_message");
+    leaveField.classList.add("wide");
+    leaveField.append(leaveCount);
+    const actions = el(
+      "div",
+      { class: "onboarding-actions" },
+      el("button", { class: "btn onboarding-save", type: "button", text: "حفظ إعدادات onboarding", onClick: saveOnboarding }),
+      el("button", { class: "btn onboarding-test", type: "button", text: "إرسال تجربة إلى Discord", onClick: sendTestWelcome }),
+    );
+    section.append(
+      el("div", { class: "studio-hero" },
+        el("div", { class: "eyebrow", text: "ONBOARDING STUDIO / LIVE" }),
+        el("h2", { text: "استوديو الدخول والهوية" }),
+        el("p", { text: "صمّم لحظة دخول العضو، راجعها بصرياً، ثم انشر تجربة حقيقية في قناة Discord." }),
+        actions,
+      ),
+      card("قواعد الدخول والترحيب", el("div", { class: "onboarding-card-body" }, onboardingFields, messageField, leaveField)),
+      card("منشئ لوحة الرتب الذاتية", selfRolesBuilder()),
+    );
+    return section;
+  }
   function renderPage() {
     const main = $("#main");
     main.replaceChildren();
@@ -816,7 +1159,7 @@
         }),
       ),
     );
-    main.append(securityView());
+    main.append(onboardingView(), securityView());
     const general = el("div", { class: "fields" });
     general.append(
       input("prefix", "بادئة الأوامر", "text", {
@@ -846,59 +1189,6 @@
       selector("log_channel_id", "قناة السجل", "channel"),
     );
     main.append(card("الحماية", protect));
-    const welcome = el("div", { class: "fields" });
-    welcome.append(
-      selector("welcome_channel_id", "قناة الترحيب", "channel"),
-      selector("auto_role_id", "الرتبة التلقائية", "role"),
-      selector("member_auto_role_id", "رتبة الأعضاء", "role"),
-      selector("bot_auto_role_id", "رتبة البوتات", "role"),
-      selector("rules_channel_id", "قناة القوانين", "channel"),
-      selector("verified_role_id", "رتبة التحقق", "role"),
-      selector("unverified_role_id", "رتبة غير موثق", "role"),
-      toggle("welcome_dm_enabled", "إرسال ترحيب خاص"),
-    );
-    const ta = el("textarea", {
-      id: "in-welcome_message",
-      maxlength: "1000",
-      placeholder: "مرحباً {user} في {server}",
-    });
-    ta.value = state.draft.welcome_message || "";
-    const count = el("div", {
-      class: "counter",
-      text: `${ta.value.length} / 1000`,
-    });
-    ta.oninput = () => {
-      state.draft.welcome_message = ta.value;
-      count.textContent = `${ta.value.length} / 1000`;
-      renderDynamic();
-      const pv = $("#preview");
-      if (pv) pv.replaceWith(preview().cloneNode(true));
-    };
-    const wfield = field("رسالة الترحيب", ta, "welcome_message");
-    wfield.classList.add("wide");
-    wfield.append(count, el("div", { id: "preview" }));
-    wfield.lastChild.replaceWith(preview());
-    welcome.append(wfield);
-    const leave = el("textarea", {
-      id: "in-leave_message",
-      maxlength: "1000",
-      placeholder: "{username} غادر {server}",
-    });
-    leave.value = state.draft.leave_message || "";
-    const leaveCount = el("div", {
-      class: "counter",
-      text: `${leave.value.length} / 1000`,
-    });
-    leave.oninput = () => {
-      state.draft.leave_message = leave.value;
-      leaveCount.textContent = `${leave.value.length} / 1000`;
-      renderDynamic();
-    };
-    const leaveField = field("رسالة المغادرة", leave, "leave_message");
-    leaveField.classList.add("wide");
-    leaveField.append(leaveCount);
-    welcome.append(leaveField);
-    main.append(card("الترحيب", welcome));
     const econ = el("div", { class: "fields" }),
       tax = input("economy_tax", "ضريبة الاقتصاد", "number", {
         min: "0",

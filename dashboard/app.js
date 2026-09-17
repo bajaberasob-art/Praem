@@ -30,6 +30,9 @@
     draft: null,
     revision: null,
     updated: null,
+    onboarding: null,
+    selfRoleBuilder: null,
+    onboardingPreviewTimer: null,
     fields: {},
     saving: false,
     online: navigator.onLine,
@@ -63,6 +66,18 @@
     "banned_words_list",
     "economy_tax",
     "daily_amount",
+  ];
+  const onboardingKeys = [
+    "welcome_channel_id",
+    "welcome_message",
+    "leave_message",
+    "welcome_dm_enabled",
+    "auto_role_id",
+    "member_auto_role_id",
+    "bot_auto_role_id",
+    "verified_role_id",
+    "unverified_role_id",
+    "rules_channel_id",
   ];
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const changes = () =>

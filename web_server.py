@@ -527,6 +527,45 @@ async def api_quick_unmute(req):
     return web.json_response(result)
 
 
+@routes.post('/api/guild/{guild_id}/engagement/test-welcome')
+async def api_test_welcome(req):
+    session, guild = await authorize(req, write=True)
+    engagement = bot_ref.get_cog("Engagement") if bot_ref else None
+    if engagement is None:
+        return json_error(503, "engagement_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        body = json.loads((await req.content.read(MAX_BODY + 1)).decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    raw_channel_id = body.get("target_channel_id")
+    if isinstance(raw_channel_id, bool) or not str(raw_channel_id).isdigit():
+        return json_error(400, "validation", fields={"target_channel_id": "معرف قناة غير صالح"})
+    channel_id = int(raw_channel_id)
+    channel = guild.get_channel(channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        return json_error(400, "validation", fields={"target_channel_id": "القناة غير موجودة في هذا السيرفر"})
+    template_data = body.get("template_data", {})
+    if not isinstance(template_data, dict) or len(template_data) > 8:
+        return json_error(400, "validation", fields={"template_data": "بيانات المعاينة غير صالحة"})
+    result = await engagement.send_test_welcome(guild.id, channel_id, template_data)
+    if not result.get("ok"):
+        return json_error(
+            404 if result.get("error") in {"guild_not_found", "channel_not_found"} else 403,
+            result.get("error", "welcome_test_failed"),
+        )
+    logger.info(
+        "Welcome preview sent in guild %s by user %s to channel %s",
+        guild.id,
+        session["id"],
+        channel_id,
+    )
+    return web.json_response(result)
+
+
 @routes.get('/api/guild/{guild_id}/settings')
 async def api_get_settings(req):
     _, guild = await authorize(req)

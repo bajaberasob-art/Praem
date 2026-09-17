@@ -44,8 +44,15 @@
     "captcha_enabled",
     "captcha_role_id",
     "auto_role_id",
+    "member_auto_role_id",
+    "bot_auto_role_id",
+    "verified_role_id",
+    "unverified_role_id",
+    "rules_channel_id",
+    "welcome_dm_enabled",
     "welcome_channel_id",
     "welcome_message",
+    "leave_message",
     "log_channel_id",
     "anti_spam_enabled",
     "anti_link_enabled",
@@ -828,6 +835,12 @@
     welcome.append(
       selector("welcome_channel_id", "قناة الترحيب", "channel"),
       selector("auto_role_id", "الرتبة التلقائية", "role"),
+      selector("member_auto_role_id", "رتبة الأعضاء", "role"),
+      selector("bot_auto_role_id", "رتبة البوتات", "role"),
+      selector("rules_channel_id", "قناة القوانين", "channel"),
+      selector("verified_role_id", "رتبة التحقق", "role"),
+      selector("unverified_role_id", "رتبة غير موثق", "role"),
+      toggle("welcome_dm_enabled", "إرسال ترحيب خاص"),
     );
     const ta = el("textarea", {
       id: "in-welcome_message",
@@ -851,6 +864,25 @@
     wfield.append(count, el("div", { id: "preview" }));
     wfield.lastChild.replaceWith(preview());
     welcome.append(wfield);
+    const leave = el("textarea", {
+      id: "in-leave_message",
+      maxlength: "1000",
+      placeholder: "{username} غادر {server}",
+    });
+    leave.value = state.draft.leave_message || "";
+    const leaveCount = el("div", {
+      class: "counter",
+      text: `${leave.value.length} / 1000`,
+    });
+    leave.oninput = () => {
+      state.draft.leave_message = leave.value;
+      leaveCount.textContent = `${leave.value.length} / 1000`;
+      renderDynamic();
+    };
+    const leaveField = field("رسالة المغادرة", leave, "leave_message");
+    leaveField.classList.add("wide");
+    leaveField.append(leaveCount);
+    welcome.append(leaveField);
     main.append(card("الترحيب", welcome));
     const econ = el("div", { class: "fields" }),
       tax = input("economy_tax", "ضريبة الاقتصاد", "number", {

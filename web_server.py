@@ -569,6 +569,168 @@ async def api_test_welcome(req):
     return web.json_response(result)
 
 
+ONBOARDING_KEYS = {
+    "welcome_channel_id",
+    "welcome_message",
+    "leave_message",
+    "welcome_dm_enabled",
+    "auto_role_id",
+    "member_auto_role_id",
+    "bot_auto_role_id",
+    "verified_role_id",
+    "unverified_role_id",
+    "rules_channel_id",
+}
+
+
+async def onboarding_payload(guild, engagement):
+    return await engagement.get_onboarding_snapshot(guild.id)
+
+
+@routes.get('/api/guild/{guild_id}/onboarding')
+async def api_get_onboarding(req):
+    _, guild = await authorize(req)
+    engagement = bot_ref.get_cog("Engagement") if bot_ref else None
+    if engagement is None:
+        return json_error(503, "engagement_unavailable")
+    return web.json_response(await onboarding_payload(guild, engagement))
+
+
+@routes.post('/api/guild/{guild_id}/onboarding')
+async def api_post_onboarding(req):
+    session, guild = await authorize(req, write=True)
+    engagement = bot_ref.get_cog("Engagement") if bot_ref else None
+    if engagement is None:
+        return json_error(503, "engagement_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        raw_body = await req.content.read(MAX_BODY + 1)
+        if len(raw_body) > MAX_BODY:
+            return json_error(413, "too_large")
+        body = json.loads(raw_body.decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    revision = body.get("revision")
+    if revision is not None and (
+        not isinstance(revision, int) or isinstance(revision, bool)
+    ):
+        return json_error(400, "validation", fields={"revision": "رقم الإصدار غير صالح"})
+    changes = body.get("changes", {})
+    if not isinstance(changes, dict):
+        return json_error(400, "validation", fields={"changes": "صيغة التعديلات غير صالحة"})
+    unknown = set(changes) - ONBOARDING_KEYS
+    if unknown:
+        return json_error(
+            400,
+            "validation",
+            fields={str(key): "حقل غير مسموح في استوديو الترحيب" for key in unknown},
+        )
+    clean, errors = validate_changes(guild, changes)
+    if errors:
+        return json_error(400, "validation", fields=errors)
+    try:
+        snapshot = await update_guild_settings(
+            guild.id,
+            expected_revision=revision,
+            **clean,
+        ) if clean else await get_guild_settings(guild.id)
+    except SettingsConflict as conflict:
+        return json_error(409, "conflict", **public_settings(conflict.current))
+    result = await onboarding_payload(guild, engagement)
+    broadcast(guild.id, {"type": "settings", "by": str(session["id"]), **result})
+    return web.json_response(result)
+
+
+@routes.post('/api/guild/{guild_id}/onboarding/test-welcome')
+async def api_onboarding_test_welcome(req):
+    session, guild = await authorize(req, write=True)
+    engagement = bot_ref.get_cog("Engagement") if bot_ref else None
+    if engagement is None:
+        return json_error(503, "engagement_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        raw_body = await req.content.read(MAX_BODY + 1)
+        if len(raw_body) > MAX_BODY:
+            return json_error(413, "too_large")
+        body = json.loads(raw_body.decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    channel_id = body.get("target_channel_id")
+    if isinstance(channel_id, bool) or not str(channel_id).isdigit():
+        return json_error(400, "validation", fields={"target_channel_id": "معرف قناة غير صالح"})
+    channel = guild.get_channel(int(channel_id))
+    if not isinstance(channel, discord.TextChannel):
+        return json_error(400, "validation", fields={"target_channel_id": "القناة غير موجودة في هذا السيرفر"})
+    template_data = body.get("template_data", {})
+    if not isinstance(template_data, dict) or len(template_data) > 8:
+        return json_error(400, "validation", fields={"template_data": "بيانات المعاينة غير صالحة"})
+    result = await engagement.send_test_welcome(guild.id, int(channel_id), template_data)
+    if not result.get("ok"):
+        return json_error(
+            404 if result.get("error") in {"guild_not_found", "channel_not_found"} else 403,
+            result.get("error", "welcome_test_failed"),
+        )
+    logger.info("Onboarding welcome preview sent in guild %s by user %s", guild.id, session["id"])
+    return web.json_response(result)
+
+
+@routes.post('/api/guild/{guild_id}/onboarding/self-roles')
+async def api_deploy_self_roles(req):
+    session, guild = await authorize(req, write=True)
+    engagement = bot_ref.get_cog("Engagement") if bot_ref else None
+    if engagement is None:
+        return json_error(503, "engagement_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        raw_body = await req.content.read(MAX_BODY + 1)
+        if len(raw_body) > MAX_BODY:
+            return json_error(413, "too_large")
+        body = json.loads(raw_body.decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    channel_id = body.get("target_channel_id")
+    if isinstance(channel_id, bool) or not str(channel_id).isdigit():
+        return json_error(400, "validation", fields={"target_channel_id": "معرف قناة غير صالح"})
+    channel = guild.get_channel(int(channel_id))
+    if not isinstance(channel, discord.TextChannel):
+        return json_error(400, "validation", fields={"target_channel_id": "القناة غير موجودة في هذا السيرفر"})
+    roles = body.get("roles")
+    if not isinstance(roles, list) or not 1 <= len(roles) <= 25:
+        return json_error(400, "validation", fields={"roles": "اختر من رتبة إلى 25 رتبة"})
+    for spec in roles:
+        if (
+            not isinstance(spec, dict)
+            or isinstance(spec.get("id"), bool)
+            or not str(spec.get("id", "")).isdigit()
+        ):
+            return json_error(400, "validation", fields={"roles": "بيانات الرتب غير صالحة"})
+    result = await engagement.deploy_self_role_panel(
+        guild.id,
+        int(channel_id),
+        str(body.get("title") or "الرتب الذاتية")[:256],
+        str(body.get("description") or "اختر الرتب المناسبة لك:")[:4000],
+        str(body.get("color") or "#5865f2")[:20],
+        str(body.get("emoji") or "🏷️")[:8],
+        roles,
+    )
+    if not result.get("ok"):
+        return json_error(
+            400 if result.get("error") in {"roles_invalid", "role_not_assignable"} else 404,
+            result.get("error", "self_role_deploy_failed"),
+        )
+    logger.info("Self-role panel deployed in guild %s by user %s", guild.id, session["id"])
+    return web.json_response(result)
+
+
 @routes.get('/api/guild/{guild_id}/settings')
 async def api_get_settings(req):
     _, guild = await authorize(req)

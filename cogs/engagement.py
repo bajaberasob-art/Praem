@@ -578,7 +578,6 @@ class Engagement(commands.Cog):
             ),
             color=0x9B59B6,
         )
-        await itx.channel.send(embed=embed, view=view)
         message = await itx.channel.send(
             embed=embed,
             view=view,

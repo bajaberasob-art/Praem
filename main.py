@@ -39,6 +39,7 @@ class EnterpriseBot(commands.Bot):
             max_messages=1000,
         )
         self.session: aiohttp.ClientSession | None = None
+        self.dashboard_runner = None
         self.presence_step = 0
 
     async def setup_hook(self):
@@ -51,9 +52,10 @@ class EnterpriseBot(commands.Bot):
             logger.error(f"❌ فشل فحص قاعدة البيانات: {error}")
 
         try:
-            await start_web_server(self)
+            self.dashboard_runner = await start_web_server(self)
             logger.info(
-                "🌐 لوحة التحكم (Web Dashboard) نشطة على المنفذ 8080."
+                "🌐 لوحة التحكم (Web Dashboard) نشطة على المنفذ %s.",
+                os.getenv("DASHBOARD_PORT", "8080"),
             )
         except Exception as error:
             logger.error(f"⚠️ تعذر إطلاق خادم الويب: {error}")
@@ -82,6 +84,10 @@ class EnterpriseBot(commands.Bot):
 
     async def close(self):
         logger.info("🛑 جاري إنهاء الجلسات وإيقاف البوت بأمان...")
+        self.rotate_status.cancel()
+        if self.dashboard_runner:
+            await self.dashboard_runner.cleanup()
+            self.dashboard_runner = None
         if self.session and not self.session.closed:
             await self.session.close()
         await super().close()
@@ -136,7 +142,7 @@ class EnterpriseBot(commands.Bot):
             ),
             (
                 discord.ActivityType.listening,
-                "لوحة التحكم | Port 8080 ⚡",
+                f"لوحة التحكم | Port {os.getenv('DASHBOARD_PORT', '8080')} ⚡",
             ),
         ]
 
@@ -222,6 +228,13 @@ async def main():
                 logger.critical(
                     "🚨 رمز DISCORD_TOKEN غير صالح أو تم تغييره، "
                     "تم إيقاف المحرك فوراً."
+                )
+                break
+            except discord.PrivilegedIntentsRequired:
+                logger.critical(
+                    "يلزم تفعيل Presence Intent وServer Members Intent "
+                    "وMessage Content Intent في Discord Developer Portal "
+                    "→ Bot → Privileged Gateway Intents. تم إيقاف المحرك."
                 )
                 break
             except (

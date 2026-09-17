@@ -1,5 +1,6 @@
 import aiosqlite
 import asyncio
+import json
 import logging
 import time
 from collections import OrderedDict
@@ -28,10 +29,21 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     # أعمدة قديمة يتم الإبقاء عليها للتوافق
     "anti_spam_enabled": ("INTEGER", True, "bool"),
     "anti_link_enabled": ("INTEGER", True, "bool"),
+    # إعدادات Auto-Mod الحديثة
+    "anti_invites": ("INTEGER", True, "bool"),
+    "anti_links": ("INTEGER", True, "bool"),
+    "anti_spam": ("INTEGER", True, "bool"),
+    "anti_mass_mention": ("INTEGER", True, "bool"),
+    "banned_words_list": ("TEXT", "[]", "json_list"),
 }
 SETTINGS_DEFAULTS: Dict[str, Any] = {k: v[1] for k, v in SETTINGS_SCHEMA.items()}
 # الأعمدة القديمة التي تُغذّي الأعمدة الجديدة عند الترحيل (new <- legacy)
-LEGACY_ALIASES = {"welcome_channel_id": "welcome_channel", "log_channel_id": "mod_log_channel"}
+LEGACY_ALIASES = {
+    "welcome_channel_id": "welcome_channel",
+    "log_channel_id": "mod_log_channel",
+    "anti_spam": "anti_spam_enabled",
+    "anti_links": "anti_link_enabled",
+}
 
 CACHE_TTL = 60.0
 CACHE_MAX = 1024
@@ -104,9 +116,11 @@ async def _migrate_guild_settings(db: aiosqlite.Connection) -> None:
     wanted = dict(SETTINGS_SCHEMA)
     wanted["revision"] = ("INTEGER", 0, "int")
     wanted["updated_at"] = ("TEXT", None, "str")
+    missing = set()
     for column, (sql_type, default, kind) in wanted.items():
         if column in existing:
             continue
+        missing.add(column)
         if default is None:
             await db.execute(f"ALTER TABLE guild_settings ADD COLUMN {column} {sql_type} DEFAULT NULL;")
         else:
@@ -119,9 +133,10 @@ async def _migrate_guild_settings(db: aiosqlite.Connection) -> None:
             # ALTER TABLE لا يقبل معاملات مرتبطة في DEFAULT؛ القيم هنا من المخطط الثابت فقط.
             await db.execute(f"ALTER TABLE guild_settings ADD COLUMN {column} {sql_type} DEFAULT {literal};")
     for new_col, legacy in LEGACY_ALIASES.items():
-        if legacy in existing:
+        if legacy in existing and new_col in missing:
             await db.execute(
-                f"UPDATE guild_settings SET {new_col} = {legacy} WHERE {new_col} IS NULL AND {legacy} IS NOT NULL;"
+                f"UPDATE guild_settings SET {new_col} = {legacy} "
+                f"WHERE {legacy} IS NOT NULL;"
             )
     await db.execute("UPDATE guild_settings SET revision = 0 WHERE revision IS NULL;")
     await db.execute("UPDATE guild_settings SET updated_at = ? WHERE updated_at IS NULL;", (_utc_now(),))
@@ -198,6 +213,14 @@ def _row_to_settings(guild_id: int, row: Optional[Any]) -> Dict[str, Any]:
             value = bool(value)
         elif kind == "float":
             value = float(value)
+        elif kind == "json_list":
+            try:
+                value = json.loads(value) if isinstance(value, str) else value
+            except (TypeError, ValueError):
+                value = []
+            if not isinstance(value, list):
+                value = []
+            value = [str(item) for item in value if isinstance(item, str)]
         elif kind in ("int", "id"):
             value = int(value)
         settings[key] = value
@@ -285,6 +308,17 @@ def validate_setting(key: str, value: Any) -> Any:
         if value != value or not 0.0 <= value <= 100.0:
             raise ValueError("النسبة يجب أن تكون بين 0 و 100")
         return round(value, 2)
+    if kind == "json_list":
+        if not isinstance(value, list):
+            raise ValueError("يجب أن تكون قائمة الكلمات نصية")
+        words = []
+        for item in value[:200]:
+            if not isinstance(item, str):
+                raise ValueError("كل كلمة محظورة يجب أن تكون نصاً")
+            item = item.strip().replace("\x00", "")
+            if item and len(item) <= 80:
+                words.append(item)
+        return list(dict.fromkeys(words))
     # str
     if not isinstance(value, str):
         raise ValueError("يجب أن تكون القيمة نصاً")
@@ -328,7 +362,14 @@ async def update_guild_settings(
         if new_col in changes:
             changes[legacy] = changes[new_col]
     columns = list(changes)
-    values = [int(v) if isinstance(v, bool) else v for v in changes.values()]
+    values = [
+        int(value)
+        if isinstance(value, bool)
+        else json.dumps(value, ensure_ascii=False)
+        if SETTINGS_SCHEMA[key][2] == "json_list"
+        else value
+        for key, value in changes.items()
+    ]
     now = _utc_now()
     assignments = ", ".join(f"{col} = excluded.{col}" for col in columns)
     sql = (
@@ -489,3 +530,36 @@ async def get_warnings(user_id: int, guild_id: int) -> List[Tuple[int, str, str]
             (user_id, guild_id),
         ) as cur:
             return await cur.fetchall()
+
+
+async def get_recent_warnings(guild_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+    """جلب أحدث مخالفات السيرفر بصيغة مناسبة للـ API."""
+    limit = max(1, min(int(limit), 100))
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT id, user_id, guild_id, moderator_id, reason, timestamp "
+            "FROM warnings WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+            (int(guild_id), limit),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_warning(warning_id: int) -> Optional[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT id, user_id, guild_id, moderator_id, reason, timestamp "
+            "FROM warnings WHERE id = ?",
+            (int(warning_id),),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def delete_warning(warning_id: int) -> bool:
+    """حذف إنذار واحد بعد تحقق المستدعي من نطاق السيرفر والصلاحية."""
+    async with connect() as db:
+        cur = await db.execute("DELETE FROM warnings WHERE id = ?", (int(warning_id),))
+        changed = cur.rowcount > 0
+        await cur.close()
+        await db.commit()
+        return changed

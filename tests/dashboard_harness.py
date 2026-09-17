@@ -118,14 +118,41 @@ class FakeBot:
         def remove_whitelisted_member(self, guild_id, user_id):
             self.whitelist.discard(str(user_id))
 
+    class ModerationStub:
+        async def get_recent_infractions(self, guild_id):
+            return [{
+                "id": 1,
+                "user_id": 100000000000000010,
+                "guild_id": guild_id,
+                "moderator_id": 0,
+                "reason": "Harness test infraction",
+                "timestamp": "2026-01-01 00:00:00",
+            }]
+
+        async def revoke_warning(self, warning_id):
+            return {
+                "id": warning_id,
+                "guild_id": FakeGuild.id,
+                "user_id": 100000000000000010,
+                "reason": "Harness test infraction",
+            }
+
+        async def quick_unmute(self, guild_id, user_id):
+            return {"ok": True, "guild_id": guild_id, "user_id": user_id}
+
     def __init__(self):
         self.security = self.SecurityStub()
+        self.moderation = self.ModerationStub()
 
     def get_guild(self, gid):
         return FakeGuild() if gid == FakeGuild.id else None
 
     def get_cog(self, name):
-        return self.security if name == "Security" else None
+        if name == "Security":
+            return self.security
+        if name == "Moderation":
+            return self.moderation
+        return None
 
     def is_ready(self):
         return True

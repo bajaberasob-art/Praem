@@ -52,6 +52,7 @@ class DiscordBot(commands.Bot):
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
+        intents.message_content = True
         super().__init__(
             command_prefix=(),
             intents=intents,
@@ -60,6 +61,9 @@ class DiscordBot(commands.Bot):
         self.sync_guild = configured_guild()
 
     async def setup_hook(self) -> None:
+        await self.load_extension("cogs.moderation")
+        logger.info("Loaded moderation cog.")
+
         if self.sync_guild is not None:
             self.tree.copy_global_to(guild=self.sync_guild)
             synced = await self.tree.sync(guild=self.sync_guild)

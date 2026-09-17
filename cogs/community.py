@@ -1,8 +1,12 @@
 import asyncio
+import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+
+
+logger = logging.getLogger(__name__)
 
 
 # --- نظام أزرار الاقتراحات المتقدم ---
@@ -180,6 +184,7 @@ class Community(commands.Cog):
         self.bot = bot
         self.counters: dict[int, dict[str, int]] = {}
         self.update_counters_task.start()
+        logger.info("Community counter updater initialized.")
 
     def cog_unload(self):
         self.update_counters_task.cancel()
@@ -218,6 +223,13 @@ class Community(commands.Cog):
         name="suggest",
         description="إرسال اقتراح وطرحه للتصويت والإدارة",
     )
+    @app_commands.checks.bot_has_permissions(
+        view_channel=True,
+        send_messages=True,
+        embed_links=True,
+        add_reactions=True,
+        read_message_history=True,
+    )
     @app_commands.describe(idea="تفاصيل فكرة الاقتراح")
     async def suggest(
         self,
@@ -248,6 +260,12 @@ class Community(commands.Cog):
         name="poll",
         description="طرح تصويت حي بالأزرار مع نسب مئوية فورية",
     )
+    @app_commands.checks.bot_has_permissions(
+        view_channel=True,
+        send_messages=True,
+        embed_links=True,
+        read_message_history=True,
+    )
     @app_commands.describe(
         question="سؤال الاستطلاع",
         opt_a="الخيار الأول",
@@ -273,6 +291,10 @@ class Community(commands.Cog):
     @app_commands.command(
         name="remind",
         description="ضبط منبه تذكير بالدقائق",
+    )
+    @app_commands.checks.bot_has_permissions(
+        view_channel=True,
+        send_messages=True,
     )
     @app_commands.describe(
         minutes="المدة بالدقائق",
@@ -311,6 +333,11 @@ class Community(commands.Cog):
         description="تثبيت قنوات صوتية حية لعرض إحصائيات السيرفر",
     )
     @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.checks.bot_has_permissions(
+        view_channel=True,
+        send_messages=True,
+        manage_channels=True,
+    )
     async def setup_counters(self, itx: discord.Interaction):
         guild = itx.guild
         category = await guild.create_category("📊 إحصائيات السيرفر")
@@ -340,3 +367,7 @@ class Community(commands.Cog):
 async def setup(bot: commands.Bot):
     bot.add_view(SuggestionActionView())
     await bot.add_cog(Community(bot))
+    logger.info(
+        "Community cog initialized with /suggest, /poll, /remind, "
+        "and /setup_counters."
+    )

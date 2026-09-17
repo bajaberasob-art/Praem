@@ -35,9 +35,10 @@ The configured project workflow runs `python main.py` automatically.
 4. Open **OAuth2 → URL Generator**.
 5. Select the `bot` and `applications.commands` scopes.
 6. Select the permissions the bot needs, including **View Channel**, **Send Messages**,
-   **Read Message History**, **Manage Messages**, and **Manage Channels** for the
-   existing moderation features. Add these security permissions where the corresponding
-   feature is enabled:
+   **Embed Links**, **Add Reactions**, **Read Message History**, **Manage Messages**,
+   and **Manage Channels**. The community commands use Embed Links for suggestions and
+   polls, Add Reactions for suggestion voting, and Manage Channels for live counters.
+   Add these security permissions where the corresponding feature is enabled:
 
    | Permission | Used by |
    | --- | --- |
@@ -50,6 +51,10 @@ The configured project workflow runs `python main.py` automatically.
    Do not grant these permissions to unrelated bots or roles. The bot must also be
    above the verified CAPTCHA role and any roles it may quarantine.
 7. Open the generated URL and add the bot to your server.
+
+Existing installations must grant **Embed Links** and **Add Reactions** to the bot role
+in the channels where community commands are used, or reauthorize the bot with an
+updated OAuth URL containing those permissions.
 
 For fast slash-command updates during development, add a non-secret `DISCORD_GUILD_ID`
 environment variable containing the server ID. Without it, commands sync globally, which

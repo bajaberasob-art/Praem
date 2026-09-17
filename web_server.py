@@ -1,16 +1,28 @@
 import asyncio
+import json
 import logging
 import os
 import secrets
 import time
+from collections import deque
 from html import escape
-from urllib.parse import urlencode
+from pathlib import Path
+from urllib.parse import urlencode, urlsplit
 
 import aiohttp
 import discord
 from aiohttp import web
 
+from database import (
+    SETTINGS_SCHEMA,
+    SettingsConflict,
+    get_guild_settings,
+    update_guild_settings,
+    validate_setting,
+)
+
 routes = web.RouteTableDef()
+DASHBOARD_DIR = Path(__file__).parent / "dashboard"
 bot_ref: discord.Client = None
 
 C_ID = os.getenv("CLIENT_ID")
@@ -21,6 +33,13 @@ ADMIN_BIT = 0x8
 SESSIONS: dict[str, dict] = {}
 STATES: dict[str, float] = {}
 STATE_TTL, SESSION_TTL = 300, 604800
+# حدود معدل الطلبات: (عدد الطلبات، النافذة بالثواني)
+SAVE_LIMIT, READ_LIMIT = (5, 10.0), (60, 10.0)
+MAX_BODY = 16 * 1024
+GRANT_TTL = 60.0
+RATE_BUCKETS: dict[tuple, deque] = {}
+GRANT_CACHE: dict[tuple[str, int], tuple[float, bool]] = {}
+SETTINGS_LISTENERS: dict[int, set[asyncio.Queue]] = {}
 logger = logging.getLogger("DashboardOAuth")
 
 
@@ -147,6 +166,7 @@ async def callback(req):
                 else "https://cdn.discordapp.com/embed/avatars/0.png"
             ),
             "guilds": guilds, "expires_at": time.time() + SESSION_TTL,
+            "csrf": secrets.token_urlsafe(32),
         }
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, TypeError):
         logger.warning("Discord OAuth request failed or returned invalid data.")
@@ -179,6 +199,278 @@ async def api_me(req):
         "session": {key: value for key, value in session.items() if key != "expires_at"},
     })
 
+
+# -------------------------------------------------------------
+# درع الحماية: التفويض لكل سيرفر، CSRF، وحدود المعدل
+# -------------------------------------------------------------
+def json_error(status: int, error: str, **extra):
+    return web.json_response({"error": error, **extra}, status=status)
+
+
+def rate_limited(key: tuple, limit: tuple[int, float]) -> float:
+    """يعيد ثواني الانتظار المتبقية (0 = مسموح). نافذة منزلقة محدودة الحجم."""
+    count, window = limit
+    now = time.monotonic()
+    if len(RATE_BUCKETS) > 5000:
+        for stale_key, stale in list(RATE_BUCKETS.items()):
+            if not stale or now - stale[-1] > window:
+                RATE_BUCKETS.pop(stale_key, None)
+    bucket = RATE_BUCKETS.setdefault(key, deque())
+    while bucket and now - bucket[0] >= window:
+        bucket.popleft()
+    if len(bucket) >= count:
+        return max(0.0, window - (now - bucket[0]))
+    bucket.append(now)
+    return 0.0
+
+
+def same_origin(req) -> bool:
+    origin = req.headers.get("Origin") or req.headers.get("Referer")
+    if not origin:
+        return False
+    return urlsplit(origin).netloc.lower() == req.host.lower()
+
+
+def csrf_ok(req, session) -> bool:
+    token = req.headers.get("X-CSRF-Token", "")
+    return bool(token) and secrets.compare_digest(token, session.get("csrf", ""))
+
+
+async def live_grant(session, guild) -> bool:
+    """تحقق حي من الصلاحية عبر البوت: المالك أو بت Administrator (0x8)."""
+    user_id = str(session["id"])
+    cached = GRANT_CACHE.get((user_id, guild.id))
+    now = time.monotonic()
+    if cached and now - cached[0] < GRANT_TTL:
+        return cached[1]
+    if len(GRANT_CACHE) > 5000:
+        GRANT_CACHE.clear()
+    if str(guild.owner_id) == user_id:
+        GRANT_CACHE[(user_id, guild.id)] = (now, True)
+        return True
+    member = guild.get_member(int(user_id))
+    if member is None:
+        try:
+            member = await guild.fetch_member(int(user_id))
+        except discord.NotFound:
+            member = None
+        except (discord.HTTPException, asyncio.TimeoutError):
+            raise web.HTTPServiceUnavailable(reason="permission check unavailable")
+    allowed = bool(member and (member.guild_permissions.value & ADMIN_BIT))
+    GRANT_CACHE[(user_id, guild.id)] = (now, allowed)
+    return allowed
+
+
+async def authorize(req, *, write: bool = False):
+    """يعيد (session, guild) أو يرفع HTTPException. لا يُوثق أي شيء من جهة العميل."""
+    session = current_session(req)
+    if not session:
+        raise web.HTTPUnauthorized(text=json.dumps({"error": "unauthorized"}), content_type="application/json")
+    raw = req.match_info.get("guild_id", "")
+    if not raw.isdigit() or not 15 <= len(raw) <= 22:
+        raise web.HTTPNotFound(text=json.dumps({"error": "not_found"}), content_type="application/json")
+    if not any(g["id"] == raw for g in session["guilds"]):
+        raise web.HTTPForbidden(text=json.dumps({"error": "forbidden"}), content_type="application/json")
+    guild = bot_ref.get_guild(int(raw)) if bot_ref else None
+    if guild is None:
+        raise web.HTTPNotFound(text=json.dumps({"error": "not_found"}), content_type="application/json")
+    if not await live_grant(session, guild):
+        session["guilds"] = [g for g in session["guilds"] if g["id"] != raw]
+        raise web.HTTPForbidden(text=json.dumps({"error": "forbidden"}), content_type="application/json")
+    if write and (not same_origin(req) or not csrf_ok(req, session)):
+        raise web.HTTPForbidden(text=json.dumps({"error": "csrf"}), content_type="application/json")
+    limit_key = ("save" if write else "read", session["id"], guild.id)
+    wait = rate_limited(limit_key, SAVE_LIMIT if write else READ_LIMIT)
+    if wait:
+        raise web.HTTPTooManyRequests(
+            text=json.dumps({"error": "rate_limited", "retry_after": int(wait) + 1}),
+            content_type="application/json", headers={"Retry-After": str(int(wait) + 1)},
+        )
+    return session, guild
+
+
+def public_settings(snapshot: dict) -> dict:
+    settings = {
+        key: (str(value) if SETTINGS_SCHEMA[key][2] == "id" and value is not None else value)
+        for key, value in snapshot["settings"].items()
+    }
+    return {"revision": snapshot["revision"], "updated_at": snapshot["updated_at"], "settings": settings}
+
+
+def guild_meta(guild) -> dict:
+    icon = getattr(guild, "icon", None)
+    me = guild.me
+    top = me.top_role if me else None
+    channels = [
+        {"id": str(c.id), "name": c.name, "category": c.category.name if c.category else None}
+        for c in sorted(guild.text_channels, key=lambda c: (c.category.position if c.category else -1, c.position))
+    ]
+    roles = []
+    for role in sorted(guild.roles, key=lambda r: -r.position):
+        if role.is_default():
+            continue
+        roles.append({
+            "id": str(role.id), "name": role.name,
+            "color": f"#{role.color.value:06x}" if role.color.value else None,
+            "assignable": bool(top and role < top and not role.managed),
+        })
+    return {
+        "guild": {"id": str(guild.id), "name": guild.name, "icon": icon.url if icon else None,
+                  "members": guild.member_count},
+        "channels": channels, "roles": roles,
+    }
+
+
+def validate_changes(guild, changes: dict) -> tuple[dict, dict]:
+    """تنقية المدخلات: مفاتيح مسموحة فقط، أنواع/حدود صحيحة، وقنوات/رتب تخص هذا السيرفر."""
+    clean, errors = {}, {}
+    if not isinstance(changes, dict) or len(changes) > len(SETTINGS_SCHEMA):
+        return {}, {"_": "صيغة التعديلات غير صالحة"}
+    for key, value in changes.items():
+        if key not in SETTINGS_SCHEMA:
+            errors[str(key)[:40]] = "حقل غير مسموح"
+            continue
+        try:
+            value = validate_setting(key, value)
+        except ValueError as error:
+            errors[key] = str(error)
+            continue
+        if value is not None and key.endswith("_channel_id"):
+            channel = guild.get_channel(value)
+            if not isinstance(channel, discord.TextChannel):
+                errors[key] = "القناة غير موجودة في هذا السيرفر"
+                continue
+        if value is not None and key.endswith("_role_id"):
+            role = guild.get_role(value)
+            me = guild.me
+            if role is None or role.is_default():
+                errors[key] = "الرتبة غير موجودة في هذا السيرفر"
+                continue
+            if role.managed or not me or role >= me.top_role:
+                errors[key] = "لا يمكن للبوت منح هذه الرتبة (أعلى من رتبته أو مُدارة)"
+                continue
+        clean[key] = value
+    return clean, errors
+
+
+def broadcast(guild_id: int, payload: dict) -> None:
+    for queue in list(SETTINGS_LISTENERS.get(guild_id, ())):
+        if queue.full():
+            continue
+        queue.put_nowait(payload)
+
+
+@routes.get('/api/health')
+async def api_health(req):
+    if not current_session(req):
+        return json_error(401, "unauthorized")
+    return web.json_response({"ok": True, "online": bool(bot_ref and bot_ref.is_ready())})
+
+
+@routes.get('/api/guild/{guild_id}/meta')
+async def api_guild_meta(req):
+    _, guild = await authorize(req)
+    return web.json_response(guild_meta(guild))
+
+
+@routes.get('/api/guild/{guild_id}/settings')
+async def api_get_settings(req):
+    _, guild = await authorize(req)
+    return web.json_response(public_settings(await get_guild_settings(guild.id)))
+
+
+@routes.post('/api/guild/{guild_id}/settings')
+async def api_post_settings(req):
+    session, guild = await authorize(req, write=True)
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    if not req.content_type.startswith("application/json"):
+        return json_error(415, "json_required")
+    try:
+        body = json.loads((await req.content.read(MAX_BODY + 1))[:MAX_BODY].decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict) or not isinstance(body.get("revision"), int) or isinstance(body.get("revision"), bool):
+        return json_error(400, "validation", fields={"_": "رقم الإصدار مطلوب"})
+    clean, errors = validate_changes(guild, body.get("changes", {}))
+    if errors:
+        return json_error(400, "validation", fields=errors)
+    if not clean:
+        return web.json_response({"ok": True, **public_settings(await get_guild_settings(guild.id))})
+    try:
+        snapshot = await update_guild_settings(guild.id, expected_revision=body["revision"], **clean)
+    except SettingsConflict as conflict:
+        return json_error(409, "conflict", **public_settings(conflict.current))
+    result = public_settings(snapshot)
+    broadcast(guild.id, {"type": "settings", "by": str(session["id"]), **result})
+    logger.info("Settings updated for guild %s by user %s: %s", guild.id, session["id"], sorted(clean))
+    return web.json_response({"ok": True, **result})
+
+
+@routes.get('/api/guild/{guild_id}/events')
+async def api_guild_events(req):
+    session, guild = await authorize(req)
+    guild_id = guild.id
+    response = web.StreamResponse(headers={
+        "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Accel-Buffering": "no",
+    })
+    await response.prepare(req)
+    queue: asyncio.Queue = asyncio.Queue(maxsize=32)
+    listeners = SETTINGS_LISTENERS.setdefault(guild_id, set())
+    if len(listeners) >= 200:
+        await response.write(b"event: error\ndata: {\"error\":\"too_many_streams\"}\n\n")
+        return response
+
+    async def send(event: str, data: dict):
+        await response.write(f"event: {event}\ndata: {json.dumps(data)}\n\n".encode("utf-8"))
+
+    def ping_payload():
+        online = bool(bot_ref and bot_ref.is_ready())
+        latency = bot_ref.latency if bot_ref else None
+        latency_ms = round(latency * 1000) if online and latency == latency and latency != float("inf") else None
+        return {"online": online, "latency_ms": latency_ms, "ts": time.time()}
+
+    listeners.add(queue)
+    try:
+        await send("ping", ping_payload())
+        while True:
+            # إعادة التحقق دورياً (بحد أقصى كل 15 ثانية): الجلسة، بقاء البوت في السيرفر، والصلاحية الحية
+            live = current_session(req)
+            guild = bot_ref.get_guild(guild_id) if bot_ref else None
+            if not live or guild is None:
+                await send("expired", {})
+                break
+            try:
+                allowed = any(g["id"] == str(guild.id) for g in live["guilds"]) and await live_grant(live, guild)
+            except web.HTTPServiceUnavailable:
+                allowed = True  # تعذر التحقق مؤقتاً؛ تبقى النتيجة المخبأة سارية حتى المحاولة التالية
+            if not allowed:
+                live["guilds"] = [g for g in live["guilds"] if g["id"] != str(guild.id)]
+                await send("expired", {"reason": "forbidden"})
+                break
+            try:
+                payload = await asyncio.wait_for(queue.get(), timeout=15)
+                await send(payload.get("type", "message"), payload)
+            except asyncio.TimeoutError:
+                await send("ping", ping_payload())
+    except (ConnectionResetError, asyncio.CancelledError, aiohttp.ClientConnectionError):
+        pass
+    finally:
+        listeners.discard(queue)
+        if not listeners:
+            SETTINGS_LISTENERS.pop(guild_id, None)
+    return response
+
+
+@routes.get('/static/{name}')
+async def static_asset(req):
+    name = req.match_info["name"]
+    types = {"app.css": "text/css", "app.js": "application/javascript"}
+    if name not in types:
+        raise web.HTTPNotFound()
+    return web.Response(text=(DASHBOARD_DIR / name).read_text("utf-8"), content_type=types[name], charset="utf-8")
+
+
 @routes.get('/')
 async def index(req):
     sess = current_session(req)
@@ -209,7 +501,7 @@ async def index(req):
                 <span class="badge">⚡ نظام التوثيق السحابي الموحد</span>
                 <h2>لوحة القيادة المركزية</h2>
                 <p>الدخول مخصص لإدارة السيرفرات الرسمية. يتم فحص الهوية والتحقق من صلاحية الإدارة (Administrator) تلقائياً عبر ديسكورد.</p>
-                <a href="/login" class="btn-login">
+                <a href="login" class="btn-login">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.893.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
                     تسجيل الدخول عبر ديسكورد
                 </a>
@@ -224,77 +516,15 @@ async def index(req):
         """
         return web.Response(text=html, content_type='text/html')
 
-    # شاشة السيرفرات المصرح بها بعد تسجيل الدخول
-    guilds_html = "".join([
-        f"""<div style="background:#111625;border:1px solid #1e293b;border-radius:12px;padding:14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-            <div style="display:flex;align-items:center;gap:12px;">
-                <img src="{escape(g.get('icon') or 'https://cdn.discordapp.com/embed/avatars/0.png')}" style="width:42px;height:42px;border-radius:50%;border:1px solid #334155;">
-                <div>
-                    <div style="font-weight:bold;font-size:0.95rem;">{escape(g['name'])}</div>
-                    <small style="color:#94a3b8;">الأعضاء: {format(g['members'], ',') if g['members'] is not None else 'غير متاح'} • {('👑 المالك' if g['is_owner'] else '🛡️ مشرف معتمد')}</small>
-                </div>
-            </div>
-            <span style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3);padding:4px 10px;border-radius:8px;font-size:0.75rem;font-weight:bold;">صلاحية معتمدة</span>
-        </div>"""
-        for g in sess["guilds"]
-    ]) or """<div style="text-align:center;padding:2rem;background:#111625;border-radius:12px;border:1px dashed #ef4444;color:#fca5a5;">
-                ⚠️ لا توجد سيرفرات مشتركة تمتلك فيها صلاحية Administrator حالياً.<br>
-                <small style="color:#94a3b8;">تأكد من تواجد البوت في سيرفرك وأن لديك رتبة مسؤول كاملة.</small>
-            </div>"""
+    # لوحة التحكم التفاعلية (HTML/CSS/JS في مجلد dashboard/)
+    page = (DASHBOARD_DIR / "index.html").read_text("utf-8")
+    return web.Response(text=page, content_type="text/html", charset="utf-8")
 
-    html = f"""
-    <!DOCTYPE html>
-    <html dir="rtl" lang="ar">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>لوحة التحكم المركزية | التحقق من الهوية</title>
-        <style>
-            * {{ box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }}
-            body {{ background: #000000; color: #f8fafc; margin: 0; padding: 1.2rem; display: flex; justify-content: center; }}
-            .container {{ max-width: 650px; width: 100%; }}
-            .user-header {{ background: #0a0e17; border: 1px solid #1e293b; border-radius: 14px; padding: 1rem 1.4rem; display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }}
-            .user-info {{ display: flex; align-items: center; gap: 12px; }}
-            .avatar {{ width: 44px; height: 44px; border-radius: 50%; border: 2px solid #3b82f6; }}
-            .btn-logout {{ background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); padding: 6px 14px; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: bold; }}
-            .section-title {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }}
-            .status-box {{ background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 12px; padding: 14px; color: #34d399; font-size: 0.88rem; margin-top: 1.5rem; line-height: 1.6; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="user-header">
-                <div class="user-info">
-                    <img src="{escape(sess['avatar'])}" class="avatar">
-                    <div>
-                        <div style="font-weight:bold;font-size:1rem;">{escape(sess['username'])}</div>
-                        <small style="color:#10b981;">● جلسة ديسكورد مشفرة ونشطة</small>
-                    </div>
-                </div>
-                <a href="/logout" class="btn-logout">تسجيل الخروج</a>
-            </div>
-
-            <div class="section-title">
-                <h3 style="margin:0;font-size:1.1rem;">السيرفرات المصرح لك بإدارتها:</h3>
-                <span style="color:#94a3b8;font-size:0.85rem;">المعتمدة: {len(sess['guilds'])}</span>
-            </div>
-
-            {guilds_html}
-
-            <div class="status-box">
-                ✅ <b>المرحلة 1 مكتملة بنجاح:</b> تم بناء نظام التوثيق OAuth2 وفحص صلاحيات الأدمن بدقة.<br>
-                جاهزون للانتقال إلى <b>المرحلة 2</b> (القائمة الجانبية المنبثقة ☰ ومحدد السيرفرات وشاشات التحكم AMOLED).
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return web.Response(text=html, content_type='text/html')
 
 async def start_web_server(bot):
     global bot_ref
     bot_ref = bot
-    app = web.Application(middlewares=[private_responses])
+    app = web.Application(middlewares=[private_responses], client_max_size=MAX_BODY)
     app.add_routes(routes)
     # Access logs include callback query strings; do not log authorization codes.
     runner = web.AppRunner(app, access_log=None)

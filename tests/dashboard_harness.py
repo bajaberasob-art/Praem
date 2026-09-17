@@ -1,0 +1,118 @@
+"""Manual/browser test harness: serves the dashboard with a fake bot and a seeded admin session.
+
+Run: python tests/dashboard_harness.py  (listens on HARNESS_PORT, default 8098)
+Then open /__test_login to receive the session cookie. Never used by the real bot.
+"""
+import asyncio
+import os
+import time
+from types import SimpleNamespace
+
+import discord
+from aiohttp import web
+
+import database
+import web_server as ws
+
+database.DB_NAME = os.getenv("HARNESS_DB", "/tmp/harness_dashboard.db")
+
+
+class Role:
+    def __init__(self, id, name, position, managed=False, default=False, color=0):
+        self.id, self.name, self.position, self.managed = id, name, position, managed
+        self._default, self.color = default, SimpleNamespace(value=color)
+
+    def is_default(self):
+        return self._default
+
+    def __lt__(self, other):
+        return self.position < other.position
+
+    def __ge__(self, other):
+        return self.position >= other.position
+
+
+class Chan(discord.TextChannel):
+    def __init__(self, id, name, pos, category=None):
+        self.id, self.name, self.position, self._cat = id, name, pos, category
+
+    @property
+    def category(self):
+        return self._cat
+
+
+CATS = {"عام": SimpleNamespace(name="📢 العام", position=0), "إدارة": SimpleNamespace(name="🛡️ الإدارة", position=1)}
+CHANNELS = [
+    Chan(300000000000000001, "الترحيب", 0, CATS["عام"]), Chan(300000000000000002, "الدردشة", 1, CATS["عام"]),
+    Chan(300000000000000003, "سجل-الحماية", 0, CATS["إدارة"]), Chan(300000000000000004, "قرارات", 1, CATS["إدارة"]),
+]
+ROLES = [
+    Role(1, "@everyone", 0, default=True), Role(200000000000000001, "عضو موثق", 1, color=0x10B981),
+    Role(200000000000000002, "قيد التحقق", 2, color=0xF59E0B), Role(200000000000000003, "Bot", 5),
+    Role(200000000000000004, "مدير", 8, color=0xEF4444), Role(200000000000000005, "Nitro Booster", 3, managed=True),
+]
+
+
+class FakeGuild:
+    id, name, icon, member_count, owner_id = 100000000000000001, "PRIME TEAM", None, 1284, 99
+    roles, text_channels = ROLES, CHANNELS
+    me = SimpleNamespace(top_role=ROLES[3])
+
+    admins = {10}
+
+    def get_member(self, uid):
+        # user 10 = administrator, anyone else = ordinary member (no 0x8 bit)
+        return SimpleNamespace(guild_permissions=SimpleNamespace(value=8 if uid in self.admins else 0))
+
+    def get_channel(self, cid):
+        return next((c for c in CHANNELS if c.id == cid), None)
+
+    def get_role(self, rid):
+        return next((r for r in ROLES if r.id == rid), None)
+
+
+class FakeBot:
+    latency = 0.058
+
+    def get_guild(self, gid):
+        return FakeGuild() if gid == FakeGuild.id else None
+
+    def is_ready(self):
+        return True
+
+
+async def test_login(req):
+    sid = "harness-session"
+    ws.SESSIONS[sid] = {
+        "id": "10", "username": "Harness Admin", "avatar": "https://cdn.discordapp.com/embed/avatars/1.png",
+        "guilds": [{"id": str(FakeGuild.id), "name": FakeGuild.name, "members": 1284, "icon": None, "is_owner": False}],
+        "expires_at": time.time() + 3600, "csrf": "harness-csrf",
+    }
+    res = web.HTTPFound("/")
+    res.set_cookie("bot_session", sid, httponly=True, samesite="Lax", path="/")
+    return res
+
+
+async def test_revoke(req):
+    """Simulates losing admin rights mid-session (the live grant is re-checked on the next tick)."""
+    FakeGuild.admins.discard(10)
+    ws.GRANT_CACHE.clear()
+    return web.json_response({"ok": True})
+
+
+async def main():
+    await database.init_db()
+    ws.bot_ref = FakeBot()
+    app = web.Application(middlewares=[ws.private_responses], client_max_size=ws.MAX_BODY)
+    app.add_routes(ws.routes)
+    app.router.add_get("/__test_login", test_login)
+    app.router.add_get("/__test_revoke", test_revoke)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", int(os.getenv("HARNESS_PORT", "8098"))).start()
+    print("harness ready", flush=True)
+    await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

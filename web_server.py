@@ -16,6 +16,7 @@ from aiohttp import web
 from database import (
     SETTINGS_SCHEMA,
     SettingsConflict,
+    get_warning,
     get_guild_settings,
     update_guild_settings,
     validate_setting,
@@ -464,6 +465,66 @@ async def api_security_whitelist(req):
         "user_id": str(user_id),
         "whitelist": security.get_whitelist(guild.id),
     })
+
+
+@routes.get('/api/guild/{guild_id}/moderation/infractions')
+async def api_moderation_infractions(req):
+    _, guild = await authorize(req)
+    moderation = bot_ref.get_cog("Moderation") if bot_ref else None
+    if moderation is None:
+        return json_error(503, "moderation_unavailable")
+    return web.json_response({
+        "guild_id": str(guild.id),
+        "infractions": await moderation.get_recent_infractions(guild.id),
+    })
+
+
+@routes.post('/api/guild/{guild_id}/moderation/warnings/{warning_id}/revoke')
+async def api_revoke_warning(req):
+    session, guild = await authorize(req, write=True)
+    moderation = bot_ref.get_cog("Moderation") if bot_ref else None
+    if moderation is None:
+        return json_error(503, "moderation_unavailable")
+    raw_warning_id = req.match_info.get("warning_id", "")
+    if not raw_warning_id.isdigit() or int(raw_warning_id) <= 0:
+        return json_error(400, "validation", fields={"warning_id": "معرف إنذار غير صالح"})
+    warning = await get_warning(int(raw_warning_id))
+    if not warning or int(warning["guild_id"]) != guild.id:
+        return json_error(404, "warning_not_found")
+    revoked = await moderation.revoke_warning(int(raw_warning_id))
+    if revoked is None:
+        return json_error(404, "warning_not_found")
+    logger.info(
+        "Warning %s revoked in guild %s by user %s",
+        raw_warning_id,
+        guild.id,
+        session["id"],
+    )
+    return web.json_response({"ok": True, "warning": revoked})
+
+
+@routes.post('/api/guild/{guild_id}/moderation/{user_id}/unmute')
+async def api_quick_unmute(req):
+    session, guild = await authorize(req, write=True)
+    moderation = bot_ref.get_cog("Moderation") if bot_ref else None
+    if moderation is None:
+        return json_error(503, "moderation_unavailable")
+    raw_user_id = req.match_info.get("user_id", "")
+    if not raw_user_id.isdigit() or not 15 <= len(raw_user_id) <= 22:
+        return json_error(400, "validation", fields={"user_id": "معرف Discord غير صالح"})
+    result = await moderation.quick_unmute(guild.id, int(raw_user_id))
+    if not result.get("ok"):
+        return json_error(
+            404 if result.get("error") in {"guild_not_found", "member_not_found"} else 403,
+            result.get("error", "unmute_failed"),
+        )
+    logger.info(
+        "User %s unmuted in guild %s by user %s",
+        raw_user_id,
+        guild.id,
+        session["id"],
+    )
+    return web.json_response(result)
 
 
 @routes.get('/api/guild/{guild_id}/settings')

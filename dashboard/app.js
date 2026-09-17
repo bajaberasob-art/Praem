@@ -49,6 +49,11 @@
     "log_channel_id",
     "anti_spam_enabled",
     "anti_link_enabled",
+    "anti_invites",
+    "anti_links",
+    "anti_spam",
+    "anti_mass_mention",
+    "banned_words_list",
     "economy_tax",
     "daily_amount",
   ];
@@ -804,8 +809,10 @@
     switches.append(
       toggle("anti_nuke", "حماية من التخريب الجماعي"),
       toggle("captcha_enabled", "تفعيل كابتشا التحقق"),
-      toggle("anti_spam_enabled", "تفعيل مكافحة السبام"),
-      toggle("anti_link_enabled", "تفعيل مكافحة الروابط"),
+      toggle("anti_invites", "حظر دعوات Discord"),
+      toggle("anti_links", "حظر الروابط المشبوهة"),
+      toggle("anti_spam", "تفعيل رادار السبام"),
+      toggle("anti_mass_mention", "حماية المنشن الجماعي"),
     );
     protect.append(
       switches,

@@ -24,6 +24,13 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     "log_channel_id": ("INTEGER", None, "id"),
     "captcha_enabled": ("INTEGER", False, "bool"),
     "captcha_role_id": ("INTEGER", None, "id"),
+    "welcome_dm_enabled": ("INTEGER", False, "bool"),
+    "member_auto_role_id": ("INTEGER", None, "id"),
+    "bot_auto_role_id": ("INTEGER", None, "id"),
+    "verified_role_id": ("INTEGER", None, "id"),
+    "unverified_role_id": ("INTEGER", None, "id"),
+    "rules_channel_id": ("INTEGER", None, "id"),
+    "leave_message": ("TEXT", "", "str"),
     "economy_tax": ("REAL", 0.0, "float"),
     "daily_amount": ("INTEGER", 450, "int"),
     # أعمدة قديمة يتم الإبقاء عليها للتوافق
@@ -190,6 +197,41 @@ async def init_db() -> None:
             # فهارس لتسريع استعلامات الرتب ولوحة الشرف (Leaderboard)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_xp ON users(guild_id, xp DESC);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_warnings_guild_user ON warnings(guild_id, user_id);")
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS invite_stats (
+                    guild_id INTEGER NOT NULL,
+                    inviter_id INTEGER NOT NULL,
+                    uses INTEGER NOT NULL DEFAULT 0,
+                    last_used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, inviter_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS rules_agreements (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    verified_role_id INTEGER,
+                    agreed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS role_panels (
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    role_ids TEXT NOT NULL,
+                    PRIMARY KEY (guild_id, channel_id, message_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS rules_panels (
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    PRIMARY KEY (guild_id, channel_id, message_id)
+                );
+            """)
 
             await db.commit()
             logger.info("[DB] جميع الجداول والفهارس تعمل بكفاءة عالية.")
@@ -327,7 +369,7 @@ def validate_setting(key: str, value: Any) -> Any:
         value = value.strip()
         if not 1 <= len(value) <= 5 or any(ch.isspace() for ch in value):
             raise ValueError("البادئة يجب أن تكون من 1 إلى 5 أحرف بدون مسافات")
-    elif key == "welcome_message" and len(value) > 1000:
+    elif key in {"welcome_message", "leave_message"} and len(value) > 1000:
         raise ValueError("رسالة الترحيب يجب ألا تتجاوز 1000 حرف")
     return value
 
@@ -530,6 +572,113 @@ async def get_warnings(user_id: int, guild_id: int) -> List[Tuple[int, str, str]
             (user_id, guild_id),
         ) as cur:
             return await cur.fetchall()
+
+
+async def record_invite_use(guild_id: int, inviter_id: int) -> int:
+    """Atomically increment persistent invite usage and return the new total."""
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO invite_stats (guild_id, inviter_id, uses, last_used_at)
+            VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id, inviter_id) DO UPDATE SET
+                uses = invite_stats.uses + 1,
+                last_used_at = CURRENT_TIMESTAMP
+            """,
+            (int(guild_id), int(inviter_id)),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT uses FROM invite_stats WHERE guild_id = ? AND inviter_id = ?",
+            (int(guild_id), int(inviter_id)),
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
+
+
+async def record_rules_agreement(
+    guild_id: int,
+    user_id: int,
+    verified_role_id: Optional[int],
+) -> str:
+    """Upsert the agreement timestamp without creating duplicate rows."""
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO rules_agreements (guild_id, user_id, verified_role_id, agreed_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                verified_role_id = excluded.verified_role_id,
+                agreed_at = CURRENT_TIMESTAMP
+            """,
+            (int(guild_id), int(user_id), verified_role_id),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT agreed_at FROM rules_agreements WHERE guild_id = ? AND user_id = ?",
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            row = await cur.fetchone()
+            return str(row[0]) if row else ""
+
+
+async def save_role_panel(
+    guild_id: int,
+    channel_id: int,
+    message_id: int,
+    role_ids: list[int],
+) -> None:
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO role_panels (guild_id, channel_id, message_id, role_ids)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, message_id) DO UPDATE SET
+                role_ids = excluded.role_ids
+            """,
+            (int(guild_id), int(channel_id), int(message_id), json.dumps(role_ids)),
+        )
+        await db.commit()
+
+
+async def get_role_panels(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT guild_id, channel_id, message_id, role_ids "
+            "FROM role_panels WHERE guild_id = ?",
+            (int(guild_id),),
+        ) as cur:
+            rows = []
+            for row in await cur.fetchall():
+                item = dict(row)
+                try:
+                    item["role_ids"] = [int(value) for value in json.loads(item["role_ids"])]
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    item["role_ids"] = []
+                rows.append(item)
+            return rows
+
+
+async def save_rules_panel(guild_id: int, channel_id: int, message_id: int) -> None:
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO rules_panels (guild_id, channel_id, message_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, message_id) DO NOTHING
+            """,
+            (int(guild_id), int(channel_id), int(message_id)),
+        )
+        await db.commit()
+
+
+async def get_rules_panels(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT guild_id, channel_id, message_id FROM rules_panels WHERE guild_id = ?",
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
 
 
 async def get_recent_warnings(guild_id: int, limit: int = 50) -> List[Dict[str, Any]]:

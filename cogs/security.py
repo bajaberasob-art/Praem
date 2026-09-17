@@ -19,8 +19,8 @@ logger = logging.getLogger("SecurityCog")
 
 # فحص روابط التصيد وسرقة الحسابات
 SCAM_REGEX = re.compile(
-    r"(https?://)?(www\.)?(discord\.(gg|io|me|li)|discordapp\.com/invite|"
-    r"discord\.gift|nitro-gift|steamcommunity-link)[^\s]+",
+    r"(https?://)?(www\.)?(discord\.gift|nitro-gift|steamcommunity-link|"
+    r"grabify\.link|iplogger\.(org|com)|bit\.ly|tinyurl\.com|t\.co)[^\s]+",
     re.I,
 )
 
@@ -123,6 +123,7 @@ class Security(commands.Cog):
                 "anti_alt_days": int(values["anti_alt_days"]),
                 "captcha_enabled": bool(values["captcha_enabled"]),
                 "captcha_role_id": values["captcha_role_id"],
+                "anti_links": bool(values.get("anti_links", True)),
             }
         except Exception:
             # Security listeners must stay alive if SQLite is briefly
@@ -137,6 +138,7 @@ class Security(commands.Cog):
                 "anti_alt_days": int(SETTINGS_DEFAULTS["anti_alt_days"]),
                 "captcha_enabled": bool(SETTINGS_DEFAULTS["captcha_enabled"]),
                 "captcha_role_id": SETTINGS_DEFAULTS["captcha_role_id"],
+                "anti_links": bool(SETTINGS_DEFAULTS.get("anti_links", True)),
             }
 
     def get_incidents(self, guild_id: Optional[int] = None) -> list[dict[str, Any]]:
@@ -532,6 +534,8 @@ class Security(commands.Cog):
             or not msg.guild
             or msg.author.guild_permissions.manage_guild
         ):
+            return
+        if not (await self.security_settings(msg.guild.id))["anti_links"]:
             return
         if SCAM_REGEX.search(msg.content):
             try:

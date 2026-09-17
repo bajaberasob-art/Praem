@@ -107,6 +107,7 @@ class Security(commands.Cog):
 
         self._lockdown_queue: Optional[asyncio.Queue] = None
         self._lockdown_worker: Optional[asyncio.Task] = None
+        self._lockdown_states: dict[int, bool] = {}
 
     # ------------------------------------------------------------------
     # Dynamic configuration and incident stream
@@ -147,6 +148,9 @@ class Security(commands.Cog):
 
     def get_whitelist(self, guild_id: int) -> list[str]:
         return [str(user_id) for user_id in sorted(self._whitelist.get(int(guild_id), set()))]
+
+    def is_locked(self, guild_id: int) -> bool:
+        return bool(self._lockdown_states.get(int(guild_id), False))
 
     def record_control_action(
         self,
@@ -255,6 +259,7 @@ class Security(commands.Cog):
             logger.error("[SECURITY_LOCKDOWN] طابور الإغلاق ممتلئ للسيرفر %s", guild.id)
             return {"queued": False, "channels": len(channels), "locked": bool(locked)}
 
+        self._lockdown_states[int(guild.id)] = bool(locked)
         self._record_incident(
             guild.id,
             getattr(self.bot, "user", 0) or 0,

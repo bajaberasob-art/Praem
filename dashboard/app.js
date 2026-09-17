@@ -23,6 +23,9 @@
     guild: null,
     meta: null,
     incidents: [],
+    whitelist: [],
+    lockdown: false,
+    incidentTimer: null,
     baseline: null,
     draft: null,
     revision: null,
@@ -432,8 +435,8 @@
       content,
     );
   }
-  function incidentsCard() {
-    const body = el("div", { class: "incident-list" });
+  function incidentBody() {
+    const body = el("div", { class: "incident-list security-incidents" });
     if (!state.incidents.length) {
       body.append(
         el("div", {
@@ -475,7 +478,284 @@
           );
         });
     }
-    return card("سجل الحوادث الأمنية", body);
+    return body;
+  }
+  function incidentsCard() {
+    return el(
+      "section",
+      { class: "security-feed card" },
+      el(
+        "div",
+        { class: "card-head" },
+        el("h2", { text: "بث التهديدات الحي" }),
+        el("small", { class: "feed-status", text: "LIVE / 50" }),
+      ),
+      el(
+        "div",
+        { class: "terminal-label" },
+        el("span", { class: "terminal-dot" }),
+        el("span", { text: "SECURITY EVENT STREAM" }),
+      ),
+      incidentBody(),
+    );
+  }
+  function refreshIncidentBody() {
+    const current = $(".security-incidents");
+    if (current) current.replaceWith(incidentBody());
+  }
+  function antiAltTone(value) {
+    if (value >= 14) return "critical";
+    if (value >= 7) return "warning";
+    return "safe";
+  }
+  function securityView() {
+    const section = el("section", { id: "view-security", class: "security-view" });
+    const lockButton = el("button", {
+      class: "lockdown-trigger",
+      type: "button",
+      text: state.lockdown
+        ? "إلغاء الإغلاق الطارئ"
+        : "إغلاق السيرفر الفوري (Emergency Lockdown)",
+      onClick: () => confirmLockdown(!state.lockdown),
+    });
+    const lockCard = el(
+      "article",
+      { class: `lockdown-card ${state.lockdown ? "is-locked" : ""}` },
+      el(
+        "div",
+        { class: "tactical-heading" },
+        el("span", { class: "tactical-kicker", text: "CRISIS CONTROL / 01" }),
+        el("h2", { text: "بروتوكول العزل الطارئ" }),
+        el("p", {
+          text: state.lockdown
+            ? "الإغلاق قيد التنفيذ عبر طابور القنوات العامة."
+            : "أوقف الكتابة العامة فوراً عند الاشتباه بغارة أو تخريب منسق.",
+        }),
+      ),
+      lockButton,
+    );
+    const current = Math.max(
+      0,
+      Math.min(30, Number(state.draft?.anti_alt_days) || 0),
+    );
+    const output = el("output", {
+      class: `anti-alt-value ${antiAltTone(current)}`,
+      text: `${current} يوم`,
+      for: "anti-alt-range",
+    });
+    const range = el("input", {
+      id: "anti-alt-range",
+      class: `anti-alt-range ${antiAltTone(current)}`,
+      type: "range",
+      min: "0",
+      max: "30",
+      step: "1",
+      value: String(current),
+      "aria-label": "الحد الأدنى لعمر الحساب",
+    });
+    range.addEventListener("input", () => {
+      const value = Number(range.value);
+      state.draft.anti_alt_days = value;
+      state.fields.anti_alt_days = "";
+      output.className = `anti-alt-value ${antiAltTone(value)}`;
+      output.textContent = `${value} يوم`;
+      range.className = `anti-alt-range ${antiAltTone(value)}`;
+      renderDynamic();
+    });
+    const sliderCard = el(
+      "article",
+      { class: "tactical-card anti-alt-card" },
+      el(
+        "div",
+        { class: "tactical-heading compact" },
+        el("span", { class: "tactical-kicker", text: "ACCOUNT AGE GATE / 02" }),
+        el("h2", { text: "حد عمر الحساب" }),
+        el("p", { text: "الحسابات الأحدث من الحد المحدد ستخضع للحماية." }),
+      ),
+      el("div", { class: "anti-alt-readout" }, output),
+      range,
+      el(
+        "div",
+        { class: "range-scale" },
+        el("span", { text: "0" }),
+        el("span", { text: "7" }),
+        el("span", { text: "14" }),
+        el("span", { text: "30 يوم" }),
+      ),
+    );
+    const whitelistInput = el("input", {
+      class: "whitelist-input",
+      type: "text",
+      inputmode: "numeric",
+      maxlength: "22",
+      placeholder: "أدخل Discord User ID",
+      "aria-label": "معرف عضو موثوق",
+    });
+    const whitelistBody = el("div", { class: "whitelist-chips" });
+    const drawWhitelist = () => {
+      whitelistBody.replaceChildren();
+      if (!state.whitelist.length) {
+        whitelistBody.append(
+          el("span", { class: "whitelist-empty", text: "لا توجد معرفات موثوقة مضافة" }),
+        );
+        return;
+      }
+      state.whitelist.forEach((id) => {
+        const chip = el(
+          "span",
+          { class: "whitelist-chip" },
+          el("span", { text: id }),
+          el("button", {
+            type: "button",
+            "aria-label": `إزالة ${id} من القائمة البيضاء`,
+            text: "×",
+            onClick: () => updateWhitelist("remove", id),
+          }),
+        );
+        whitelistBody.append(chip);
+      });
+    };
+    const addWhitelist = () => {
+      const id = whitelistInput.value.trim();
+      if (!/^\d{15,22}$/.test(id)) {
+        toast("أدخل Discord User ID صالحاً", "warn");
+        return;
+      }
+      updateWhitelist("add", id);
+    };
+    whitelistInput.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addWhitelist();
+      }
+    };
+    const addButton = el("button", {
+      class: "btn whitelist-add",
+      type: "button",
+      text: "إضافة موثوق",
+      onClick: addWhitelist,
+    });
+    drawWhitelist();
+    const whitelistCard = el(
+      "article",
+      { class: "tactical-card whitelist-card" },
+      el(
+        "div",
+        { class: "tactical-heading compact" },
+        el("span", { class: "tactical-kicker", text: "TRUSTED OPERATORS / 03" }),
+        el("h2", { text: "القائمة البيضاء للمشرفين" }),
+        el("p", { text: "أضف معرفات المشرفين الموثوقين لمنع تدخل Anti-Nuke ضدهم." }),
+      ),
+      el("div", { class: "whitelist-entry" }, whitelistInput, addButton),
+      whitelistBody,
+    );
+    section.append(
+      el(
+        "div",
+        { class: "security-section-head" },
+        el("div", { class: "eyebrow", text: "TACTICAL SECURITY / LIVE" }),
+        el("h2", { text: "مركز الدفاع والأزمات" }),
+        el("p", { text: "تحكم مباشر في عزل السيرفر ومراقبة النشاط الإداري عالي الخطورة." }),
+      ),
+      el("div", { class: "security-grid" }, lockCard, sliderCard, whitelistCard),
+      incidentsCard(),
+    );
+    return section;
+  }
+  function confirmLockdown(locked) {
+    navigator.vibrate?.([30, 50, 30]);
+    const back = el("div", {
+        class: "modal-back crisis-modal-back",
+        role: "dialog",
+        "aria-modal": "true",
+      }),
+      modal = el(
+        "div",
+        { class: "modal crisis-modal" },
+        el("div", { class: "crisis-modal-icon", text: locked ? "⚠" : "✓" }),
+        el("h2", { text: locked ? "تأكيد الإغلاق الطارئ" : "إلغاء الإغلاق الطارئ" }),
+        el("p", {
+          text: locked
+            ? "سيتم منع الإرسال في جميع القنوات النصية العامة. هل تريد المتابعة؟"
+            : "سيتم إعادة السماح بالإرسال في القنوات التي تم عزلها.",
+        }),
+      ),
+      actions = el("div", { class: "modal-actions" });
+    actions.append(
+      el("button", {
+        class: locked ? "crisis-confirm" : "save",
+        type: "button",
+        text: locked ? "نعم، فعّل الإغلاق" : "نعم، ألغِ الإغلاق",
+        onClick: () => {
+          navigator.vibrate?.([30, 50, 30]);
+          back.remove();
+          setLockdown(locked);
+        },
+      }),
+      el("button", {
+        type: "button",
+        text: "إلغاء",
+        onClick: () => back.remove(),
+      }),
+    );
+    modal.append(actions);
+    back.append(modal);
+    document.body.append(back);
+  }
+  async function setLockdown(locked) {
+    if (!state.online) {
+      toast("الحفظ معطّل أثناء انقطاع الاتصال", "warn");
+      return;
+    }
+    try {
+      const r = await api(`api/guild/${state.guild.id}/security/lockdown`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": state.session.csrf,
+        },
+        body: JSON.stringify({ locked }),
+      });
+      const data = await r.json();
+      if (r.ok && data.ok) {
+        state.lockdown = locked;
+        toast(
+          locked ? "🚨 بدأ عزل القنوات العامة" : "✅ تم إلغاء الإغلاق الطارئ",
+          locked ? "warn" : "success",
+          4000,
+        );
+        await refreshIncidents(state.guild.id, true);
+        renderPage();
+      } else if (r.status === 429) {
+        toast(`تم تجاوز الحد، حاول بعد ${data.retry_after || 5} ثانية`, "warn");
+      } else {
+        toast("تعذر تنفيذ بروتوكول الإغلاق");
+      }
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بمحرك الأمان");
+    }
+  }
+  async function updateWhitelist(action, userId) {
+    try {
+      const r = await api(`api/guild/${state.guild.id}/security/whitelist`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": state.session.csrf,
+        },
+        body: JSON.stringify({ action, user_id: userId }),
+      });
+      const data = await r.json();
+      if (r.ok && data.ok) {
+        state.whitelist = data.whitelist || [];
+        toast(action === "add" ? "تمت إضافة المشرف إلى القائمة البيضاء" : "تمت الإزالة", "success", 2600);
+        renderPage();
+        return;
+      }
+      toast(data.fields?.user_id || "تعذر تحديث القائمة البيضاء");
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بمحرك الأمان");
+    }
   }
   function renderPage() {
     const main = $("#main");
@@ -509,6 +789,7 @@
         }),
       ),
     );
+    main.append(securityView());
     const general = el("div", { class: "fields" });
     general.append(
       input("prefix", "بادئة الأوامر", "text", {
@@ -582,7 +863,6 @@
     );
     main.append(
       card("الاقتصاد", econ),
-      incidentsCard(),
       el("footer", {
         class: "footer",
         text: "الإعدادات تُحفظ في قاعدة بيانات البوت وتُطبّق على الميزات المرتبطة بها",
@@ -723,6 +1003,31 @@
     document.body.append(back);
   }
   // Guild loading and live events
+  function stopIncidentRefresh() {
+    if (state.incidentTimer) {
+      clearInterval(state.incidentTimer);
+      state.incidentTimer = null;
+    }
+  }
+  async function refreshIncidents(id, redraw = false) {
+    if (state.guild?.id !== id) return;
+    try {
+      const r = await api(`api/guild/${id}/security/incidents`);
+      if (!r.ok) return;
+      const data = await r.json();
+      if (state.guild?.id !== id) return;
+      state.incidents = data.incidents || [];
+      state.whitelist = data.whitelist || [];
+      state.lockdown = Boolean(data.locked);
+      if (redraw) refreshIncidentBody();
+    } catch (error) {
+      if (error.message !== "unauth") updatePing("wait");
+    }
+  }
+  function startIncidentRefresh(id) {
+    stopIncidentRefresh();
+    state.incidentTimer = setInterval(() => refreshIncidents(id, true), 15000);
+  }
   async function loadGuild(id) {
     const g = state.session.guilds.find((x) => x.id === id);
     if (!g) return;
@@ -731,6 +1036,7 @@
     state.meta = state.baseline = state.draft = null;
     renderShell();
     closeSSE();
+    stopIncidentRefresh();
     try {
       const [mr, sr, ir] = await Promise.all([
         api(`api/guild/${id}/meta`),
@@ -746,12 +1052,15 @@
       if (state.guild.id !== id) return;
       state.meta = meta;
       state.incidents = incidents.incidents || [];
+      state.whitelist = incidents.whitelist || [];
+      state.lockdown = Boolean(incidents.locked);
       state.baseline = clone(settings.settings);
       state.draft = clone(settings.settings);
       state.revision = settings.revision;
       state.updated = settings.updated_at;
       renderPage();
       openSSE(id);
+      startIncidentRefresh(id);
     } catch (e) {
       if (e.message !== "unauth" && state.guild.id === id) {
         $("#main").replaceChildren(

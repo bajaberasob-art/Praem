@@ -509,7 +509,7 @@ class Engagement(commands.Cog):
         if guild is None:
             return {"ok": False, "error": "guild_not_found"}
         channel = guild.get_channel(int(target_channel_id))
-        if not isinstance(channel, discord.TextChannel):
+        if channel is None or not callable(getattr(channel, "send", None)):
             return {"ok": False, "error": "channel_not_found"}
         config = await self.engagement_settings(guild.id)
         content = self.render_template(

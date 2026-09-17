@@ -27,7 +27,26 @@ if not TOKEN:
     )
     sys.exit(1)
 
-intents = discord.Intents.all()
+intents = discord.Intents.default()
+# Security listeners require member join/ban events and message content.
+# Presence, typing, and other privileged intents are intentionally disabled.
+intents.members = True
+intents.message_content = True
+
+
+def configured_sync_guild() -> discord.Object | None:
+    """Return the optional guild used for fast slash-command synchronization."""
+    guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
+    if not guild_id:
+        return None
+
+    try:
+        return discord.Object(id=int(guild_id))
+    except ValueError:
+        logger.warning(
+            "DISCORD_GUILD_ID is not numeric; falling back to global command sync."
+        )
+        return None
 
 
 class EnterpriseBot(commands.Bot):
@@ -41,6 +60,7 @@ class EnterpriseBot(commands.Bot):
         self.session: aiohttp.ClientSession | None = None
         self.dashboard_runner = None
         self.presence_step = 0
+        self.sync_guild = configured_sync_guild()
 
     async def setup_hook(self):
         self.session = aiohttp.ClientSession()
@@ -61,11 +81,13 @@ class EnterpriseBot(commands.Bot):
             logger.error(f"⚠️ تعذر إطلاق خادم الويب: {error}")
 
         modules = [
+            # Load protection before the remaining feature cogs so the security
+            # listeners are registered as soon as the bot connects.
+            "cogs.security",
             "cogs.moderation",
             "cogs.engagement",
             "cogs.economy",
             "cogs.utilities",
-            "cogs.security",
             "cogs.tournaments",
             "cogs.community",
             "cogs.ai_tools",
@@ -79,6 +101,21 @@ class EnterpriseBot(commands.Bot):
                 pass
             except Exception as error:
                 logger.error(f"❌ خطأ أثناء تحميل {module}: {error}")
+
+        try:
+            if self.sync_guild is not None:
+                self.tree.copy_global_to(guild=self.sync_guild)
+                synced = await self.tree.sync(guild=self.sync_guild)
+                logger.info(
+                    "✨ تمت مزامنة %d أمر Slash مع سيرفر التطوير %s.",
+                    len(synced),
+                    self.sync_guild.id,
+                )
+            else:
+                synced = await self.tree.sync()
+                logger.info("✨ تمت مزامنة %d أمر Slash عالمياً بنجاح.", len(synced))
+        except discord.HTTPException as error:
+            logger.error("⚠️ فشل مزامنة أوامر Slash: %s", error)
 
         self.rotate_status.start()
 
@@ -107,19 +144,6 @@ class EnterpriseBot(commands.Bot):
             f"{round(self.latency * 1000)}ms"
         )
         logger.info("=" * 45)
-
-        try:
-            synced = await self.tree.sync()
-            logger.info(
-                f"✨ تمت مزامنة {len(synced)} أمر Slash عالمياً بنجاح."
-            )
-        except discord.HTTPException as error:
-            logger.error(
-                "⚠️ فشل الاتصال بخوادم ديسكورد لمزامنة الأوامر: "
-                f"{error}"
-            )
-        except Exception as error:
-            logger.error(f"⚠️ خطأ غير متوقع في المزامنة: {error}")
 
     @tasks.loop(seconds=30)
     async def rotate_status(self):
@@ -232,8 +256,8 @@ async def main():
                 break
             except discord.PrivilegedIntentsRequired:
                 logger.critical(
-                    "يلزم تفعيل Presence Intent وServer Members Intent "
-                    "وMessage Content Intent في Discord Developer Portal "
+                    "يلزم تفعيل Server Members Intent وMessage Content Intent "
+                    "في Discord Developer Portal "
                     "→ Bot → Privileged Gateway Intents. تم إيقاف المحرك."
                 )
                 break

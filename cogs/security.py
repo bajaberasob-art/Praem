@@ -1,4 +1,5 @@
 import datetime
+import logging
 import random
 import re
 import time
@@ -6,6 +7,9 @@ import time
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+
+logger = logging.getLogger("SecurityCog")
 
 
 # فحص روابط التصيد وسرقة الحسابات
@@ -52,6 +56,14 @@ class CaptchaView(discord.ui.View):
     def __init__(self, role_id: int):
         super().__init__(timeout=None)
         self.role_id = role_id
+        # A role-specific ID prevents one server's CAPTCHA view from routing
+        # interactions to another server's verified role.
+        button = next(
+            item
+            for item in self.children
+            if isinstance(item, discord.ui.Button)
+        )
+        button.custom_id = f"btn_sec_cap:{role_id}"
 
     @discord.ui.button(
         label="بدء التحقق 🛡️",
@@ -124,7 +136,7 @@ class Security(commands.Cog):
                     embed=embed,
                 )
         except Exception as error:
-            print(f"[SECURITY_CRITICAL] فشل عزل المشرف: {error}")
+            logger.exception("[SECURITY_CRITICAL] فشل عزل المشرف: %s", error)
 
     @commands.Cog.listener()
     async def on_member_join(self, mem: discord.Member):
@@ -248,12 +260,27 @@ class Security(commands.Cog):
         name="setup_captcha",
         description="تثبيت بوابة التحقق البشري الذكية",
     )
+    @app_commands.guild_only()
     @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.checks.bot_has_permissions(
+        manage_roles=True,
+        send_messages=True,
+        embed_links=True,
+    )
     async def setup_captcha(
         self,
         itx: discord.Interaction,
         verified_role: discord.Role,
     ):
+        guild = itx.guild
+        bot_member = guild.me
+        if bot_member is None or verified_role >= bot_member.top_role:
+            await itx.response.send_message(
+                "⚠️ رتبة التفعيل يجب أن تكون أسفل أعلى رتبة للبوت.",
+                ephemeral=True,
+            )
+            return
+
         embed = discord.Embed(
             title="🛡️ بوابة التحقق البشري والأمان الفائق",
             description=(
@@ -264,9 +291,11 @@ class Security(commands.Cog):
             color=0x2ECC71,
         )
         embed.set_footer(text="نظام الحماية المركزي النشط")
+        view = CaptchaView(verified_role.id)
+        self.bot.add_view(view)
         await itx.channel.send(
             embed=embed,
-            view=CaptchaView(verified_role.id),
+            view=view,
         )
         await itx.response.send_message(
             "✅ تم نشر بوابة الكابتشا بنجاح.",

@@ -24,13 +24,16 @@ A Python Discord bot with slash commands for latency checks, greetings, and basi
 
 ## Where things live
 
-- `bot.py` — Discord bot entry point and slash commands
+- `main.py` — active Discord bot entry point and slash-command synchronization
+- `cogs/security.py` — CAPTCHA, account-age, scam-link, and anti-nuke protections
 - `pyproject.toml` / `uv.lock` — Python dependency metadata and lockfile
 - `README.md` — Discord setup and run instructions
 
 ## Architecture decisions
 
-- Slash commands are used instead of message-content commands, so the bot does not need the privileged Message Content intent.
+- Slash commands are used instead of prefix commands, but the security cog requires the
+  privileged Message Content and Server Members intents for scam-link and account-age
+  protections.
 - `DISCORD_GUILD_ID` is optional: when present, commands sync quickly to one development server; otherwise they sync globally.
 - `DISCORD_BOT_TOKEN` is read only from the environment and is never stored in source files.
 

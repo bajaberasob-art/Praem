@@ -1016,10 +1016,18 @@
       if (!r.ok) return;
       const data = await r.json();
       if (state.guild?.id !== id) return;
+      const lockChanged = state.lockdown !== Boolean(data.locked);
       state.incidents = data.incidents || [];
       state.whitelist = data.whitelist || [];
       state.lockdown = Boolean(data.locked);
-      if (redraw) refreshIncidentBody();
+      if (redraw) {
+        if (lockChanged) {
+          const view = $("#view-security");
+          if (view) view.replaceWith(securityView());
+        } else {
+          refreshIncidentBody();
+        }
+      }
     } catch (error) {
       if (error.message !== "unauth") updatePing("wait");
     }

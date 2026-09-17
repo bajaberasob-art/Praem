@@ -439,7 +439,12 @@ async def api_security_whitelist(req):
     user_id = int(user_id)
     member = guild.get_member(user_id)
     if member is None:
-        return json_error(404, "member_not_found")
+        try:
+            member = await guild.fetch_member(user_id)
+        except discord.NotFound:
+            return json_error(404, "member_not_found")
+        except (discord.Forbidden, discord.HTTPException, asyncio.TimeoutError):
+            return json_error(503, "member_lookup_unavailable")
     if action == "add" and not member.guild_permissions.administrator:
         return json_error(400, "validation", fields={"user_id": "يجب أن يملك العضو صلاحية Administrator"})
     if action == "add":

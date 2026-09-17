@@ -330,6 +330,27 @@ class Security(commands.Cog):
                 self._threats.pop(stale_key, None)
         return len(timestamps)
 
+    async def _resolve_member(
+        self,
+        guild: discord.Guild,
+        user_id: int,
+    ) -> Optional[discord.Member]:
+        member = guild.get_member(int(user_id))
+        if member is not None:
+            return member
+        try:
+            return await guild.fetch_member(int(user_id))
+        except discord.NotFound:
+            return None
+        except (discord.Forbidden, discord.HTTPException, asyncio.TimeoutError):
+            logger.warning(
+                "[SECURITY_MEMBER] تعذر جلب العضو %s من السيرفر %s",
+                user_id,
+                guild.id,
+                exc_info=True,
+            )
+            return None
+
     async def _handle_admin_action(
         self,
         guild: discord.Guild,
@@ -338,7 +359,7 @@ class Security(commands.Cog):
     ) -> None:
         if actor is None or self._is_whitelisted(guild, actor.id):
             return
-        member = guild.get_member(actor.id)
+        member = await self._resolve_member(guild, actor.id)
         if member is None or not member.guild_permissions.administrator:
             return
 

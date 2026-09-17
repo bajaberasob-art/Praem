@@ -145,6 +145,37 @@ class Security(commands.Cog):
             rows = [row for row in rows if row["guild_id"] == int(guild_id)]
         return [dict(row) for row in rows]
 
+    def get_whitelist(self, guild_id: int) -> list[str]:
+        return [str(user_id) for user_id in sorted(self._whitelist.get(int(guild_id), set()))]
+
+    def record_control_action(
+        self,
+        guild_id: int,
+        culprit_id: int,
+        culprit_name: str,
+        action_type: str,
+        mitigation_taken: str,
+    ) -> dict[str, Any]:
+        """Record a dashboard/operator action without treating it as an attack."""
+        incident = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "guild_id": int(guild_id),
+            "culprit_id": int(culprit_id),
+            "culprit_name": str(culprit_name),
+            "action_type": str(action_type),
+            "mitigation_taken": str(mitigation_taken),
+        }
+        with self._incident_lock:
+            self.incidents.append(incident)
+        logger.info(
+            "[SECURITY_CONTROL] guild=%s operator=%s action=%s mitigation=%s",
+            guild_id,
+            culprit_id,
+            action_type,
+            mitigation_taken,
+        )
+        return dict(incident)
+
     def _record_incident(
         self,
         guild_id: int,

@@ -382,6 +382,81 @@ async def api_security_incidents(req):
     return web.json_response({
         "guild_id": str(guild.id),
         "incidents": security.get_incidents(guild.id),
+        "whitelist": security.get_whitelist(guild.id),
+    })
+
+
+@routes.post('/api/guild/{guild_id}/security/lockdown')
+async def api_security_lockdown(req):
+    session, guild = await authorize(req, write=True)
+    security = bot_ref.get_cog("Security") if bot_ref else None
+    if security is None:
+        return json_error(503, "security_unavailable")
+    try:
+        body = json.loads((await req.content.read(MAX_BODY + 1))[:MAX_BODY].decode("utf-8") or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    locked = body.get("locked", True)
+    if not isinstance(locked, bool):
+        return json_error(400, "validation", fields={"locked": "القيمة يجب أن تكون تشغيل/إيقاف"})
+    result = await security.emergency_lockdown(guild.id, locked)
+    mitigation = (
+        f"{'queued_lockdown' if locked else 'queued_unlock'}:{result['channels']}"
+        if result["queued"]
+        else "queue_rejected"
+    )
+    security.record_control_action(
+        guild.id,
+        int(session["id"]),
+        session.get("username", session["id"]),
+        "dashboard_lockdown" if locked else "dashboard_unlock",
+        mitigation,
+    )
+    return web.json_response({"ok": result["queued"], **result})
+
+
+@routes.post('/api/guild/{guild_id}/security/whitelist')
+async def api_security_whitelist(req):
+    session, guild = await authorize(req, write=True)
+    security = bot_ref.get_cog("Security") if bot_ref else None
+    if security is None:
+        return json_error(503, "security_unavailable")
+    try:
+        body = json.loads((await req.content.read(MAX_BODY + 1))[:MAX_BODY].decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    action = body.get("action")
+    user_id = body.get("user_id")
+    if action not in {"add", "remove"}:
+        return json_error(400, "validation", fields={"action": "الإجراء يجب أن يكون add أو remove"})
+    if isinstance(user_id, bool) or not str(user_id).isdigit() or not 15 <= len(str(user_id)) <= 22:
+        return json_error(400, "validation", fields={"user_id": "معرّف Discord غير صالح"})
+    user_id = int(user_id)
+    member = guild.get_member(user_id)
+    if member is None:
+        return json_error(404, "member_not_found")
+    if action == "add" and not member.guild_permissions.administrator:
+        return json_error(400, "validation", fields={"user_id": "يجب أن يملك العضو صلاحية Administrator"})
+    if action == "add":
+        security.whitelist_member(guild.id, user_id)
+    else:
+        security.remove_whitelisted_member(guild.id, user_id)
+    security.record_control_action(
+        guild.id,
+        int(session["id"]),
+        session.get("username", session["id"]),
+        f"dashboard_whitelist_{action}",
+        f"user:{user_id}",
+    )
+    return web.json_response({
+        "ok": True,
+        "action": action,
+        "user_id": str(user_id),
+        "whitelist": security.get_whitelist(guild.id),
     })
 
 

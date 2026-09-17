@@ -34,7 +34,7 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     "anti_links": ("INTEGER", True, "bool"),
     "anti_spam": ("INTEGER", True, "bool"),
     "anti_mass_mention": ("INTEGER", True, "bool"),
-    "banned_words_list": ("TEXT", "[]", "json_list"),
+    "banned_words_list": ("TEXT", [], "json_list"),
 }
 SETTINGS_DEFAULTS: Dict[str, Any] = {k: v[1] for k, v in SETTINGS_SCHEMA.items()}
 # الأعمدة القديمة التي تُغذّي الأعمدة الجديدة عند الترحيل (new <- legacy)

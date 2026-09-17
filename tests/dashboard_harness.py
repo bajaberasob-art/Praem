@@ -140,9 +140,20 @@ class FakeBot:
         async def quick_unmute(self, guild_id, user_id):
             return {"ok": True, "guild_id": guild_id, "user_id": user_id}
 
+    class EngagementStub:
+        async def send_test_welcome(self, guild_id, target_channel_id, template_data):
+            return {
+                "ok": True,
+                "guild_id": guild_id,
+                "channel_id": target_channel_id,
+                "message_id": 800000000000000001,
+                "template_data": template_data,
+            }
+
     def __init__(self):
         self.security = self.SecurityStub()
         self.moderation = self.ModerationStub()
+        self.engagement = self.EngagementStub()
 
     def get_guild(self, gid):
         return FakeGuild() if gid == FakeGuild.id else None
@@ -152,6 +163,8 @@ class FakeBot:
             return self.security
         if name == "Moderation":
             return self.moderation
+        if name == "Engagement":
+            return self.engagement
         return None
 
     def is_ready(self):

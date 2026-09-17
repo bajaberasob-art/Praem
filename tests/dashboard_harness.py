@@ -58,7 +58,7 @@ class FakeGuild:
     roles, text_channels = ROLES, CHANNELS
     me = SimpleNamespace(top_role=ROLES[3])
 
-    admins = {10}
+    admins = {10, 100000000000000010}
 
     def get_member(self, uid):
         # user 10 = administrator, anyone else = ordinary member (no 0x8 bit)

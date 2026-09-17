@@ -198,7 +198,33 @@ class RulesAgreementView(discord.ui.View):
                 "⚠️ نظام التحقق غير متاح مؤقتاً.",
                 ephemeral=True,
             )
-        result = await engagement.agree_to_rules(itx)
+        await itx.response.send_modal(RulesAgreementModal(engagement))
+
+
+class RulesAgreementModal(discord.ui.Modal, title="تأكيد الموافقة على القوانين"):
+    def __init__(self, engagement):
+        super().__init__()
+        self.engagement = engagement
+        self.confirmation = discord.ui.TextInput(
+            label="اكتب أوافق للتأكيد",
+            placeholder="أوافق",
+            min_length=3,
+            max_length=20,
+        )
+        self.add_item(self.confirmation)
+
+    async def on_submit(self, itx: discord.Interaction):
+        if self.confirmation.value.strip().casefold() not in {
+            "أوافق",
+            "اوافق",
+            "موافق",
+            "agree",
+        }:
+            return await itx.response.send_message(
+                "❌ اكتب «أوافق» لتأكيد قراءة القوانين.",
+                ephemeral=True,
+            )
+        result = await self.engagement.agree_to_rules(itx)
         if result["ok"]:
             return await itx.response.send_message(
                 f"✅ تم توثيق موافقتك في {result['agreed_at']} ومنحك رتبة التحقق.",

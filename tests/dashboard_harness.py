@@ -62,7 +62,16 @@ class FakeGuild:
 
     def get_member(self, uid):
         # user 10 = administrator, anyone else = ordinary member (no 0x8 bit)
-        return SimpleNamespace(guild_permissions=SimpleNamespace(value=8 if uid in self.admins else 0))
+        allowed = uid in self.admins
+        return SimpleNamespace(
+            id=uid,
+            name=f"User {uid}",
+            display_name=f"User {uid}",
+            guild_permissions=SimpleNamespace(value=8 if allowed else 0, administrator=allowed),
+        )
+
+    async def fetch_member(self, uid):
+        return self.get_member(uid)
 
     def get_channel(self, cid):
         return next((c for c in CHANNELS if c.id == cid), None)
@@ -74,8 +83,49 @@ class FakeGuild:
 class FakeBot:
     latency = 0.058
 
+    class SecurityStub:
+        def __init__(self):
+            self.locked = False
+            self.whitelist = set()
+            self.incidents = []
+
+        def get_incidents(self, guild_id=None):
+            return list(self.incidents)
+
+        def get_whitelist(self, guild_id):
+            return sorted(self.whitelist)
+
+        def is_locked(self, guild_id):
+            return self.locked
+
+        async def emergency_lockdown(self, guild_id, locked):
+            self.locked = locked
+            return {"queued": True, "channels": len(CHANNELS), "locked": locked}
+
+        def record_control_action(self, guild_id, culprit_id, culprit_name, action, mitigation):
+            self.incidents.append({
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "guild_id": guild_id,
+                "culprit_id": culprit_id,
+                "culprit_name": culprit_name,
+                "action_type": action,
+                "mitigation_taken": mitigation,
+            })
+
+        def whitelist_member(self, guild_id, user_id):
+            self.whitelist.add(str(user_id))
+
+        def remove_whitelisted_member(self, guild_id, user_id):
+            self.whitelist.discard(str(user_id))
+
+    def __init__(self):
+        self.security = self.SecurityStub()
+
     def get_guild(self, gid):
         return FakeGuild() if gid == FakeGuild.id else None
+
+    def get_cog(self, name):
+        return self.security if name == "Security" else None
 
     def is_ready(self):
         return True

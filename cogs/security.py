@@ -108,6 +108,7 @@ class Security(commands.Cog):
         self._lockdown_queue: Optional[asyncio.Queue] = None
         self._lockdown_worker: Optional[asyncio.Task] = None
         self._lockdown_states: dict[int, bool] = {}
+        self._captcha_views: dict[int, CaptchaView] = {}
 
     # ------------------------------------------------------------------
     # Dynamic configuration and incident stream
@@ -312,6 +313,16 @@ class Security(commands.Cog):
     def cog_unload(self):
         if self._lockdown_worker and not self._lockdown_worker.done():
             self._lockdown_worker.cancel()
+        self._captcha_views.clear()
+
+    def _captcha_view(self, role_id: int) -> CaptchaView:
+        role_id = int(role_id)
+        view = self._captcha_views.get(role_id)
+        if view is None:
+            view = CaptchaView(role_id)
+            self._captcha_views[role_id] = view
+            self.bot.add_view(view)
+        return view
 
     # ------------------------------------------------------------------
     # Threat tracking and mitigation
@@ -500,8 +511,7 @@ class Security(commands.Cog):
             if role and mem.guild.me and role < mem.guild.me.top_role:
                 channel = mem.guild.system_channel
                 if channel:
-                    view = CaptchaView(role.id)
-                    self.bot.add_view(view)
+                    view = self._captcha_view(role.id)
                     try:
                         await channel.send(
                             f"🛡️ {mem.mention} أكمل التحقق البشري للحصول على رتبة الدخول.",
@@ -639,8 +649,7 @@ class Security(commands.Cog):
             color=0x2ECC71,
         )
         embed.set_footer(text="نظام الحماية المركزي النشط")
-        view = CaptchaView(verified_role.id)
-        self.bot.add_view(view)
+        view = self._captcha_view(verified_role.id)
         await itx.channel.send(embed=embed, view=view)
         await itx.response.send_message(
             "✅ تم نشر بوابة الكابتشا وحفظ إعداداتها بنجاح.",

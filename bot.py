@@ -10,6 +10,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.errors import LoginFailure
 
 
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -38,13 +39,21 @@ def configured_guild() -> Optional[discord.Object]:
         raise ValueError("DISCORD_GUILD_ID must be a numeric Discord server ID.") from exc
 
 
+def normalized_token() -> str:
+    """Read a raw bot token and remove common formatting added during copy/paste."""
+    token = os.getenv("DISCORD_BOT_TOKEN", "").strip().strip("\"'")
+    if token.lower().startswith("bot "):
+        token = token[4:].strip()
+    return token
+
+
 class DiscordBot(commands.Bot):
     """Bot with a small starter command set and explicit command syncing."""
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
         super().__init__(
-            command_prefix="!",
+            command_prefix=(),
             intents=intents,
             description="A practical starter Discord bot.",
         )
@@ -127,14 +136,21 @@ async def on_app_command_error(
 
 def main() -> None:
     configure_logging()
-    token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+    token = normalized_token()
     if not token:
         raise RuntimeError(
             "DISCORD_BOT_TOKEN is not set. Add the bot token as a Replit Secret "
             "before starting the bot."
         )
 
-    bot.run(token, log_handler=None)
+    try:
+        bot.run(token, log_handler=None)
+    except LoginFailure as exc:
+        raise RuntimeError(
+            "Discord rejected DISCORD_BOT_TOKEN. Use the current token from the "
+            "Developer Portal's Bot page, not the Application ID, public key, "
+            "client secret, or OAuth URL."
+        ) from exc
 
 
 if __name__ == "__main__":

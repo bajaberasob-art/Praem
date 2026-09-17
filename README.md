@@ -21,7 +21,7 @@ The configured project workflow runs the same command automatically.
 ## Discord setup
 
 1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Open **Bot**, create the bot user, and copy its token into the `DISCORD_BOT_TOKEN` Replit Secret.
+2. Open **Bot**, create the bot user, and copy its raw token into the `DISCORD_BOT_TOKEN` Replit Secret. Do not use the Application ID, public key, client secret, or an OAuth URL.
 3. Open **OAuth2 → URL Generator**.
 4. Select the `bot` and `applications.commands` scopes.
 5. Select only the permissions the bot needs. The starter commands work without administrator permissions.

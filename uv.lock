@@ -625,7 +625,7 @@ wheels = [
 ]
 
 [[package]]
-name = "repl-nix-workspace"
+name = "python-discord-bot"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

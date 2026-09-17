@@ -366,7 +366,7 @@ async def update_guild_settings(
         int(value)
         if isinstance(value, bool)
         else json.dumps(value, ensure_ascii=False)
-        if SETTINGS_SCHEMA[key][2] == "json_list"
+        if SETTINGS_SCHEMA.get(key, (None, None, None))[2] == "json_list"
         else value
         for key, value in changes.items()
     ]

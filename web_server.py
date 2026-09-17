@@ -536,7 +536,10 @@ async def api_test_welcome(req):
     if req.content_length and req.content_length > MAX_BODY:
         return json_error(413, "too_large")
     try:
-        body = json.loads((await req.content.read(MAX_BODY + 1)).decode("utf-8") or "{}")
+        raw_body = await req.content.read(MAX_BODY + 1)
+        if len(raw_body) > MAX_BODY:
+            return json_error(413, "too_large")
+        body = json.loads(raw_body.decode("utf-8") or "{}")
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):

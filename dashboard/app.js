@@ -1710,13 +1710,14 @@
     const wanted = new Set(requested.map((value) => value.toLowerCase()));
     try {
       for (const trigger of requested) {
-        if (existingByTrigger.has(trigger.toLowerCase())) continue;
+        const existingShortcut = existingByTrigger.get(trigger.toLowerCase());
+        if (existingShortcut && existingShortcut.target_type === "command") continue;
         const response = await api(`api/guild/${state.guild.id}/shortcuts`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
           body: JSON.stringify({
             trigger,
-            target_type: "help",
+            target_type: "command",
             target: `/${command.command_name}`,
           }),
         });

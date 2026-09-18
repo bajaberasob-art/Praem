@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -36,11 +37,12 @@ class AITools(commands.Cog):
         self.session: aiohttp.ClientSession | None = None
 
     async def cog_load(self):
-        self.session = aiohttp.ClientSession()
+        self.session = getattr(self.bot, "session", None)
+        if self.session is None:
+            raise RuntimeError("AITools requires the shared bot HTTP session")
 
     async def cog_unload(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
+        self.session = None
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(
@@ -61,10 +63,10 @@ class AITools(commands.Cog):
             if not message.content or message.author.bot:
                 return
 
-            translated = GoogleTranslator(
-                source="auto",
-                target=target_lang,
-            ).translate(message.content)
+            translated = await asyncio.to_thread(
+                GoogleTranslator(source="auto", target=target_lang).translate,
+                message.content,
+            )
             embed = discord.Embed(
                 title=f"🌐 الترجمة الفورية ({target_lang.upper()})",
                 description=translated,
@@ -77,8 +79,8 @@ class AITools(commands.Cog):
             )
             embed.set_footer(text=f"طلب: {requester}")
             await channel.send(embed=embed, reference=message)
-        except Exception as error:
-            print(f"[TRANSLATE_ERR] {error}")
+        except Exception:
+            LOGGER.exception("[TRANSLATE_ERR] translation failed")
 
     @app_commands.command(
         name="ask_ai",

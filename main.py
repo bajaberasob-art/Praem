@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import sys
+import time
+from collections import deque
 
 import aiohttp
 import discord
@@ -68,6 +70,7 @@ class EnterpriseBot(commands.Bot):
         self.dashboard_runner = None
         self.presence_step = 0
         self.sync_guild = configured_sync_guild()
+        self.metrics: deque[dict[str, int | float | str | None]] = deque(maxlen=600)
 
     async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):
         options = {"override": override}
@@ -137,7 +140,7 @@ class EnterpriseBot(commands.Bot):
                 await self.load_extension(module)
                 logger.info(f"✅ تم تحميل الوحدة بنجاح: {module}")
             except commands.ExtensionAlreadyLoaded:
-                pass
+                logger.debug("الوحدة محملة مسبقاً: %s", module)
             except Exception as error:
                 raise RuntimeError(f"فشل تحميل الوحدة {module}; أوقف الإقلاع.") from error
 
@@ -170,6 +173,7 @@ class EnterpriseBot(commands.Bot):
         await super().close()
 
     async def on_ready(self):
+        self.record_metrics()
         logger.info("=" * 45)
         logger.info(
             f"🚀 المحرك المركزي جاهز للخدمة: "
@@ -184,6 +188,34 @@ class EnterpriseBot(commands.Bot):
             f"{round(self.latency * 1000)}ms"
         )
         logger.info("=" * 45)
+
+    def record_metrics(self) -> None:
+        """Capture live gateway and guild values for the dashboard charts."""
+        latency = self.latency
+        latency_ms = (
+            round(latency * 1000)
+            if latency == latency and latency != float("inf")
+            else None
+        )
+        timestamp = time.time()
+        for guild in self.guilds:
+            self.metrics.append(
+                {
+                    "guild_id": str(guild.id),
+                    "ts": timestamp,
+                    "latency_ms": latency_ms,
+                    "members": guild.member_count,
+                }
+            )
+
+    def metrics_for_guild(self, guild_id: int) -> list[dict]:
+        """Return a bounded, JSON-ready metric history for one guild."""
+        self.record_metrics()
+        return [
+            dict(item)
+            for item in self.metrics
+            if str(item.get("guild_id")) == str(guild_id)
+        ][-120:]
 
     @tasks.loop(seconds=30)
     async def rotate_status(self):

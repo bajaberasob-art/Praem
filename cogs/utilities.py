@@ -49,6 +49,15 @@ COMMAND_PERMISSION_LABELS = {
     "lockdown": "إدارة القنوات",
     "slowmode": "إدارة القنوات",
 }
+BOT_ACTION_PERMISSIONS = {
+    "timeout": "moderate_members",
+    "untimeout": "moderate_members",
+    "warn": "moderate_members",
+    "clear": "manage_messages",
+    "slowmode": "manage_channels",
+    "lockdown": "manage_channels",
+}
+TARGET_HIERARCHY_COMMANDS = {"timeout", "untimeout", "warn"}
 COMMAND_PARAMETER_LABELS = {
     "member": "عضو",
     "user": "عضو",
@@ -500,6 +509,10 @@ class Utilities(commands.Cog):
                 return False
             if original_allowed is False:
                 return False
+        environment_error = self._command_environment_error(interaction)
+        if environment_error:
+            await self._send_policy_denial(interaction, environment_error)
+            return False
         guild_id = int(interaction.guild.id)
         controls = self.command_controls.get(guild_id)
         if controls is None:
@@ -534,15 +547,61 @@ class Utilities(commands.Cog):
                     f"`/{interaction.command.qualified_name}`."
                 )
         if reason:
-            try:
-                if interaction.response.is_done():
-                    await interaction.followup.send(reason, ephemeral=True)
-                else:
-                    await interaction.response.send_message(reason, ephemeral=True)
-            except (discord.Forbidden, discord.HTTPException):
-                LOGGER.debug("[COMMAND_POLICY] تعذر إرسال حظر Slash", exc_info=True)
+            await self._send_policy_denial(interaction, reason)
             return False
         return True
+
+    @staticmethod
+    def _command_environment_error(interaction: discord.Interaction) -> str | None:
+        """Check channel bot permissions and target hierarchy before callbacks."""
+        command_name = str(
+            getattr(getattr(interaction, "command", None), "qualified_name", "")
+        ).lower()
+        required_permission = BOT_ACTION_PERMISSIONS.get(command_name)
+        guild = getattr(interaction, "guild", None)
+        channel = getattr(interaction, "channel", None)
+        me = getattr(guild, "me", None)
+        if required_permission and me is not None and channel is not None:
+            try:
+                permissions = channel.permissions_for(me)
+            except (AttributeError, TypeError):
+                permissions = None
+            if permissions is not None and not getattr(permissions, required_permission, False):
+                return f"❌ البوت لا يملك صلاحية `{required_permission}` في هذه القناة."
+
+        if command_name not in TARGET_HIERARCHY_COMMANDS:
+            return None
+        namespace = getattr(interaction, "namespace", None)
+        target = getattr(namespace, "member", None)
+        if target is None or me is None:
+            return None
+        target_top = getattr(target, "top_role", None)
+        bot_top = getattr(me, "top_role", None)
+        user_top = getattr(getattr(interaction, "user", None), "top_role", None)
+        if target_top is None or bot_top is None:
+            return None
+        if getattr(target, "id", None) == getattr(me, "id", None):
+            return "❌ لا يمكن للبوت تنفيذ هذا الإجراء على نفسه."
+        if target_top >= bot_top:
+            return "❌ رتبة البوت يجب أن تكون أعلى من رتبة العضو المستهدف."
+        guild_owner_id = getattr(guild, "owner_id", None)
+        if (
+            getattr(interaction.user, "id", None) != guild_owner_id
+            and user_top is not None
+            and target_top >= user_top
+        ):
+            return "❌ رتبتك يجب أن تكون أعلى من رتبة العضو المستهدف."
+        return None
+
+    @staticmethod
+    async def _send_policy_denial(interaction: discord.Interaction, reason: str) -> None:
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(reason, ephemeral=True)
+            else:
+                await interaction.response.send_message(reason, ephemeral=True)
+        except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            LOGGER.error("[COMMAND_POLICY] تعذر إرسال رسالة الرفض", exc_info=True)
 
     @commands.Cog.listener()
     async def on_ready(self):

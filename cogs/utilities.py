@@ -1,12 +1,98 @@
 import asyncio
+import logging
+import random
+import re
 import time
+from dataclasses import dataclass
+from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from database import (
+    get_auto_responders,
+    get_command_controls,
+    get_guild_settings,
+    get_shortcuts,
+    save_auto_responder,
+    save_command_control,
+    save_shortcut,
+)
+
 
 HUB_NAME = "➕ اضغط للإنشاء"
+LOGGER = logging.getLogger("UtilitiesOrchestrator")
+MATCH_TYPES = {"exact", "contains", "regex"}
+SHORTCUT_TYPES = {"command", "announcement"}
+
+
+async def dynamic_prefix(
+    bot: commands.Bot,
+    message: discord.Message,
+) -> list[str]:
+    """Resolve mentions plus the guild prefix from the shared settings cache."""
+    prefix = "!"
+    if message.guild is not None:
+        try:
+            snapshot = await get_guild_settings(message.guild.id)
+            configured = snapshot["settings"].get("prefix")
+            if isinstance(configured, str) and configured.strip():
+                prefix = configured.strip()[:5]
+        except Exception:
+            LOGGER.exception("[PREFIX] تعذر قراءة بادئة السيرفر %s", message.guild.id)
+    return commands.when_mentioned_or(prefix)(bot, message)
+
+
+class CommandIntercepted(commands.CheckFailure):
+    """A command was intentionally blocked by a guild policy."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclass
+class TokenBucket:
+    tokens: float
+    updated_at: float
+
+
+class ShortcutInteractionResponse:
+    def __init__(self, interaction: "ShortcutInteraction"):
+        self.interaction = interaction
+        self._done = False
+
+    def is_done(self) -> bool:
+        return self._done
+
+    async def defer(self, **kwargs):
+        self._done = True
+
+    async def send_message(self, content=None, **kwargs):
+        self._done = True
+        await self.interaction.channel.send(content, **kwargs)
+
+
+class ShortcutFollowup:
+    def __init__(self, interaction: "ShortcutInteraction"):
+        self.interaction = interaction
+
+    async def send(self, content=None, **kwargs):
+        return await self.interaction.channel.send(content, **kwargs)
+
+
+class ShortcutInteraction:
+    """Small interaction adapter for no-argument slash command shortcuts."""
+
+    def __init__(self, message: discord.Message):
+        self.message = message
+        self.user = message.author
+        self.guild = message.guild
+        self.channel = message.channel
+        self.client = message._state._get_client() if getattr(message, "_state", None) else None
+        self.response = ShortcutInteractionResponse(self)
+        self.followup = ShortcutFollowup(self)
 
 
 class VoiceControl(discord.ui.View):
@@ -89,6 +175,383 @@ class Utilities(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.temp_voice = {}
+        self.auto_responders: dict[int, list[dict[str, Any]]] = {}
+        self.shortcuts: dict[int, list[dict[str, Any]]] = {}
+        self.command_controls: dict[int, dict[str, dict[str, Any]]] = {}
+        self._cooldowns: dict[tuple[int, int, int], TokenBucket] = {}
+        self._check_registered = False
+        self.bot.add_check(self.command_interceptor)
+        self._check_registered = True
+
+    async def cog_unload(self):
+        if self._check_registered:
+            self.bot.remove_check(self.command_interceptor)
+            self._check_registered = False
+
+    async def get_guild_commands_status(self, guild_id: int) -> dict[str, Any]:
+        """Return command policy state merged with the commands currently loaded."""
+        guild_id = int(guild_id)
+        controls = await get_command_controls(guild_id)
+        self.command_controls[guild_id] = controls
+        snapshot = await get_guild_settings(guild_id)
+        known = {}
+        for command in self.bot.commands:
+            if command.hidden:
+                continue
+            known[command.qualified_name] = {
+                "command_name": command.qualified_name,
+                "enabled": True,
+                "allowed_roles": [],
+                "configured": False,
+                "aliases": list(command.aliases),
+            }
+        for name, control in controls.items():
+            item = known.setdefault(
+                name,
+                {
+                    "command_name": name,
+                    "enabled": True,
+                    "allowed_roles": [],
+                    "configured": False,
+                    "aliases": [],
+                },
+            )
+            item.update(
+                enabled=bool(control["enabled"]),
+                allowed_roles=list(control["allowed_roles"]),
+                configured=True,
+                updated_at=control.get("updated_at"),
+            )
+        return {
+            "guild_id": str(guild_id),
+            "prefix": snapshot["settings"].get("prefix", "!"),
+            "commands": sorted(known.values(), key=lambda item: item["command_name"]),
+        }
+
+    async def toggle_command(
+        self,
+        guild_id: int,
+        command_name: str,
+        enabled: bool,
+        allowed_roles: list[int | str] | None = None,
+    ) -> dict[str, Any]:
+        """Persist and publish a command's enabled/role policy."""
+        name = str(command_name).strip().lower()
+        if not name or len(name) > 100:
+            raise ValueError("command_name must be a non-empty command name")
+        roles = [str(role_id) for role_id in (allowed_roles or []) if str(role_id).isdigit()]
+        if len(roles) > 25:
+            raise ValueError("allowed_roles cannot contain more than 25 roles")
+        result = await save_command_control(guild_id, name, bool(enabled), roles)
+        self.command_controls.setdefault(int(guild_id), {})[name] = result
+        return result
+
+    async def sync_auto_responders(self, guild_id: int) -> dict[str, int]:
+        """Refresh the in-memory trigger and shortcut registries for one guild."""
+        guild_id = int(guild_id)
+        responders = await get_auto_responders(guild_id)
+        valid = []
+        for responder in responders:
+            if responder["match_type"] not in MATCH_TYPES:
+                LOGGER.warning("[AUTORESPONDER] نوع مطابقة غير معروف: %s", responder)
+                continue
+            if responder["match_type"] == "regex":
+                try:
+                    responder["_compiled"] = re.compile(
+                        responder["trigger"], re.IGNORECASE
+                    )
+                except re.error:
+                    LOGGER.warning(
+                        "[AUTORESPONDER] Regex غير صالح في السيرفر %s: %s",
+                        guild_id,
+                        responder["trigger"],
+                    )
+                    continue
+            valid.append(responder)
+        self.auto_responders[guild_id] = valid
+        self.shortcuts[guild_id] = await get_shortcuts(guild_id)
+        self._prune_buckets(guild_id)
+        return {
+            "responders": len(valid),
+            "shortcuts": len(self.shortcuts[guild_id]),
+        }
+
+    async def add_auto_responder(
+        self,
+        guild_id: int,
+        trigger: str,
+        match_type: str,
+        response: str,
+        *,
+        enabled: bool = True,
+        cooldown_seconds: float = 5.0,
+        bucket_capacity: int = 1,
+    ) -> dict[str, Any]:
+        """Management helper for creating a trigger without touching SQL."""
+        match_type = str(match_type).strip().lower()
+        trigger = str(trigger).strip()
+        if match_type not in MATCH_TYPES:
+            raise ValueError(f"match_type must be one of {sorted(MATCH_TYPES)}")
+        if not trigger or len(trigger) > 500:
+            raise ValueError("trigger must contain 1-500 characters")
+        if match_type == "regex":
+            re.compile(trigger, re.IGNORECASE)
+        if not str(response).strip() or len(str(response)) > 2000:
+            raise ValueError("response must contain 1-2000 characters")
+        item = await save_auto_responder(
+            guild_id,
+            trigger,
+            match_type,
+            response,
+            enabled=enabled,
+            cooldown_seconds=cooldown_seconds,
+            bucket_capacity=bucket_capacity,
+        )
+        await self.sync_auto_responders(guild_id)
+        return item
+
+    async def add_shortcut(
+        self,
+        guild_id: int,
+        trigger: str,
+        target_type: str,
+        *,
+        target: str = "",
+        announcement: str = "",
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        target_type = str(target_type).strip().lower()
+        trigger = str(trigger).strip()
+        if target_type not in SHORTCUT_TYPES:
+            raise ValueError(f"target_type must be one of {sorted(SHORTCUT_TYPES)}")
+        if not trigger or len(trigger) > 100:
+            raise ValueError("shortcut trigger must contain 1-100 characters")
+        if target_type == "command" and not str(target).strip():
+            raise ValueError("command shortcuts need a target command")
+        if target_type == "announcement" and not str(announcement).strip():
+            raise ValueError("announcement shortcuts need announcement text")
+        item = await save_shortcut(
+            guild_id,
+            trigger,
+            target_type,
+            target=target,
+            announcement=announcement,
+            enabled=enabled,
+        )
+        await self.sync_auto_responders(guild_id)
+        return item
+
+    async def command_interceptor(self, ctx: commands.Context) -> bool:
+        """Apply the guild command matrix before a prefix command is invoked."""
+        if ctx.guild is None or ctx.command is None:
+            return True
+        guild_id = int(ctx.guild.id)
+        controls = self.command_controls.get(guild_id)
+        if controls is None:
+            controls = await get_command_controls(guild_id)
+            self.command_controls[guild_id] = controls
+        control = controls.get(ctx.command.qualified_name.lower())
+        if not control:
+            return True
+        member = ctx.author
+        permissions = getattr(member, "guild_permissions", None)
+        if permissions and getattr(permissions, "administrator", False):
+            return True
+        if not control["enabled"]:
+            raise CommandIntercepted(
+                f"الأمر `{ctx.command.qualified_name}` معطّل في هذا السيرفر."
+            )
+        allowed_roles = {str(role_id) for role_id in control["allowed_roles"]}
+        if allowed_roles:
+            member_roles = {
+                str(role.id) for role in getattr(member, "roles", [])
+            }
+            if not member_roles.intersection(allowed_roles):
+                raise CommandIntercepted(
+                    f"لا تملك رتبة مسموحة للأمر `{ctx.command.qualified_name}`."
+                )
+        return True
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        for guild in list(self.bot.guilds):
+            try:
+                await self.sync_auto_responders(guild.id)
+                await self.get_guild_commands_status(guild.id)
+            except Exception:
+                LOGGER.exception(
+                    "[ORCHESTRATOR] تعذر مزامنة إعدادات السيرفر %s", guild.id
+                )
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx: commands.Context, error: Exception):
+        if isinstance(error, CommandIntercepted):
+            try:
+                await ctx.send(f"⛔ {error.reason}", delete_after=7)
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.debug("[COMMAND_POLICY] تعذر إرسال رسالة الحظر", exc_info=True)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or message.guild is None:
+            return
+        guild_id = int(message.guild.id)
+        if guild_id not in self.auto_responders:
+            await self.sync_auto_responders(guild_id)
+        content = str(message.content or "")
+        if not content.strip():
+            return
+        if await self._dispatch_shortcut(message):
+            return
+        for responder in self.auto_responders.get(guild_id, []):
+            if not self._matches(responder, content):
+                continue
+            if not self._consume_bucket(message, responder):
+                continue
+            rendered = self.render_response(responder["response"], message)
+            if not rendered.strip():
+                continue
+            try:
+                await message.channel.send(
+                    rendered,
+                    allowed_mentions=discord.AllowedMentions(
+                        users=True,
+                        roles=False,
+                        everyone=False,
+                    ),
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.warning(
+                    "[AUTORESPONDER] تعذر إرسال رد في السيرفر %s",
+                    guild_id,
+                    exc_info=True,
+                )
+            break
+
+    @staticmethod
+    def _matches(responder: dict[str, Any], content: str) -> bool:
+        trigger = str(responder.get("trigger", ""))
+        match_type = responder.get("match_type")
+        if match_type == "exact":
+            return content.strip().casefold() == trigger.casefold()
+        if match_type == "contains":
+            return trigger.casefold() in content.casefold()
+        if match_type == "regex":
+            compiled = responder.get("_compiled")
+            return bool(compiled and compiled.search(content))
+        return False
+
+    def _consume_bucket(
+        self,
+        message: discord.Message,
+        responder: dict[str, Any],
+    ) -> bool:
+        trigger_id = int(responder.get("id") or hash(responder.get("trigger", "")))
+        key = (int(message.guild.id), trigger_id, int(message.author.id))
+        now = time.monotonic()
+        capacity = max(1, int(responder.get("bucket_capacity", 1)))
+        refill = max(0.0, float(responder.get("cooldown_seconds", 5.0)))
+        bucket = self._cooldowns.get(key)
+        if bucket is None:
+            bucket = TokenBucket(float(capacity), now)
+        elif refill > 0:
+            bucket.tokens = min(
+                float(capacity),
+                bucket.tokens + ((now - bucket.updated_at) / refill),
+            )
+        bucket.updated_at = now
+        if bucket.tokens < 1:
+            self._cooldowns[key] = bucket
+            return False
+        bucket.tokens -= 1
+        self._cooldowns[key] = bucket
+        return True
+
+    def _prune_buckets(self, guild_id: int | None = None) -> None:
+        now = time.monotonic()
+        for key, bucket in list(self._cooldowns.items()):
+            if guild_id is not None and key[0] != int(guild_id):
+                continue
+            if now - bucket.updated_at > 3600:
+                self._cooldowns.pop(key, None)
+        if len(self._cooldowns) > 20000:
+            oldest = sorted(
+                self._cooldowns.items(), key=lambda item: item[1].updated_at
+            )[:5000]
+            for key, _ in oldest:
+                self._cooldowns.pop(key, None)
+
+    @staticmethod
+    def render_response(template: str, message: discord.Message) -> str:
+        guild = message.guild
+        channel = message.channel
+        values = {
+            "user": getattr(message.author, "mention", f"<@{message.author.id}>"),
+            "channel": getattr(channel, "mention", f"#{getattr(channel, 'name', 'channel')}"),
+            "server": getattr(guild, "name", "السيرفر"),
+            "members": f"{getattr(guild, 'member_count', 0):,}",
+        }
+        rendered = str(template or "")
+        for key, value in values.items():
+            rendered = rendered.replace("{" + key + "}", str(value))
+
+        def choose(match: re.Match) -> str:
+            options = [item.strip() for item in match.group(1).split("|") if item.strip()]
+            return random.choice(options) if options else ""
+
+        return re.sub(r"\{random:([^{}|]+(?:\|[^{}|]+)+)\}", choose, rendered)[:2000]
+
+    async def _dispatch_shortcut(self, message: discord.Message) -> bool:
+        trigger = message.content.strip().casefold()
+        for shortcut in self.shortcuts.get(int(message.guild.id), []):
+            if str(shortcut.get("trigger", "")).strip().casefold() != trigger:
+                continue
+            if shortcut["target_type"] == "announcement":
+                embed = discord.Embed(
+                    description=self.render_response(shortcut["announcement"], message),
+                    color=0x5865F2,
+                )
+                await message.channel.send(embed=embed)
+                return True
+            return await self._dispatch_command_shortcut(message, shortcut["target"])
+        return False
+
+    async def _dispatch_command_shortcut(
+        self,
+        message: discord.Message,
+        target: str,
+    ) -> bool:
+        target = str(target).strip()
+        command_name = target.lstrip("!/").split()[0].lower() if target else ""
+        if not command_name:
+            return False
+        slash_command = self.bot.tree.get_command(command_name)
+        if slash_command is not None and target.startswith("/"):
+            callback = slash_command.callback
+            interaction = ShortcutInteraction(message)
+            try:
+                binding = getattr(slash_command, "binding", None)
+                if binding is not None:
+                    await callback(binding, interaction)
+                else:
+                    await callback(interaction)
+                return True
+            except Exception:
+                LOGGER.exception(
+                    "[SHORTCUT] فشل تشغيل الأمر Slash /%s", command_name
+                )
+                return False
+        command = self.bot.get_command(command_name)
+        if command is None:
+            await message.channel.send(f"⚠️ الأمر `{command_name}` غير موجود حالياً.")
+            return True
+        ctx = await self.bot.get_context(message)
+        try:
+            await ctx.invoke(command)
+            return True
+        except Exception:
+            LOGGER.exception("[SHORTCUT] فشل تشغيل الأمر %s", command_name)
+            return False
 
     @commands.Cog.listener()
     async def on_voice_state_update(

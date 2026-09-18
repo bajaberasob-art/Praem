@@ -34,6 +34,13 @@
     commandStudio: { commands: [], roles: [], channels: [] },
     autoResponses: [],
     commandSearch: "",
+    commandCogFilter: "all",
+    commandStatusFilter: "all",
+    commandRoleFilter: "all",
+    commandTab: "commands",
+    selectedCommandIds: [],
+    commandSimulatorText: "",
+    commandDetail: null,
     tickets: {
       active: [],
       archive: [],
@@ -1433,13 +1440,29 @@
   function commandRoles(command) {
     return new Set((command.allowed_roles || []).map(String));
   }
-  function commandRows() {
+  function commandPermissionWarnings(command) {
+    const raw = [
+      ...(Array.isArray(command.permission_warnings) ? command.permission_warnings : []),
+      ...(Array.isArray(command.missing_permissions) ? command.missing_permissions : []),
+      ...(command.permission_warning ? [command.permission_warning] : []),
+    ];
+    return raw.filter(Boolean).map((item) => typeof item === "string" ? item : item.name || item.permission || JSON.stringify(item));
+  }
+  function commandMatchesFilters(command) {
     const query = state.commandSearch.trim().toLowerCase();
-    const commands = (state.commandStudio.commands || []).filter((command) =>
-      !query ||
-      command.command_name.toLowerCase().includes(query) ||
-      String(command.cog || "").toLowerCase().includes(query),
+    const roleId = String(state.commandRoleFilter || "");
+    return (
+      (!query || `${command.command_name || ""} ${command.cog || ""}`.toLowerCase().includes(query)) &&
+      (state.commandCogFilter === "all" || String(command.cog || "Commands") === state.commandCogFilter) &&
+      (state.commandStatusFilter === "all" ||
+        (state.commandStatusFilter === "enabled" && command.enabled !== false) ||
+        (state.commandStatusFilter === "disabled" && command.enabled === false) ||
+        (state.commandStatusFilter === "warning" && commandPermissionWarnings(command).length > 0)) &&
+      (state.commandRoleFilter === "all" || commandRoles(command).has(roleId))
     );
+  }
+  function commandRows() {
+    const commands = (state.commandStudio.commands || []).filter(commandMatchesFilters);
     const groups = new Map();
     commands.forEach((command) => {
       const key = command.cog || "Commands";
@@ -1456,6 +1479,8 @@
       group.append(el("div", { class: "command-group-title" }, el("span", { text: cog }), el("small", { text: `${items.length} أمر` })));
       items.forEach((command) => {
         const roles = commandRoles(command);
+        const commandId = String(command.command_name);
+        const warnings = commandPermissionWarnings(command);
         const roleWrap = el("div", { class: "command-role-tags" });
         (state.commandStudio.roles || []).forEach((role) => {
           const active = roles.has(String(role.id));
@@ -1485,14 +1510,33 @@
           pulse();
           updateCommand(command, !command.enabled, [...roles]);
         };
-        group.append(el("article", { class: "command-row" },
+        const select = el("input", {
+          class: "command-select",
+          type: "checkbox",
+          checked: state.selectedCommandIds.includes(commandId),
+          "aria-label": `تحديد ${command.command_name}`,
+        });
+        select.onchange = () => {
+          state.selectedCommandIds = select.checked
+            ? [...new Set([...state.selectedCommandIds, commandId])]
+            : state.selectedCommandIds.filter((id) => id !== commandId);
+          renderPage();
+        };
+        group.append(el("article", { class: `command-row${warnings.length ? " has-warning" : ""}` },
+          el("div", { class: "command-row-select" }, select),
           el("div", { class: "command-name" },
-            el("strong", { text: `/${command.command_name}` }),
-            el("small", { text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
+            el("button", { class: "command-name-button", type: "button", onClick: () => openCommandDetail(command) },
+              el("strong", { text: `/${command.command_name}` }),
+              el("small", { text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
+            ),
           ),
           el("div", { class: "command-role-picker" },
             el("span", { class: "command-role-label", text: "الرتب المسموحة — اتركها فارغة للجميع" }),
             roleWrap,
+          ),
+          el("div", { class: "command-row-status" },
+            warnings.length ? el("span", { class: "command-warning", text: "تحذير صلاحيات", title: warnings.join("، ") }) : el("span", { class: "command-ok", text: "جاهز" }),
+            el("button", { class: "command-detail-link", type: "button", text: "التفاصيل", onClick: () => openCommandDetail(command) }),
           ),
           toggleButton,
         ));
@@ -1561,6 +1605,132 @@
       }
     }
   }
+  function commandListForWorkspace() {
+    return (state.commandStudio.commands || []).filter(commandMatchesFilters);
+  }
+  function closeCommandDetail() {
+    document.querySelector(".command-detail-back")?.remove();
+    state.commandDetail = null;
+  }
+  function openCommandDetail(command) {
+    closeCommandDetail();
+    state.commandDetail = command;
+    const warnings = commandPermissionWarnings(command);
+    const back = el("div", { class: "modal-back command-detail-back", role: "dialog", "aria-modal": "true" });
+    const input = el("input", {
+      class: "studio-input command-simulator-input",
+      value: state.commandSimulatorText || `${state.draft?.prefix || "!"}${command.command_name}`,
+      placeholder: `${state.draft?.prefix || "!"}${command.command_name} ...`,
+      "aria-label": "رسالة المحاكاة",
+    });
+    const output = el("div", { class: "command-simulator-output" });
+    const renderOutput = () => {
+      state.commandSimulatorText = input.value;
+      const entered = input.value.trim() || `${state.draft?.prefix || "!"}${command.command_name}`;
+      output.replaceChildren(
+        el("span", { class: "simulator-user", text: "أنت" }),
+        el("code", { text: entered }),
+        el("span", { class: "simulator-arrow", text: "→" }),
+        el("span", { class: "simulator-response", text: command.example_response || command.response_preview || "سيتم تشغيل الأمر حسب سياسة البوت الحالية." }),
+      );
+    };
+    input.oninput = renderOutput;
+    renderOutput();
+    const permissionBox = warnings.length
+      ? el("div", { class: "permission-warning" },
+          el("strong", { text: "تنبيه صلاحيات" }),
+          el("p", { text: warnings.join("، ") }),
+        )
+      : el("div", { class: "permission-ok", text: "لا توجد تحذيرات صلاحيات من البيانات الحالية" });
+    const roles = [...commandRoles(command)].map((id) => (state.commandStudio.roles || []).find((role) => String(role.id) === id)?.name || id);
+    const modal = el("aside", { class: "modal command-detail-drawer" },
+      el("div", { class: "drawer-head" },
+        el("div", {}, el("span", { class: "eyebrow", text: `${command.cog || "COMMANDS"} / POLICY` }), el("h2", { text: `/${command.command_name}` })),
+        el("button", { class: "icon-action", type: "button", text: "×", title: "إغلاق", onClick: closeCommandDetail }),
+      ),
+      el("div", { class: "detail-status-line" },
+        el("span", { class: `status-pill ${command.enabled === false ? "off" : "on"}`, text: command.enabled === false ? "معطّل" : "مفعّل" }),
+        el("span", { class: "detail-meta", text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
+      ),
+      permissionBox,
+      el("dl", { class: "command-detail-list" },
+        el("div", {}, el("dt", { text: "الـ Cog" }), el("dd", { text: command.cog || "Commands" })),
+        el("div", {}, el("dt", { text: "الرتب" }), el("dd", { text: roles.length ? roles.join("، ") : "كل الرتب" })),
+        el("div", {}, el("dt", { text: "آخر استخدام" }), el("dd", { text: command.last_used_at ? new Date(command.last_used_at).toLocaleString("ar") : "لا توجد بيانات" })),
+      ),
+      el("section", { class: "command-simulator" },
+        el("div", { class: "section-heading compact" }, el("div", {}, el("div", { class: "eyebrow", text: "SAFE SIMULATOR" }), el("h3", { text: "اختبر شكل التنفيذ" }))),
+        input,
+        output,
+        el("small", { class: "hint", text: "محاكاة محلية فقط؛ لا يتم إرسال رسالة إلى Discord." }),
+      ),
+      el("div", { class: "modal-actions" },
+        el("button", { class: "btn ghost", type: "button", text: "إغلاق", onClick: closeCommandDetail }),
+        el("button", { class: "btn primary", type: "button", text: command.enabled === false ? "تفعيل الأمر" : "تعطيل الأمر", onClick: async () => {
+          await updateCommand(command, command.enabled === false, [...commandRoles(command)]);
+          closeCommandDetail();
+        } }),
+      ),
+    );
+    back.onclick = (event) => { if (event.target === back) closeCommandDetail(); };
+    back.append(modal);
+    document.body.append(back);
+    input.focus();
+  }
+  async function bulkUpdateCommands(enabled) {
+    const selected = (state.commandStudio.commands || []).filter((command) => state.selectedCommandIds.includes(String(command.command_name)));
+    if (!selected.length) return toast("حدد أمراً واحداً على الأقل", "info", 2200);
+    if (!confirm(`${enabled ? "تفعيل" : "تعطيل"} ${selected.length} أوامر؟`)) return;
+    let changed = 0;
+    for (const command of selected) {
+      try {
+        const r = await api(`api/guild/${state.guild.id}/commands/toggle`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
+          body: JSON.stringify({ command_name: command.command_name, enabled, allowed_roles: [...commandRoles(command)] }),
+        });
+        const data = await r.json();
+        if (r.ok && data.command) {
+          Object.assign(command, data.command);
+          changed++;
+        }
+      } catch (error) {
+        if (error.message === "unauth") return;
+      }
+    }
+    state.selectedCommandIds = [];
+    pulse();
+    toast(`تم تحديث ${changed} من ${selected.length} أوامر`, changed === selected.length ? "success" : "warn", 2500);
+    renderPage();
+  }
+  function commandPolicyMatrix() {
+    const roles = (state.commandStudio.roles || []).slice(0, 6);
+    const commands = commandListForWorkspace().slice(0, 30);
+    const table = el("div", { class: "policy-matrix", role: "table" });
+    const head = el("div", { class: "policy-matrix-row matrix-head", role: "row" },
+      el("span", { role: "columnheader", text: "الأمر" }),
+      ...roles.map((role) => el("span", { role: "columnheader", text: `@${role.name}` })),
+    );
+    table.append(head);
+    if (!commands.length) {
+      table.append(el("div", { class: "empty studio-empty", text: "لا توجد بيانات كافية لبناء مصفوفة السياسات" }));
+      return table;
+    }
+    commands.forEach((command) => {
+      const allowed = commandRoles(command);
+      table.append(el("div", { class: "policy-matrix-row", role: "row" },
+        el("button", { class: "matrix-command", type: "button", text: `/${command.command_name}`, onClick: () => openCommandDetail(command) }),
+        ...roles.map((role) => el("button", {
+          class: `matrix-cell ${allowed.has(String(role.id)) ? "allowed" : ""}`,
+          type: "button",
+          title: allowed.has(String(role.id)) ? "مسموح" : "غير مسموح",
+          text: allowed.has(String(role.id)) ? "●" : "—",
+          onClick: () => openCommandDetail(command),
+        })),
+      ));
+    });
+    return table;
+  }
   function insertVariable(textarea, value) {
     const start = textarea.selectionStart ?? textarea.value.length;
     const end = textarea.selectionEnd ?? start;
@@ -1577,6 +1747,8 @@
     form.elements.response.value = rule?.response || "";
     form.elements.cooldown_seconds.value = rule?.cooldown_seconds ?? 5;
     form.elements.channel_id.value = rule?.channel_id || "";
+    form.elements.trigger.dispatchEvent(new Event("input", { bubbles: true }));
+    form.elements.response.dispatchEvent(new Event("input", { bubbles: true }));
     form.querySelectorAll("[data-match-type]").forEach((button) => {
       button.classList.toggle("active", button.dataset.matchType === (rule?.match_type || "exact"));
     });
@@ -2117,6 +2289,11 @@
         el("button", { class: "btn ghost", type: "button", text: "السجل", onClick: () => openTicketTranscript(ticket) }),
       ),
     )));
+     const serverEmojis = [
+       ...(Array.isArray(state.meta?.emojis) ? state.meta.emojis : []),
+       ...(Array.isArray(state.meta?.guild_emojis) ? state.meta.guild_emojis : []),
+       ...(Array.isArray(state.guild?.emojis) ? state.guild.emojis : []),
+     ];
      const cannedForm = el("form", { class: "canned-form" },
        el("div", { class: "canned-form-heading" },
          el("div", {}, el("span", { class: "eyebrow", text: "REPLY KIT" }), el("h4", { text: "رد سريع للموظفين" })),
@@ -2156,6 +2333,28 @@
                textarea.setSelectionRange(start + token.length, start + token.length);
              },
            }),
+         ),
+       ),
+       el("div", { class: "server-emoji-picker" },
+         el("div", { class: "server-emoji-heading" },
+           el("span", { class: "eyebrow", text: "SERVER EMOJI" }),
+           el("small", { text: serverEmojis.length ? "اختر رمزاً لإدراجه في الرد" : "لا توجد رموز سيرفر مقدمة من الخادم" }),
+         ),
+         el("div", { class: "server-emoji-list" },
+           serverEmojis.length
+             ? serverEmojis.slice(0, 40).map((emoji) => {
+                 const token = emoji.token || `<:${emoji.name || "emoji"}:${emoji.id || ""}>`;
+                 const image = emoji.url || emoji.image || emoji.icon_url;
+                 const button = el("button", { class: "server-emoji-token", type: "button", title: `إدراج ${token}`, "aria-label": `إدراج ${token}` });
+                 if (image) {
+                   const imageNode = el("img", { src: image, alt: emoji.name || "emoji" });
+                   imageNode.onerror = () => { imageNode.remove(); button.append(el("span", { text: emoji.name || token })); };
+                   button.append(imageNode);
+                 } else button.append(el("span", { text: emoji.name || token }));
+                 button.onclick = () => insertVariable(cannedForm.elements.content, token);
+                 return button;
+               })
+             : [el("span", { class: "empty-row", text: "سيظهر هنا ما يرسله Discord من رموز السيرفر." })],
          ),
        ),
        el("label", { class: "canned-content-field" }, "نص الرد",
@@ -2242,6 +2441,41 @@
       event.preventDefault();
       saveCommandPrefix(prefixInput, prefixFeedback);
     };
+    const prefixExamples = el("div", { class: "prefix-examples" });
+    const renderPrefixExamples = () => {
+      const prefix = prefixInput.value.trim() || "!";
+      prefixExamples.replaceChildren(
+        el("span", { class: "eyebrow", text: "LIVE EXAMPLES" }),
+        el("code", { text: `${prefix}help` }),
+        el("code", { text: `${prefix}ticket status` }),
+        el("code", { text: `${prefix}rules` }),
+      );
+    };
+    prefixInput.oninput = renderPrefixExamples;
+    renderPrefixExamples();
+    const commandTabs = el("nav", { class: "command-tabs", "aria-label": "أقسام مركز الأوامر" });
+    [
+      ["commands", "الأوامر", "command-panel"],
+      ["policy", "مصفوفة السياسات", "policy-panel"],
+      ["responders", "الردود التلقائية", "auto-responder-panel"],
+      ["audit", "النشاط والتدقيق", "command-audit-panel"],
+    ].forEach(([key, label, target]) => commandTabs.append(el("button", {
+      class: `command-tab ${state.commandTab === key ? "active" : ""}`,
+      type: "button",
+      "aria-selected": String(state.commandTab === key),
+      text: label,
+      onClick: () => {
+        state.commandTab = key;
+        document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        commandTabs.querySelectorAll(".command-tab").forEach((item) => item.classList.toggle("active", item.textContent === label));
+      },
+    })));
+    const commandMetrics = el("div", { class: "command-metrics" },
+      el("article", { class: "command-metric accent-blue" }, el("small", { text: "إجمالي الأوامر" }), el("strong", { text: String(studio.commands.length) }), el("span", { text: "مسجلة في البوت" })),
+      el("article", { class: "command-metric accent-green" }, el("small", { text: "متاحة الآن" }), el("strong", { text: String(studio.commands.filter((command) => command.enabled !== false).length) }), el("span", { text: "أمر مفعّل" })),
+      el("article", { class: "command-metric accent-amber" }, el("small", { text: "تحتاج مراجعة" }), el("strong", { text: String(studio.commands.filter((command) => commandPermissionWarnings(command).length).length) }), el("span", { text: "تحذير صلاحيات" })),
+      el("article", { class: "command-metric accent-purple" }, el("small", { text: "ردود تلقائية" }), el("strong", { text: String(state.autoResponses.length) }), el("span", { text: "قاعدة نشطة" })),
+    );
     const search = el("input", {
       class: "studio-search",
       type: "search",
@@ -2254,15 +2488,47 @@
       const rows = $("#command-rows");
       if (rows) rows.replaceWith(commandRows());
     };
+    const cogChoices = [...new Set(studio.commands.map((command) => command.cog || "Commands"))].sort();
+    const filterSelect = (label, value, options, key) => {
+      const select = el("select", { class: "studio-input command-filter", "aria-label": label },
+        options.map(([optionValue, optionLabel]) => el("option", { value: optionValue, text: optionLabel })),
+      );
+      select.value = value;
+      select.onchange = () => {
+        state[key] = select.value;
+        renderPage();
+      };
+      return select;
+    };
+    const filterBar = el("div", { class: "command-filter-bar" },
+      filterSelect("تصفية حسب Cog", state.commandCogFilter, [["all", "كل الـ Cogs"], ...cogChoices.map((cog) => [cog, cog])], "commandCogFilter"),
+      filterSelect("تصفية حسب الحالة", state.commandStatusFilter, [["all", "كل الحالات"], ["enabled", "مفعّلة"], ["disabled", "معطّلة"], ["warning", "تحذير صلاحيات"]], "commandStatusFilter"),
+      filterSelect("تصفية حسب الرتبة", state.commandRoleFilter, [["all", "كل الرتب"], ...(studio.roles || []).map((role) => [String(role.id), `@${role.name}`])], "commandRoleFilter"),
+    );
+    const bulkBar = el("div", { class: "command-bulk-bar" },
+      el("label", { class: "bulk-select-all" },
+        el("input", { type: "checkbox", checked: commandListForWorkspace().length > 0 && commandListForWorkspace().every((command) => state.selectedCommandIds.includes(String(command.command_name))), onChange: (event) => {
+          const ids = commandListForWorkspace().map((command) => String(command.command_name));
+          state.selectedCommandIds = event.target.checked ? [...new Set([...state.selectedCommandIds, ...ids])] : state.selectedCommandIds.filter((id) => !ids.includes(id));
+          renderPage();
+        } }),
+        el("span", { text: `${state.selectedCommandIds.length} محدد` }),
+      ),
+      el("button", { class: "btn ghost", type: "button", disabled: !state.selectedCommandIds.length, text: "تفعيل المحدد", onClick: () => bulkUpdateCommands(true) }),
+      el("button", { class: "btn ghost danger-outline", type: "button", disabled: !state.selectedCommandIds.length, text: "تعطيل المحدد", onClick: () => bulkUpdateCommands(false) }),
+    );
     const commandPanel = card("مصفوفة صلاحيات الأوامر",
       el("div", { class: "command-panel" },
         el("div", { class: "panel-intro" },
           el("p", { text: "تحكم في الأوامر حسب الـ Cog واربط كل أمر بالرتب المسموحة. اترك الرتب فارغة للسماح للجميع." }),
           search,
         ),
+        filterBar,
+        bulkBar,
         commandRows(),
       ),
     );
+    commandPanel.id = "command-panel";
     const form = el("form", { id: "auto-responder-form", class: "auto-form" },
       el("div", { class: "auto-form-heading" },
         el("div", { class: "eyebrow", text: "TRIGGER ENGINE" }),
@@ -2316,6 +2582,27 @@
         el("button", { class: "btn ghost", type: "button", text: "مسح", onClick: () => setRuleForm() }),
       ),
     );
+    const autoPreview = el("section", { class: "auto-live-preview" },
+      el("div", { class: "section-heading compact" }, el("div", {}, el("div", { class: "eyebrow", text: "LIVE PREVIEW" }), el("h3", { text: "معاينة الرد" }))),
+      el("div", { class: "auto-preview-message", text: "اكتب المشغل والرد لرؤية المعاينة هنا." }),
+      el("button", { class: "btn ghost auto-test-button", type: "button", text: "اختبار محلي", onClick: () => {
+        const trigger = form.elements.trigger.value.trim() || "المشغل";
+        const response = form.elements.response.value.trim() || "لا يوجد رد بعد";
+        toast(`اختبار «${trigger}»: ${response.slice(0, 90)}`, "info", 3200);
+      } }),
+    );
+    form.append(autoPreview);
+    const updateAutoPreview = () => {
+      const trigger = form.elements.trigger.value.trim() || "المشغل";
+      const response = form.elements.response.value.trim() || "اكتب نص الرد هنا…";
+      autoPreview.querySelector(".auto-preview-message").replaceChildren(
+        el("span", { class: "preview-trigger", text: trigger }),
+        el("span", { text: response }),
+      );
+    };
+    form.elements.trigger.oninput = updateAutoPreview;
+    form.elements.response.oninput = updateAutoPreview;
+    updateAutoPreview();
     form.elements.cooldown_seconds.oninput = () => {
       form.querySelector(".range-output").textContent = `${form.elements.cooldown_seconds.value}s`;
     };
@@ -2345,15 +2632,47 @@
         cards.append(cardNode);
       });
     }
+    const policyPanel = card("Policy Matrix / مصفوفة الوصول", el("div", { class: "policy-panel-body" },
+      el("p", { class: "hint", text: "عرض سريع لعلاقة الأوامر بالرتب المسموحة. افتح أي أمر لتعديل السياسة من التفاصيل." }),
+      commandPolicyMatrix(),
+    ));
+    policyPanel.id = "policy-panel";
+    const auditEntries = [
+      ...(state.incidents || []).map((item) => ({
+        title: item.action_type || item.action || item.type || "حدث أمني",
+        detail: item.culprit_name || item.reason || item.mitigation_taken || "سجل وارد من محرك الحماية",
+        at: item.timestamp,
+      })),
+      ...(studio.commands || []).filter((command) => command.last_used_at).map((command) => ({
+        title: `/${command.command_name}`,
+        detail: `آخر استخدام · ${command.cog || "Commands"}`,
+        at: command.last_used_at,
+      })),
+    ].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0)).slice(0, 8);
+    const auditPanel = card("Activity / سجل النشاط والتدقيق", el("div", { class: "command-audit-panel-body" },
+      auditEntries.length
+        ? auditEntries.map((entry, index) => el("div", { class: "audit-row" },
+            el("span", { class: "audit-marker" }),
+            el("div", {}, el("strong", { text: entry.title }), el("small", { text: `${entry.detail} · ${entry.at ? new Date(entry.at).toLocaleString("ar") : "وقت غير متاح" }` })),
+          ))
+        : [el("div", { class: "empty studio-empty", text: "لا توجد أحداث تدقيق مقدمة من الخادم بعد" })],
+    ));
+    auditPanel.id = "command-audit-panel";
+    const autoCard = card("Visual Auto-Responder Studio", form);
+    autoCard.id = "auto-responder-panel";
     return el("section", { id: "view-commands", class: "commands-view" },
       el("div", { class: "studio-hero commands-hero" },
         el("div", { class: "eyebrow", text: `${state.guild.name} / COMMANDS` }),
         el("h2", { text: "استوديو الأوامر والاختصارات" }),
         el("p", { text: "اضبط الوصول، بدّل prefix فورياً، وابنِ ردوداً تلقائية بواجهة AMOLED سريعة وواضحة." }),
       ),
+      commandMetrics,
+      commandTabs,
       prefixForm,
+      prefixExamples,
       commandPanel,
-      card("Visual Auto-Responder Studio", form),
+      policyPanel,
+      autoCard,
       el("section", { class: "active-trigger-section" },
         el("div", { class: "section-heading" },
           el("div", {}, el("div", { class: "eyebrow", text: "LIVE REGISTRY" }), el("h3", { text: "Active Triggers" })),
@@ -2361,6 +2680,7 @@
         ),
         cards,
       ),
+      auditPanel,
     );
   }
   function overviewMetric(label, value, hint, tone, view) {
@@ -2957,6 +3277,12 @@
         roles: commands.roles || meta.roles || [],
         channels: commands.channels || meta.channels || [],
       };
+      state.selectedCommandIds = [];
+      state.commandSearch = "";
+      state.commandCogFilter = "all";
+      state.commandStatusFilter = "all";
+      state.commandRoleFilter = "all";
+      state.commandDetail = null;
       state.autoResponses = autoResponses.rules || [];
       state.tickets = {
         active: activeTickets.tickets || [],

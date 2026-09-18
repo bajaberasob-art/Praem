@@ -2482,6 +2482,64 @@ async def get_recent_warnings(guild_id: int, limit: int = 50) -> List[Dict[str, 
             return [dict(row) for row in await cur.fetchall()]
 
 
+async def get_dashboard_stats(
+    guild_id: int,
+    *,
+    member_count: int | None = None,
+    latency_series: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return the shared dashboard snapshot used by REST and live charts."""
+    guild_id = int(guild_id)
+    now = time.monotonic()
+    cached = _stats_cache.get(guild_id)
+    if cached and now - cached[0] < 5:
+        snapshot = dict(cached[1])
+        snapshot["series"] = list(latency_series or snapshot.get("series", []))
+        if member_count is not None:
+            snapshot["guild"]["members"] = int(member_count)
+        return snapshot
+
+    async with connect(aiosqlite.Row) as db:
+        queries = {
+            "tickets_active": (
+                "SELECT COUNT(*) AS value FROM tickets "
+                "WHERE guild_id = ? AND status NOT IN ('closed', 'archived')"
+            ),
+            "tickets_archive": (
+                "SELECT COUNT(*) AS value FROM tickets "
+                "WHERE guild_id = ? AND status IN ('closed', 'archived')"
+            ),
+            "infractions": "SELECT COUNT(*) AS value FROM warnings WHERE guild_id = ?",
+            "auto_responses": (
+                "SELECT COUNT(*) AS value FROM guild_auto_responders "
+                "WHERE guild_id = ? AND enabled = 1"
+            ),
+            "commands_enabled": (
+                "SELECT COUNT(*) AS value FROM guild_command_controls "
+                "WHERE guild_id = ? AND enabled = 1"
+            ),
+            "economy_accounts": (
+                "SELECT COUNT(*) AS value FROM users WHERE guild_id = ?"
+            ),
+        }
+        counts: dict[str, int] = {}
+        for key, query in queries.items():
+            async with db.execute(query, (guild_id,)) as cursor:
+                row = await cursor.fetchone()
+            counts[key] = int(row["value"]) if row else 0
+
+    snapshot = {
+        "guild": {"id": str(guild_id), "members": member_count},
+        "counts": counts,
+        "series": list(latency_series or []),
+        "updated_at": _utc_now(),
+    }
+    _stats_cache[guild_id] = (now, snapshot)
+    while len(_stats_cache) > 256:
+        _stats_cache.popitem(last=False)
+    return snapshot
+
+
 async def get_warning(warning_id: int) -> Optional[Dict[str, Any]]:
     async with connect(aiosqlite.Row) as db:
         async with db.execute(

@@ -3240,7 +3240,7 @@
     sessionStorage.setItem("dashboard-guild", id);
     state.meta = state.baseline = state.draft = null;
     state.onboarding = null;
-    state.commandStudio = { commands: [], roles: [], channels: [] };
+    state.commandStudio = { commands: [], roles: [], channels: [], shortcuts: [] };
     state.autoResponses = [];
     state.commandSearch = "";
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };
@@ -3270,7 +3270,7 @@
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
         or.json(),
-        cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [] }),
+        cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [], shortcuts: [] }),
         ar.ok ? ar.json() : Promise.resolve({ rules: [], channels: [] }),
         ta.ok ? ta.json() : Promise.resolve({ tickets: [] }),
         tv.ok ? tv.json() : Promise.resolve({ tickets: [] }),
@@ -3283,6 +3283,7 @@
         commands: commands.commands || [],
         roles: commands.roles || meta.roles || [],
         channels: commands.channels || meta.channels || [],
+        shortcuts: commands.shortcuts || [],
       };
       state.selectedCommandIds = [];
       state.commandSearch = "";

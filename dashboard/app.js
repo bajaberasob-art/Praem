@@ -23,6 +23,8 @@
     guild: null,
     meta: null,
     incidents: [],
+    actions: [],
+    stats: null,
     whitelist: [],
     lockdown: false,
     incidentTimer: null,
@@ -67,6 +69,7 @@
     source: null,
     newer: false,
     activeView: sessionStorage.getItem("dashboard-view") || "overview",
+    drawerOpen: false,
   };
   const keys = [
     "prefix",
@@ -244,6 +247,17 @@
       inr = el("div", { class: "topbar-inner" });
     inr.append(
       el(
+        "button",
+        {
+          class: "menu-toggle",
+          type: "button",
+          "aria-label": "فتح قائمة الأقسام",
+          "aria-expanded": String(state.drawerOpen),
+          onClick: () => toggleDrawer(),
+        },
+        el("span", { text: "☰" }),
+      ),
+      el(
         "div",
         { class: "brand" },
         el("strong", { text: "PRIME | TEAM" }),
@@ -306,11 +320,17 @@
     commands: { label: "الأوامر والأتمتة", icon: "⌘", hint: "Commands" },
     onboarding: { label: "الترحيب والأدوار", icon: "✦", hint: "Onboarding" },
     security: { label: "الحماية", icon: "◈", hint: "Security" },
+    moderation: { label: "المراقبة", icon: "⚔", hint: "Moderation" },
+    economy: { label: "الاقتصاد", icon: "◌", hint: "Economy" },
+    community: { label: "المجتمع", icon: "◎", hint: "Community" },
+    ai: { label: "الذكاء الاصطناعي", icon: "✧", hint: "AI Tools" },
     settings: { label: "الإعدادات", icon: "⚙", hint: "Configuration" },
+    system: { label: "النظام", icon: "⌁", hint: "Runtime" },
   };
   function navigateView(view) {
     if (!viewLabels[view]) return;
     state.activeView = view;
+    state.drawerOpen = false;
     sessionStorage.setItem("dashboard-view", view);
     document.querySelectorAll(".mobile-more-menu").forEach((menu) => {
       menu.hidden = true;
@@ -322,6 +342,14 @@
     });
     renderPage();
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function toggleDrawer(force = null) {
+    state.drawerOpen = force == null ? !state.drawerOpen : Boolean(force);
+    $(".workspace-nav")?.classList.toggle("drawer-open", state.drawerOpen);
+    $(".drawer-scrim")?.classList.toggle("show", state.drawerOpen);
+    document.body.classList.toggle("drawer-visible", state.drawerOpen);
+    $(".menu-toggle")?.setAttribute("aria-expanded", String(state.drawerOpen));
+    navigator.vibrate?.(12);
   }
   function navButton(view) {
     const meta = viewLabels[view];
@@ -341,7 +369,7 @@
   function workspaceNav() {
     return el(
       "aside",
-      { class: "workspace-nav", "aria-label": "التنقل الرئيسي" },
+      { class: `workspace-nav ${state.drawerOpen ? "drawer-open" : ""}`, "aria-label": "التنقل الرئيسي" },
       el(
         "div",
         { class: "workspace-nav-head" },
@@ -369,12 +397,17 @@
       { class: "mobile-more-menu", hidden: true },
       navButton("onboarding"),
       navButton("security"),
+      navButton("moderation"),
+      navButton("economy"),
+      navButton("community"),
+      navButton("ai"),
       navButton("settings"),
+      navButton("system"),
     );
     const moreButton = el(
       "button",
       {
-        class: `nav-item ${["onboarding", "security", "settings"].includes(state.activeView) ? "active" : ""}`,
+         class: `nav-item ${["onboarding", "security", "moderation", "economy", "community", "ai", "settings", "system"].includes(state.activeView) ? "active" : ""}`,
         type: "button",
         "aria-expanded": "false",
         onClick: () => {
@@ -423,6 +456,12 @@
     app.replaceChildren(
       header(),
       el("div", { class: "workspace-layout" }, workspaceNav(), main),
+      el("button", {
+        class: "drawer-scrim",
+        type: "button",
+        "aria-label": "إغلاق قائمة الأقسام",
+        onClick: () => toggleDrawer(false),
+      }),
       mobileNav(),
     );
     updatePing(state.online ? "online" : "offline");

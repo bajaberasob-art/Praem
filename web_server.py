@@ -31,6 +31,7 @@ bot_ref: discord.Client = None
 C_ID = os.getenv("CLIENT_ID")
 C_SEC = os.getenv("CLIENT_SECRET")
 R_URI = os.getenv("REDIRECT_URI")
+DASHBOARD_BASE_PATH = os.getenv("DASHBOARD_BASE_PATH", "/").rstrip("/") + "/"
 DISCORD_API = "https://discord.com/api/v10"
 ADMIN_BIT = 0x8
 SESSIONS: dict[str, dict] = {}
@@ -189,7 +190,7 @@ async def callback(req):
     SESSIONS.pop(req.cookies.get("bot_session"), None)
     sid = secrets.token_urlsafe(32)
     SESSIONS[sid] = user_session
-    res = web.HTTPFound('/')
+    res = web.HTTPFound(DASHBOARD_BASE_PATH)
     res.del_cookie("oauth_state", path="/")
     res.set_cookie("bot_session", sid, max_age=SESSION_TTL, httponly=True, secure=True, samesite="Lax", path="/")
     return res
@@ -198,7 +199,7 @@ async def callback(req):
 async def logout(req):
     SESSIONS.pop(req.cookies.get("bot_session"), None)
     STATES.pop(req.cookies.get("oauth_state"), None)
-    res = web.HTTPFound('/')
+    res = web.HTTPFound(DASHBOARD_BASE_PATH)
     res.del_cookie("bot_session", path="/")
     res.del_cookie("oauth_state", path="/")
     return res

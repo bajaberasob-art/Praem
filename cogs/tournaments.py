@@ -70,11 +70,15 @@ class TournamentEntryView(discord.ui.View):
                 ephemeral=True,
             )
         self.stop()
-        players = [
-            itx.guild.get_member(player_id)
-            for player_id in tournament["entries"]
-        ]
-        players = [player for player in players if player is not None]
+        players = []
+        for player_id in tournament["entries"]:
+            player = itx.guild.get_member(player_id)
+            if player is None:
+                try:
+                    player = await itx.guild.fetch_member(player_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    continue
+            players.append(player)
         random.shuffle(players)
         matches = []
         for index in range(0, len(players), 2):

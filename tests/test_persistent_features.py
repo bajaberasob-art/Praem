@@ -2,6 +2,8 @@ import os
 import unittest
 
 import database
+from cogs.economy import LiveGiveaway
+from cogs.tournaments import TournamentEntryView
 
 
 class PersistentFeatureTests(unittest.IsolatedAsyncioTestCase):
@@ -79,3 +81,15 @@ class PersistentFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await database.cancel_reminder(700, 55, reminder_id))
         self.assertEqual(await database.get_user_reminders(700, 55), [])
         self.assertFalse(await database.cancel_reminder(700, 55, reminder_id))
+
+    async def test_interactive_views_have_restart_safe_unique_ids(self):
+        giveaway = LiveGiveaway("جائزة", 41)
+        tournament = TournamentEntryView(42, "بطولة", 8)
+        self.assertEqual(
+            [item.custom_id for item in giveaway.children],
+            ["giveaway:enter:41"],
+        )
+        self.assertEqual(
+            [item.custom_id for item in tournament.children],
+            ["tournament:join:42", "tournament:start:42"],
+        )

@@ -1087,6 +1087,7 @@ async def cancel_tournament(tournament_id: int) -> bool:
 
 async def add_tournament_entry(tournament_id: int, user_id: int) -> tuple[bool, int, int]:
     async with connect(aiosqlite.Row) as db:
+        await db.execute("BEGIN IMMEDIATE")
         async with db.execute(
             "SELECT max_players, status FROM tournaments WHERE id = ?",
             (int(tournament_id),),
@@ -1141,6 +1142,7 @@ async def get_tournament_entries(tournament_id: int) -> list[int]:
 
 async def start_tournament(tournament_id: int) -> Optional[Dict[str, Any]]:
     async with connect(aiosqlite.Row) as db:
+        await db.execute("BEGIN IMMEDIATE")
         async with db.execute(
             "SELECT * FROM tournaments WHERE id = ? AND status = 'open'",
             (int(tournament_id),),

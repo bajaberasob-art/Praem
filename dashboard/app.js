@@ -1948,28 +1948,38 @@
     state.commandStudio = { commands: [], roles: [], channels: [] };
     state.autoResponses = [];
     state.commandSearch = "";
+    state.tickets = { active: [], archive: [], kpis: [], canned: [] };
+    state.ticketSearch = "";
     state.selfRoleBuilder = null;
     state.fields = {};
     renderShell();
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or, cr, ar] = await Promise.all([
+      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc] = await Promise.all([
         api(`api/guild/${id}/meta`),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
         api(`api/guild/${id}/onboarding`),
         api(`api/guild/${id}/commands`),
         api(`api/guild/${id}/auto-responses`),
+        api(`api/guild/${id}/tickets/active`),
+        api(`api/guild/${id}/tickets/archive`),
+        api(`api/guild/${id}/tickets/kpis`),
+        api(`api/guild/${id}/tickets/canned`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding, commands, autoResponses] = await Promise.all([
+      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned] = await Promise.all([
         mr.json(),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
         or.json(),
         cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [] }),
         ar.ok ? ar.json() : Promise.resolve({ rules: [], channels: [] }),
+        ta.ok ? ta.json() : Promise.resolve({ tickets: [] }),
+        tv.ok ? tv.json() : Promise.resolve({ tickets: [] }),
+        tk.ok ? tk.json() : Promise.resolve({ kpis: [] }),
+        tc.ok ? tc.json() : Promise.resolve({ responses: [] }),
       ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
@@ -1979,6 +1989,12 @@
         channels: commands.channels || meta.channels || [],
       };
       state.autoResponses = autoResponses.rules || [];
+      state.tickets = {
+        active: activeTickets.tickets || [],
+        archive: archiveTickets.tickets || [],
+        kpis: ticketKpis.kpis || [],
+        canned: canned.responses || [],
+      };
       state.incidents = incidents.incidents || [];
       state.whitelist = incidents.whitelist || [];
       state.lockdown = Boolean(incidents.locked);

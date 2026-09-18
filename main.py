@@ -70,12 +70,12 @@ class EnterpriseBot(commands.Bot):
         self.sync_guild = configured_sync_guild()
 
     async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):
-        result = await super().add_cog(
-            cog,
-            override=override,
-            guild=guild,
-            guilds=guilds,
-        )
+        options = {"override": override}
+        if guild is not None:
+            options["guild"] = guild
+        if guilds is not None:
+            options["guilds"] = guilds
+        result = await super().add_cog(cog, **options)
         self.install_interaction_guards()
         return result
 

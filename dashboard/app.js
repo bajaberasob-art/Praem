@@ -2620,6 +2620,49 @@
       el("button", { class: "btn ghost", type: "button", disabled: !state.selectedCommandIds.length, text: "تفعيل المحدد", onClick: () => bulkUpdateCommands(true) }),
       el("button", { class: "btn ghost danger-outline", type: "button", disabled: !state.selectedCommandIds.length, text: "تعطيل المحدد", onClick: () => bulkUpdateCommands(false) }),
     );
+    const shortcutCommand = studio.commands.find((command) => String(command.command_name) === String(state.shortcutCommandId))
+      || studio.commands[0];
+    if (shortcutCommand && !state.shortcutCommandId) state.shortcutCommandId = shortcutCommand.command_name;
+    const shortcutValue = state.shortcutInputText != null
+      ? state.shortcutInputText
+      : (shortcutCommand ? commandShortcuts(shortcutCommand).map((item) => item.trigger).join("، ") : "");
+    const shortcutCommandSelect = el("select", { class: "studio-input command-shortcut-command", "aria-label": "اختر الأمر لإدارة اختصاراته" },
+      studio.commands.map((command) => el("option", {
+        value: command.command_name,
+        text: `/${command.command_name} · ${command.cog || "Commands"}`,
+      })),
+    );
+    if (shortcutCommand) shortcutCommandSelect.value = shortcutCommand.command_name;
+    shortcutCommandSelect.onchange = () => {
+      state.shortcutCommandId = shortcutCommandSelect.value;
+      const next = studio.commands.find((command) => String(command.command_name) === String(state.shortcutCommandId));
+      state.shortcutInputText = next ? commandShortcuts(next).map((item) => item.trigger).join("، ") : "";
+      renderPage();
+    };
+    const shortcutInput = el("textarea", {
+      class: "studio-textarea command-shortcut-input",
+      rows: "2",
+      placeholder: "مثال: عيب، تحذير، انذار",
+      "aria-label": "اختصارات الأمر",
+      text: shortcutValue,
+    });
+    shortcutInput.oninput = () => { state.shortcutInputText = shortcutInput.value; };
+    const shortcutWorkbench = el("section", { class: "command-shortcut-workbench" },
+      el("div", { class: "command-shortcut-workbench-head" },
+        el("div", {},
+          el("div", { class: "eyebrow", text: "COMMAND ALIASES" }),
+          el("h3", { text: "اختصارات الأوامر" }),
+          el("p", { text: "اختر أمراً واكتب أكثر من اسم بديل له. ستظهر الاختصارات في البطاقة وتُحفظ دفعة واحدة." }),
+        ),
+        el("span", { class: "command-shortcut-count", text: shortcutCommand ? `${commandShortcuts(shortcutCommand).length}/20` : "0/20" }),
+      ),
+      el("div", { class: "command-shortcut-editor" },
+        shortcutCommandSelect,
+        shortcutInput,
+        el("button", { class: "btn primary command-shortcut-save", type: "button", text: "حفظ الاختصارات", disabled: !shortcutCommand, onClick: () => shortcutCommand && saveCommandShortcuts(shortcutCommand, shortcutInput, { reopen: false }) }),
+      ),
+      el("small", { class: "command-shortcut-hint", text: "مثال: اختر /warn ثم اكتب: عيب، تحذير، انذار. اكتب كل الاختصارات بفواصل أو أسطر." }),
+    );
     const commandPanel = card("مصفوفة صلاحيات الأوامر",
       el("div", { class: "command-panel" },
         el("div", { class: "panel-intro" },
@@ -2773,6 +2816,7 @@
       commandTabs,
       prefixForm,
       prefixExamples,
+      shortcutWorkbench,
       commandPanel,
       policyPanel,
       autoCard,

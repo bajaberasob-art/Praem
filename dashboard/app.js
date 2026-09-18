@@ -1937,6 +1937,15 @@
       roles.onchange = () => {
         state.ticketCategories[index].support_role_ids = [...roles.selectedOptions].map((option) => option.value);
       };
+      const seniorRoles = el("select", { class: "ticket-role-select ticket-senior-role-select", multiple: "multiple", "aria-label": `رتب التصعيد ${category.label}` });
+      (state.commandStudio.roles || []).forEach((role) => {
+        const option = el("option", { value: role.id }, role.name);
+        option.selected = (category.senior_role_ids || []).map(String).includes(String(role.id));
+        seniorRoles.append(option);
+      });
+      seniorRoles.onchange = () => {
+        state.ticketCategories[index].senior_role_ids = [...seniorRoles.selectedOptions].map((option) => option.value);
+      };
       const fields = el("div", { class: "ticket-intake-editor" });
       const renderFields = () => {
         fields.replaceChildren();
@@ -1968,11 +1977,32 @@
         }
       };
       category.intake_fields = Array.isArray(category.intake_fields) ? category.intake_fields : [];
+      category.support_role_ids = Array.isArray(category.support_role_ids) ? category.support_role_ids : [];
+      category.senior_role_ids = Array.isArray(category.senior_role_ids) ? category.senior_role_ids : [];
       renderFields();
       wrap.append(el("div", { class: "ticket-category-row" },
-        el("div", { class: "ticket-category-head" }, el("span", { class: "ticket-category-emoji", text: category.emoji }), emoji),
-        label,
-        roles,
+        el("div", { class: "ticket-category-head" },
+          el("span", { class: "ticket-category-index", text: String(index + 1).padStart(2, "0") }),
+          el("span", { class: "ticket-category-emoji", text: category.emoji }),
+          emoji,
+          el("button", {
+            class: "icon-action danger ticket-remove-category",
+            type: "button",
+            text: "×",
+            title: state.ticketCategories.length > 1 ? "حذف القسم" : "يجب إبقاء قسم واحد على الأقل",
+            disabled: state.ticketCategories.length <= 1,
+            onClick: () => {
+              if (state.ticketCategories.length <= 1) return toast("يجب إبقاء قسم دعم واحد على الأقل");
+              if (!confirm(`حذف قسم «${category.label || "بدون اسم"}»؟`)) return;
+              state.ticketCategories.splice(index, 1);
+              renderPage();
+            },
+          }),
+        ),
+        el("label", { class: "ticket-editor-label" }, "اسم القسم", label),
+        el("label", { class: "ticket-editor-label" }, "فريق الدعم", roles),
+        el("label", { class: "ticket-editor-label" }, "رتب التصعيد", seniorRoles),
+        el("small", { class: "ticket-field-caption", text: "الرتب المحددة تمنح صلاحية متابعة هذا القسم والتصعيد الإداري." }),
         el("small", { class: "ticket-field-caption", text: "حقول نموذج الفتح (اختيارية، حتى 3)" }),
         fields,
       ));

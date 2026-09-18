@@ -259,6 +259,14 @@ class Engagement(commands.Cog):
                 "leave_channel_id": values.get("leave_channel_id"),
                 "welcome_message": values.get("welcome_message", ""),
                 "leave_message": values.get("leave_message", ""),
+                "welcome_embed_enabled": bool(values.get("welcome_embed_enabled", False)),
+                "welcome_embed_color": values.get("welcome_embed_color", "#7c3aed"),
+                "welcome_embed_title": values.get("welcome_embed_title", "أهلاً بك في {server} ✨"),
+                "welcome_embed_description": values.get("welcome_embed_description", ""),
+                "welcome_embed_image_url": values.get("welcome_embed_image_url", ""),
+                "welcome_embed_sticker_id": values.get("welcome_embed_sticker_id"),
+                "welcome_embed_footer": values.get("welcome_embed_footer", "PRIME | TEAM • تطوير abood2026"),
+                "welcome_embed_show_avatar": bool(values.get("welcome_embed_show_avatar", True)),
                 "welcome_dm_enabled": bool(values.get("welcome_dm_enabled", False)),
                 "auto_role_id": values.get("auto_role_id"),
                 "member_auto_role_id": values.get("member_auto_role_id"),
@@ -274,6 +282,14 @@ class Engagement(commands.Cog):
                 "leave_channel_id": None,
                 "welcome_message": "",
                 "leave_message": "",
+                "welcome_embed_enabled": False,
+                "welcome_embed_color": "#7c3aed",
+                "welcome_embed_title": "أهلاً بك في {server} ✨",
+                "welcome_embed_description": "",
+                "welcome_embed_image_url": "",
+                "welcome_embed_sticker_id": None,
+                "welcome_embed_footer": "PRIME | TEAM • تطوير abood2026",
+                "welcome_embed_show_avatar": True,
                 "welcome_dm_enabled": False,
                 "auto_role_id": None,
                 "member_auto_role_id": None,
@@ -355,6 +371,68 @@ class Engagement(commands.Cog):
         for key, value in data.items():
             rendered = rendered.replace("{" + key + "}", str(value))
         return rendered
+
+    async def build_welcome_embed(
+        self,
+        guild: discord.Guild,
+        member: Optional[discord.Member] = None,
+        *,
+        config: Optional[dict[str, Any]] = None,
+        inviter: str = "دعوة تجريبية",
+        count: Optional[int] = None,
+        template_data: Optional[dict[str, Any]] = None,
+    ) -> discord.Embed:
+        config = config or await self.engagement_settings(guild.id)
+        member_count = count if count is not None else int(guild.member_count or 0)
+        title = self.render_template(
+            config.get("welcome_embed_title") or "أهلاً بك في {server} ✨",
+            member=member,
+            guild=guild,
+            inviter=inviter,
+            count=member_count,
+            template_data=template_data,
+        )
+        description = self.render_template(
+            config.get("welcome_embed_description")
+            or config.get("welcome_message")
+            or "يا هلا {user} في {server}! أنت العضو رقم {count}.",
+            member=member,
+            guild=guild,
+            inviter=inviter,
+            count=member_count,
+            template_data=template_data,
+        )
+        raw_color = str(config.get("welcome_embed_color") or "#7c3aed").lstrip("#")
+        try:
+            color = discord.Colour(int(raw_color, 16))
+        except (TypeError, ValueError):
+            color = discord.Colour(0x7C3AED)
+        embed = discord.Embed(
+            title=title[:256],
+            description=description[:4096],
+            color=color,
+        )
+        avatar = str(getattr(getattr(member, "display_avatar", None), "url", "") or "")
+        display_name = getattr(member, "display_name", None) or "عضو جديد"
+        if avatar:
+            embed.set_author(name=display_name, icon_url=avatar)
+            if config.get("welcome_embed_show_avatar", True):
+                embed.set_thumbnail(url=avatar)
+        embed.add_field(name="العضو رقم", value=f"#{member_count:,}", inline=True)
+        embed.add_field(name="عدد الأعضاء", value=f"{member_count:,}", inline=True)
+        image_url = str(config.get("welcome_embed_image_url") or "").strip()
+        sticker_id = config.get("welcome_embed_sticker_id")
+        if not image_url and sticker_id:
+            for sticker in getattr(guild, "stickers", ()) or ():
+                if sticker.id == int(sticker_id):
+                    image_url = str(sticker.url)
+                    break
+        if image_url:
+            embed.set_image(url=image_url)
+        footer = str(config.get("welcome_embed_footer") or "").strip()
+        if footer:
+            embed.set_footer(text=footer[:2048])
+        return embed
 
     async def _cache_guild_invites(self, guild: discord.Guild) -> None:
         try:
@@ -557,10 +635,19 @@ class Engagement(commands.Cog):
         )
         channel = self._welcome_channel(mem.guild, config)
         if channel:
-            await channel.send(
-                content,
-                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
-            )
+            allowed_mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
+            if config.get("welcome_embed_enabled"):
+                await channel.send(
+                    embed=await self.build_welcome_embed(
+                        mem.guild,
+                        mem,
+                        config=config,
+                        inviter=inviter,
+                    ),
+                    allowed_mentions=allowed_mentions,
+                )
+            else:
+                await channel.send(content, allowed_mentions=allowed_mentions)
         if config["welcome_dm_enabled"]:
             try:
                 await mem.send(
@@ -614,10 +701,19 @@ class Engagement(commands.Cog):
             count=guild.member_count or 0,
         )
         try:
-            message = await channel.send(
-                content,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            allowed_mentions = discord.AllowedMentions.none()
+            if config.get("welcome_embed_enabled"):
+                message = await channel.send(
+                    embed=await self.build_welcome_embed(
+                        guild,
+                        getattr(guild, "me", None),
+                        config=config,
+                        template_data=template_data,
+                    ),
+                    allowed_mentions=allowed_mentions,
+                )
+            else:
+                message = await channel.send(content, allowed_mentions=allowed_mentions)
         except (discord.Forbidden, discord.HTTPException):
             return {"ok": False, "error": "send_failed"}
         return {"ok": True, "guild_id": guild.id, "channel_id": channel.id, "message_id": message.id}

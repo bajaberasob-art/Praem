@@ -969,8 +969,8 @@ async def api_test_welcome(req):
     if isinstance(raw_channel_id, bool) or not str(raw_channel_id).isdigit():
         return json_error(400, "validation", fields={"target_channel_id": "معرف قناة غير صالح"})
     channel_id = int(raw_channel_id)
-    channel = guild.get_channel(channel_id)
-    if not isinstance(channel, discord.TextChannel):
+    channel = await resolve_text_channel(guild, channel_id)
+    if channel is None:
         return json_error(400, "validation", fields={"target_channel_id": "القناة غير موجودة في هذا السيرفر"})
     template_data = body.get("template_data", {})
     if not isinstance(template_data, dict) or len(template_data) > 8:
@@ -1085,8 +1085,8 @@ async def api_onboarding_test_welcome(req):
     channel_id = body.get("target_channel_id")
     if isinstance(channel_id, bool) or not str(channel_id).isdigit():
         return json_error(400, "validation", fields={"target_channel_id": "معرف قناة غير صالح"})
-    channel = guild.get_channel(int(channel_id))
-    if not isinstance(channel, discord.TextChannel):
+    channel = await resolve_text_channel(guild, int(channel_id))
+    if channel is None:
         return json_error(400, "validation", fields={"target_channel_id": "القناة غير موجودة في هذا السيرفر"})
     template_data = body.get("template_data", {})
     if not isinstance(template_data, dict) or len(template_data) > 8:

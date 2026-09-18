@@ -281,6 +281,21 @@ class Engagement(commands.Cog):
                 "rules_channel_id": None,
             }
 
+    async def resolve_text_channel(self, guild: discord.Guild, channel_id: int):
+        channel = guild.get_channel(int(channel_id))
+        if isinstance(channel, discord.TextChannel):
+            return channel
+        fetch_channels = getattr(guild, "fetch_channels", None)
+        if fetch_channels is None:
+            return None
+        try:
+            for fetched in await fetch_channels():
+                if fetched.id == int(channel_id) and isinstance(fetched, discord.TextChannel):
+                    return fetched
+        except (discord.Forbidden, discord.HTTPException):
+            logger.debug("[ENGAGEMENT_CONFIG] تعذر تحديث قنوات السيرفر %s", guild.id, exc_info=True)
+        return None
+
     async def get_onboarding_snapshot(self, guild_id: int) -> dict[str, Any]:
         snapshot = await get_guild_settings(int(guild_id))
         fields = await self.engagement_settings(guild_id)
@@ -576,7 +591,7 @@ class Engagement(commands.Cog):
         guild = self.bot.get_guild(int(guild_id))
         if guild is None:
             return {"ok": False, "error": "guild_not_found"}
-        channel = guild.get_channel(int(target_channel_id))
+        channel = await self.resolve_text_channel(guild, int(target_channel_id))
         if channel is None or not callable(getattr(channel, "send", None)):
             return {"ok": False, "error": "channel_not_found"}
         config = await self.engagement_settings(guild.id)
@@ -610,7 +625,7 @@ class Engagement(commands.Cog):
         guild = self.bot.get_guild(int(guild_id))
         if guild is None:
             return {"ok": False, "error": "guild_not_found"}
-        channel = guild.get_channel(int(target_channel_id))
+        channel = await self.resolve_text_channel(guild, int(target_channel_id))
         if channel is None or not callable(getattr(channel, "send", None)):
             return {"ok": False, "error": "channel_not_found"}
         if not isinstance(role_specs, list) or not 1 <= len(role_specs) <= 25:

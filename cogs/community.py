@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import html
 import io
 import json
@@ -25,10 +26,15 @@ from database import (
     get_canned_responses,
     save_canned_response,
     delete_canned_response,
+    cancel_reminder,
     record_ticket_response,
     save_ticket_panel,
     save_ticket_rating,
     save_ticket_transcript,
+    complete_reminder,
+    create_reminder,
+    get_due_reminders,
+    get_user_reminders,
 )
 
 
@@ -409,10 +415,12 @@ class Community(commands.Cog):
         self.bot = bot
         self.counters: dict[int, dict[str, int]] = {}
         self.update_counters_task.start()
+        self.reminder_task.start()
         logger.info("Community counter updater initialized.")
 
     def cog_unload(self):
         self.update_counters_task.cancel()
+        self.reminder_task.cancel()
 
     async def deploy_ticket_panel(
         self,
@@ -866,6 +874,42 @@ class Community(commands.Cog):
     async def before_counter(self):
         await self.bot.wait_until_ready()
 
+    @tasks.loop(seconds=10)
+    async def reminder_task(self):
+        """Deliver queued reminders from SQLite so restarts do not lose them."""
+        for item in await get_due_reminders():
+            delivered = False
+            content = (
+                f"🔔 <@{item['user_id']}> تذكيرك المستحق:\n"
+                f"**{item['reminder']}**"
+            )
+            channel = self.bot.get_channel(int(item["channel_id"]))
+            if channel is not None:
+                try:
+                    await channel.send(content)
+                    delivered = True
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.warning(
+                        "[REMINDER] تعذر الإرسال في القناة %s",
+                        item["channel_id"],
+                    )
+            if not delivered:
+                try:
+                    user = self.bot.get_user(int(item["user_id"])) or await self.bot.fetch_user(int(item["user_id"]))
+                    await user.send(f"🔔 تذكيرك المستحق:\n**{item['reminder']}**")
+                    delivered = True
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.warning(
+                        "[REMINDER] تعذر الإرسال الخاص للمستخدم %s",
+                        item["user_id"],
+                    )
+            if delivered:
+                await complete_reminder(int(item["id"]))
+
+    @reminder_task.before_loop
+    async def before_reminder(self):
+        await self.bot.wait_until_ready()
+
     @app_commands.command(
         name="suggest",
         description="إرسال اقتراح وطرحه للتصويت والإدارة",
@@ -958,22 +1002,56 @@ class Community(commands.Cog):
                 "❌ أقل وقت للتذكير هو دقيقة واحدة.",
                 ephemeral=True,
             )
-        await itx.response.send_message(
-            "⏰ تم ضبط المنبه بنجاح! سأقوم بتذكيرك بـ "
-            f"**{reminder}** بعد `{minutes}` دقيقة."
+        due_at = (
+            discord.utils.utcnow() + datetime.timedelta(minutes=minutes)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        reminder_id = await create_reminder(
+            itx.guild.id,
+            itx.user.id,
+            itx.channel.id,
+            reminder,
+            due_at,
         )
-        await asyncio.sleep(minutes * 60)
-        try:
-            await itx.channel.send(
-                f"🔔 {itx.user.mention} **تذكيرك المستحق:** {reminder}"
+        await itx.response.send_message(
+            "⏰ تم حفظ التذكير بنجاح.\n"
+            f"الرقم: `{reminder_id}` | بعد: `{minutes}` دقيقة\n"
+            "سيستمر حتى لو أعيد تشغيل البوت."
+        )
+
+    @app_commands.command(
+        name="reminders",
+        description="عرض تذكيراتك المحفوظة في هذا السيرفر",
+    )
+    async def reminders(self, itx: discord.Interaction):
+        items = await get_user_reminders(itx.guild.id, itx.user.id)
+        if not items:
+            return await itx.response.send_message(
+                "لا توجد لديك تذكيرات معلقة.",
+                ephemeral=True,
             )
-        except discord.HTTPException:
-            try:
-                await itx.user.send(
-                    f"🔔 **تذكيرك المستحق:** {reminder}"
-                )
-            except discord.HTTPException:
-                pass
+        lines = [
+            f"`#{item['id']}` — <t:{int(datetime.datetime.fromisoformat(item['due_at']).replace(tzinfo=datetime.timezone.utc).timestamp())}:R> — {item['reminder']}"
+            for item in items
+        ]
+        await itx.response.send_message(
+            "⏰ **تذكيراتك المعلقة**\n" + "\n".join(lines),
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="reminder_cancel",
+        description="إلغاء تذكير محفوظ بالرقم",
+    )
+    async def reminder_cancel(self, itx: discord.Interaction, reminder_id: int):
+        if await cancel_reminder(itx.guild.id, itx.user.id, reminder_id):
+            return await itx.response.send_message(
+                f"✅ تم إلغاء التذكير `#{reminder_id}`.",
+                ephemeral=True,
+            )
+        await itx.response.send_message(
+            "❌ لم أجد تذكيراً نشطاً بهذا الرقم يخصك.",
+            ephemeral=True,
+        )
 
     @app_commands.command(
         name="setup_counters",
@@ -987,20 +1065,30 @@ class Community(commands.Cog):
     )
     async def setup_counters(self, itx: discord.Interaction):
         guild = itx.guild
-        category = await guild.create_category("📊 إحصائيات السيرفر")
+        category = discord.utils.get(guild.categories, name="📊 إحصائيات السيرفر")
+        if category is None:
+            category = await guild.create_category("📊 إحصائيات السيرفر")
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(connect=False)
         }
-        member_channel = await guild.create_voice_channel(
-            name=f"👥 الأعضاء: {guild.member_count}",
-            category=category,
-            overwrites=overwrites,
-        )
-        boost_channel = await guild.create_voice_channel(
-            name=f"🚀 البوست: {guild.premium_subscription_count}",
-            category=category,
-            overwrites=overwrites,
-        )
+        member_channel = discord.utils.get(category.voice_channels, name__startswith="👥 الأعضاء:")
+        if member_channel is None:
+            member_channel = await guild.create_voice_channel(
+                name=f"👥 الأعضاء: {guild.member_count}",
+                category=category,
+                overwrites=overwrites,
+            )
+        else:
+            await member_channel.edit(name=f"👥 الأعضاء: {guild.member_count}")
+        boost_channel = discord.utils.get(category.voice_channels, name__startswith="🚀 البوست:")
+        if boost_channel is None:
+            boost_channel = await guild.create_voice_channel(
+                name=f"🚀 البوست: {guild.premium_subscription_count}",
+                category=category,
+                overwrites=overwrites,
+            )
+        else:
+            await boost_channel.edit(name=f"🚀 البوست: {guild.premium_subscription_count}")
         self.counters[guild.id] = {
             "members": member_channel.id,
             "boosts": boost_channel.id,

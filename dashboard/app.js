@@ -101,7 +101,7 @@
   const onboardingDirty = () => Object.keys(onboardingChanges()).length > 0;
   // اعتماد نسخة أحدث من الخادم مع الإبقاء على تعديلات المستخدم فقط (لا على القيم القديمة غير المعدّلة)
   function adopt(snapshot, keepLocal = true) {
-    const local = keepLocal ? changes() : {};
+    const local = keepLocal ? { ...changes(), ...onboardingChanges() } : {};
     state.baseline = clone(snapshot.settings);
     state.revision = snapshot.revision;
     state.updated = snapshot.updated_at;
@@ -1222,6 +1222,10 @@
     });
     const d = $(".dock");
     if (d) d.classList.toggle("show", dirty());
+    const onboardingSave = $(".onboarding-save");
+    if (onboardingSave) onboardingSave.disabled = !onboardingDirty() || state.saving || !state.online;
+    const onboardingTest = $(".onboarding-test");
+    if (onboardingTest) onboardingTest.disabled = !state.online || state.saving;
   }
   function renderDock() {
     let d = $(".dock");
@@ -1274,7 +1278,7 @@
       if (r.status === 200 && data.ok) {
         // تعديلات أُجريت أثناء الحفظ فقط هي التي تبقى غير محفوظة
         const later = Object.fromEntries(
-          keys
+          settingsKeys
             .filter((k) => state.draft[k] !== sent[k])
             .map((k) => [k, state.draft[k]]),
         );
@@ -1307,6 +1311,182 @@
         b.disabled = !state.online;
         b.textContent = "حفظ التغييرات";
       }
+    }
+  }
+  async function saveOnboarding() {
+    if (state.saving || !onboardingDirty() || !state.online) return false;
+    const guildId = state.guild.id;
+    const snap = onboardingChanges();
+    const sent = { ...clone(state.baseline), ...snap };
+    state.saving = true;
+    const button = $(".onboarding-save");
+    if (button) {
+      button.disabled = true;
+      button.replaceChildren(el("span", { class: "spinner" }), document.createTextNode(" جارٍ الحفظ…"));
+    }
+    try {
+      const r = await api(`api/guild/${guildId}/onboarding`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": state.session.csrf,
+        },
+        body: JSON.stringify({ revision: state.revision, changes: snap }),
+      });
+      if (guildId !== state.guild.id) return false;
+      const data = await r.json();
+      if (r.ok && data.revision != null) {
+        const later = Object.fromEntries(
+          onboardingKeys
+            .filter((key) => state.draft[key] !== sent[key])
+            .map((key) => [key, state.draft[key]]),
+        );
+        state.baseline = { ...state.baseline, ...(data.settings || {}) };
+        state.revision = data.revision;
+        state.updated = data.updated_at;
+        state.draft = { ...clone(state.baseline), ...later };
+        state.onboarding = { ...state.onboarding, ...data, settings: data.settings || state.onboarding?.settings || {} };
+        state.newer = false;
+        state.fields = {};
+        navigator.vibrate?.([15, 30, 15]);
+        toast("✅ تم حفظ إعدادات الدخول وتطبيقها فورياً", "success", 3500);
+        renderPage();
+        return true;
+      }
+      if (r.status === 400) {
+        state.fields = data.fields || {};
+        toast("يرجى مراجعة حقول onboarding");
+        renderDynamic();
+      } else if (r.status === 403) toast("لا تملك صلاحية تعديل هذا السيرفر");
+      else if (r.status === 409) onboardingConflict(data);
+      else if (r.status === 429) toast(`تم تجاوز الحد، حاول بعد ${data.retry_after || 5} ثانية`, "warn", 5000);
+      else toast("تعذر حفظ إعدادات onboarding");
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بالخادم. احتفظنا بتعديلاتك");
+    } finally {
+      state.saving = false;
+      renderDynamic();
+    }
+    return false;
+  }
+  function onboardingConflict(data) {
+    const back = el("div", { class: "modal-back", role: "dialog", "aria-modal": "true" });
+    const modal = el(
+      "div",
+      { class: "modal" },
+      el("h2", { text: "تعارض في إعدادات الدخول" }),
+      el("p", { text: "تم تعديل استوديو onboarding من جلسة أخرى. اختر النسخة التي تريد اعتمادها." }),
+    );
+    const actions = el("div", { class: "modal-actions" });
+    const adoptOnboarding = (keepLocal) => {
+      const local = keepLocal ? onboardingChanges() : {};
+      state.baseline = { ...state.baseline, ...(data.settings || {}) };
+      state.revision = data.revision;
+      state.updated = data.updated_at;
+      state.draft = { ...clone(state.baseline), ...local };
+      state.onboarding = { ...state.onboarding, ...data };
+      state.newer = keepLocal && Object.keys(local).length > 0;
+      back.remove();
+      renderPage();
+    };
+    actions.append(
+      el("button", { type: "button", text: "تحميل الأحدث", onClick: () => adoptOnboarding(false) }),
+      el("button", { type: "button", text: "مراجعة تعديلي", onClick: () => adoptOnboarding(true) }),
+    );
+    modal.append(actions);
+    back.append(modal);
+    document.body.append(back);
+  }
+  async function sendTestWelcome() {
+    if (!state.online || state.saving) return;
+    if (onboardingDirty()) {
+      const saved = await saveOnboarding();
+      if (!saved) {
+        toast("احفظ إعدادات onboarding أولاً لإرسال تجربة مطابقة لها", "warn");
+        return;
+      }
+    }
+    const channelId = state.draft?.welcome_channel_id;
+    if (!channelId) {
+      toast("اختر قناة الترحيب أولاً", "warn");
+      return;
+    }
+    const button = $(".onboarding-test");
+    if (button) {
+      button.disabled = true;
+      button.replaceChildren(el("span", { class: "spinner" }), document.createTextNode(" جارٍ الإرسال…"));
+    }
+    try {
+      const r = await api(`api/guild/${state.guild.id}/onboarding/test-welcome`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": state.session.csrf,
+        },
+        body: JSON.stringify({
+          target_channel_id: String(channelId),
+          template_data: { username: "عضو تجريبي" },
+        }),
+      });
+      const data = await r.json();
+      if (r.ok && data.ok) toast("تم إرسال رسالة التجربة إلى Discord", "success", 3500);
+      else toast(data.fields?.target_channel_id || "تعذر إرسال رسالة التجربة");
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال لإرسال رسالة التجربة");
+    } finally {
+      renderDynamic();
+    }
+  }
+  async function deploySelfRoles() {
+    const builder = ensureSelfRoleBuilder();
+    if (!state.online || state.saving) return;
+    if (!builder.target_channel_id) {
+      toast("اختر قناة لوحة الرتب أولاً", "warn");
+      return;
+    }
+    if (!builder.roles.length || builder.roles.length > 25) {
+      toast("أضف من رتبة إلى 25 رتبة قابلة للإسناد", "warn");
+      return;
+    }
+    const button = $(".builder-deploy");
+    if (button) {
+      button.disabled = true;
+      button.replaceChildren(el("span", { class: "spinner" }), document.createTextNode(" جارٍ النشر…"));
+    }
+    try {
+      const r = await api(`api/guild/${state.guild.id}/onboarding/self-roles`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": state.session.csrf,
+        },
+        body: JSON.stringify({
+          target_channel_id: String(builder.target_channel_id),
+          title: builder.title,
+          description: builder.description,
+          color: normalizePanelColor(builder.color),
+          emoji: builder.emoji,
+          roles: builder.roles.map((role) => ({
+            id: String(role.id),
+            label: String(role.label || roleName(role.id)).slice(0, 100),
+            emoji: String(role.emoji || "🏷️").slice(0, 32),
+          })),
+        }),
+      });
+      const data = await r.json();
+      if (r.ok && data.ok && data.panel) {
+        state.onboarding = {
+          ...state.onboarding,
+          self_roles: [data.panel, ...(state.onboarding?.self_roles || [])],
+        };
+        navigator.vibrate?.([15, 30, 15]);
+        toast("✅ نُشرت لوحة الرتب وحُفظت للاستعادة بعد إعادة التشغيل", "success", 4000);
+        renderPage();
+      } else toast(data.error === "role_not_assignable" ? "إحدى الرتب أعلى من رتبة البوت أو مُدارة" : "تعذر نشر لوحة الرتب");
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال لنشر لوحة الرتب");
+    } finally {
+      renderDynamic();
     }
   }
   function conflict(data) {
@@ -1386,20 +1566,25 @@
     state.guild = g;
     sessionStorage.setItem("dashboard-guild", id);
     state.meta = state.baseline = state.draft = null;
+    state.onboarding = null;
+    state.selfRoleBuilder = null;
+    state.fields = {};
     renderShell();
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir] = await Promise.all([
+      const [mr, sr, ir, or] = await Promise.all([
         api(`api/guild/${id}/meta`),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
+        api(`api/guild/${id}/onboarding`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents] = await Promise.all([
+      const [meta, settings, incidents, onboarding] = await Promise.all([
         mr.json(),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
+        or.json(),
       ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
@@ -1407,9 +1592,11 @@
       state.whitelist = incidents.whitelist || [];
       state.lockdown = Boolean(incidents.locked);
       state.baseline = clone(settings.settings);
-      state.draft = clone(settings.settings);
-      state.revision = settings.revision;
-      state.updated = settings.updated_at;
+      state.onboarding = onboarding;
+      state.baseline = { ...state.baseline, ...(onboarding.settings || {}) };
+      state.draft = clone(state.baseline);
+      state.revision = onboarding.revision ?? settings.revision;
+      state.updated = onboarding.updated_at ?? settings.updated_at;
       renderPage();
       openSSE(id);
       startIncidentRefresh(id);

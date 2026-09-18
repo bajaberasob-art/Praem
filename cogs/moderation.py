@@ -279,7 +279,7 @@ class Moderation(commands.Cog):
         warning = await get_warning(warning_id)
         if warning is None:
             return None
-        if not await delete_warning(warning_id):
+        if not await delete_warning(warning["guild_id"], warning_id):
             return None
         return warning
 
@@ -418,6 +418,46 @@ class Moderation(commands.Cog):
                 inline=False,
             )
         await itx.response.send_message(embed=emb, ephemeral=True)
+
+    @app_commands.command(name="unwarn", description="إلغاء تحذير برقم السجل")
+    @app_commands.checks.has_permissions(kick_members=True)
+    async def unwarn(self, itx: discord.Interaction, warning_id: int):
+        warning = await get_warning(warning_id)
+        if warning is None or int(warning["guild_id"]) != itx.guild.id:
+            return await itx.response.send_message(
+                "❌ لم أجد هذا التحذير داخل هذا السيرفر.",
+                ephemeral=True,
+            )
+        if not await delete_warning(itx.guild.id, warning_id):
+            return await itx.response.send_message(
+                "❌ تعذر إلغاء التحذير.",
+                ephemeral=True,
+            )
+        await itx.response.send_message(
+            f"✅ تم إلغاء التحذير `#{warning_id}` عن <@{warning['user_id']}>.",
+        )
+
+    @app_commands.command(name="slowmode", description="تعيين وضع التمهل للقناة")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def slowmode(self, itx: discord.Interaction, seconds: int):
+        if not 0 <= seconds <= 21600:
+            return await itx.response.send_message(
+                "❌ قيمة التمهل يجب أن تكون بين 0 و21600 ثانية.",
+                ephemeral=True,
+            )
+        try:
+            await itx.channel.edit(
+                slowmode_delay=seconds,
+                reason=f"Slowmode by {itx.user} ({itx.user.id})",
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return await itx.response.send_message(
+                "❌ تعذر تعديل وضع التمهل. تحقق من صلاحيات البوت.",
+                ephemeral=True,
+            )
+        await itx.response.send_message(
+            f"✅ تم ضبط التمهل إلى `{seconds}` ثانية.",
+        )
 
     @app_commands.command(name="clear", description="مسح رسائل بفلترة ذكية")
     @app_commands.checks.has_permissions(manage_messages=True)

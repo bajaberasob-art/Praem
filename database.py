@@ -1637,10 +1637,13 @@ async def get_warning(warning_id: int) -> Optional[Dict[str, Any]]:
             return dict(row) if row else None
 
 
-async def delete_warning(warning_id: int) -> bool:
-    """حذف إنذار واحد بعد تحقق المستدعي من نطاق السيرفر والصلاحية."""
+async def delete_warning(guild_id: int, warning_id: int) -> bool:
+    """حذف إنذار واحد مع تقييد العملية بسيرفره الأصلي."""
     async with connect() as db:
-        cur = await db.execute("DELETE FROM warnings WHERE id = ?", (int(warning_id),))
+        cur = await db.execute(
+            "DELETE FROM warnings WHERE id = ? AND guild_id = ?",
+            (int(warning_id), int(guild_id)),
+        )
         changed = cur.rowcount > 0
         await cur.close()
         await db.commit()

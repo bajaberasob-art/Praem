@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import random
 import re
 import time
@@ -26,7 +27,37 @@ from database import (
 HUB_NAME = "➕ اضغط للإنشاء"
 LOGGER = logging.getLogger("UtilitiesOrchestrator")
 MATCH_TYPES = {"exact", "contains", "regex"}
-SHORTCUT_TYPES = {"command", "announcement"}
+SHORTCUT_TYPES = {"command", "help", "announcement"}
+COMMAND_HELP_LABELS = {
+    "warn": "تحذير",
+    "timeout": "تايم أوت",
+    "untimeout": "فك التايم أوت",
+    "warnings": "سجل التحذيرات",
+    "unwarn": "إلغاء تحذير",
+    "clear": "مسح الرسائل",
+    "lockdown": "قفل المحادثة",
+    "slowmode": "الوضع البطيء",
+}
+COMMAND_PERMISSION_LABELS = {
+    "warn": "طرد الأعضاء",
+    "timeout": "إدارة الأعضاء",
+    "untimeout": "إدارة الأعضاء",
+    "warnings": "إدارة الرسائل",
+    "unwarn": "إدارة الرسائل",
+    "clear": "إدارة الرسائل",
+    "lockdown": "إدارة القنوات",
+    "slowmode": "إدارة القنوات",
+}
+COMMAND_PARAMETER_LABELS = {
+    "member": "عضو",
+    "user": "عضو",
+    "reason": "السبب",
+    "minutes": "الدقائق",
+    "duration": "المدة",
+    "channel": "القناة",
+    "category": "القسم",
+    "question": "السؤال",
+}
 SENSITIVE_COMMAND_NAMES = {
     "ban",
     "clear",
@@ -620,8 +651,75 @@ class Utilities(commands.Cog):
                 )
                 await message.channel.send(embed=embed)
                 return True
+            if shortcut["target_type"] == "help":
+                await self._send_command_help(message, shortcut["target"])
+                return True
             return await self._dispatch_command_shortcut(message, shortcut["target"])
         return False
+
+    def _command_for_target(self, target: str):
+        command_name = str(target).strip().lstrip("!/").split()[0].lower()
+        if not command_name:
+            return None
+        return (
+            self.bot.tree.get_command(command_name)
+            or self.bot.get_command(command_name)
+        )
+
+    @staticmethod
+    def _command_argument_text(command) -> str:
+        values = []
+        for parameter in getattr(command, "parameters", []) or []:
+            name = str(getattr(parameter, "name", "")).lower()
+            label = COMMAND_PARAMETER_LABELS.get(name, name.replace("_", " "))
+            if not label:
+                continue
+            required = bool(getattr(parameter, "required", False))
+            values.append(f"<{label}>" if required else f"[{label}]")
+        return " ".join(values)
+
+    async def _send_command_help(self, message: discord.Message, target: str):
+        command = self._command_for_target(target)
+        command_name = str(target).strip().lstrip("!/").split()[0].lower()
+        if command is None:
+            await message.channel.send(f"⚠️ الأمر `{command_name}` غير موجود حالياً.")
+            return
+        current_alias = message.content.strip()
+        label = COMMAND_HELP_LABELS.get(
+            command_name,
+            str(getattr(command, "name", command_name)).replace("_", " ").title(),
+        )
+        description = getattr(command, "description", None) or "لا يوجد وصف لهذا الأمر بعد."
+        arguments = self._command_argument_text(command)
+        syntax = f"{current_alias}{(' ' + arguments) if arguments else ''}"
+        aliases = [
+            str(item["trigger"])
+            for item in self.shortcuts.get(int(message.guild.id), [])
+            if item.get("target_type") == "help"
+            and str(item.get("target", "")).lstrip("!/").split()[0].lower() == command_name
+            and str(item.get("trigger", "")).casefold() != current_alias.casefold()
+        ]
+        aliases.extend(str(item) for item in getattr(command, "aliases", []) if item)
+        permission = COMMAND_PERMISSION_LABELS.get(command_name, "صلاحيات Discord الخاصة بالأمر")
+        dashboard_path = os.getenv("DASHBOARD_BASE_PATH", "/").rstrip("/") + "/?view=commands"
+
+        embed = discord.Embed(
+            title=f"{label} 📖",
+            description=f"{description}\n\nاستخدم الصيغة التالية لتنفيذ الأمر من البادئة الحالية.",
+            color=0xF3A6C7,
+        )
+        embed.add_field(name="الصيغة ⌨️", value=f"`{syntax}`", inline=False)
+        example = f"{current_alias} @أحمد {('لغة غير لائقة' if command_name == 'warn' else '10')}".strip()
+        embed.add_field(name="مثال ✅", value=f"`{example}`", inline=False)
+        embed.add_field(
+            name="تكتبه أيضاً 🔀",
+            value="، ".join(f"`{item}`" for item in aliases[:12]) if aliases else "لا توجد اختصارات أخرى",
+            inline=False,
+        )
+        embed.add_field(name="الصلاحية المطلوبة 🛡️", value=permission, inline=False)
+        embed.add_field(name="⚙️ إعدادات الأمر في الداشبورد", value=f"[فتح مركز الأوامر]({dashboard_path})", inline=False)
+        embed.set_footer(text="مساعد الأوامر الذكي · اكتب أي اختصار لعرض الشرح")
+        await message.channel.send(embed=embed, reference=message)
 
     async def _dispatch_command_shortcut(
         self,

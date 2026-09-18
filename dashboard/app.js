@@ -3381,6 +3381,8 @@
     state.meta = state.baseline = state.draft = null;
     state.onboarding = null;
     state.commandStudio = { commands: [], roles: [], channels: [], shortcuts: [] };
+    state.shortcutCommandId = "";
+    state.shortcutInputText = null;
     state.autoResponses = [];
     state.commandSearch = "";
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };

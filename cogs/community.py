@@ -1011,6 +1011,149 @@ class Community(commands.Cog):
         )
         await itx.response.send_message("✅ تم استلام التذكرة حصرياً لك.", ephemeral=True)
 
+    async def _resolve_ticket_member(self, guild, raw_value: str):
+        member_id = _member_id_from_text(raw_value)
+        if member_id is None:
+            return None
+        member = guild.get_member(member_id)
+        if member is not None:
+            return member
+        try:
+            return await guild.fetch_member(member_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return None
+
+    async def show_ticket_member_modal(self, itx: discord.Interaction, action: str):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] == "closed":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        await itx.response.send_modal(TicketMemberActionModal(action))
+
+    async def handle_ticket_member_action(
+        self,
+        itx: discord.Interaction,
+        action: str,
+        raw_member: str,
+    ):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] == "closed":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        member = await self._resolve_ticket_member(itx.guild, raw_member)
+        if member is None:
+            return await itx.response.send_message(
+                "لم أجد هذا العضو داخل السيرفر. أرسل Discord ID صحيحاً أو منشن العضو.",
+                ephemeral=True,
+            )
+        if action == "add":
+            await itx.channel.set_permissions(
+                member,
+                overwrite=discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    attach_files=True,
+                ),
+            )
+            return await itx.response.send_message(
+                f"✅ تمت إضافة {member.mention} إلى التذكرة.",
+                ephemeral=True,
+            )
+        if action == "remove":
+            if member.id == ticket["user_id"]:
+                return await itx.response.send_message(
+                    "لا يمكن طرد صاحب التذكرة. استخدم إغلاق التذكرة عند انتهاء الطلب.",
+                    ephemeral=True,
+                )
+            if itx.guild.me and member.id == itx.guild.me.id:
+                return await itx.response.send_message(
+                    "لا يمكن إزالة البوت من قناة التذكرة.",
+                    ephemeral=True,
+                )
+            await itx.channel.set_permissions(member, overwrite=None)
+            return await itx.response.send_message(
+                f"✅ تمت إزالة {member.mention} من التذكرة.",
+                ephemeral=True,
+            )
+        if action == "transfer":
+            if not self._is_ticket_staff(member, ticket):
+                return await itx.response.send_message(
+                    "لا يمكن تحويل التذكرة إلا إلى عضو من فريق الدعم أو الإدارة.",
+                    ephemeral=True,
+                )
+            if ticket.get("claimed_by") == member.id:
+                return await itx.response.send_message(
+                    "التذكرة مستلمة بالفعل من هذا العضو.",
+                    ephemeral=True,
+                )
+            old_staff = (
+                itx.guild.get_member(ticket["claimed_by"])
+                if ticket.get("claimed_by")
+                else None
+            )
+            ticket = await claim_ticket(itx.guild.id, ticket["id"], member.id)
+            if old_staff and old_staff.id != member.id:
+                old_overwrite = itx.channel.overwrites_for(old_staff)
+                old_overwrite.send_messages = None
+                await itx.channel.set_permissions(old_staff, overwrite=old_overwrite)
+            for role_id in ticket.get("support_role_ids", []):
+                role = itx.guild.get_role(int(role_id))
+                if role:
+                    role_overwrite = itx.channel.overwrites_for(role)
+                    role_overwrite.send_messages = False
+                    await itx.channel.set_permissions(role, overwrite=role_overwrite)
+            target_overwrite = itx.channel.overwrites_for(member)
+            target_overwrite.view_channel = True
+            target_overwrite.send_messages = True
+            target_overwrite.read_message_history = True
+            await itx.channel.set_permissions(member, overwrite=target_overwrite)
+            await itx.channel.edit(
+                topic=f"Ticket • {ticket['category_label']} • مستلمة بواسطة {member.display_name}"
+            )
+            return await itx.response.send_message(
+                f"🔁 تم تحويل التذكرة إلى {member.mention}.",
+                ephemeral=True,
+            )
+        await itx.response.send_message("إجراء التذكرة غير معروف.", ephemeral=True)
+
+    async def unclaim_ticket_from_interaction(self, itx: discord.Interaction):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] == "closed":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        if ticket.get("claimed_by") != itx.user.id:
+            return await itx.response.send_message(
+                "لا يمكنك ترك تذكرة لم تستلمها أنت.",
+                ephemeral=True,
+            )
+        ticket = await unclaim_ticket(itx.guild.id, ticket["id"], itx.user.id)
+        if not ticket:
+            return await itx.response.send_message(
+                "تعذر ترك التذكرة؛ ربما استلمها موظف آخر.",
+                ephemeral=True,
+            )
+        for role_id in ticket.get("support_role_ids", []):
+            role = itx.guild.get_role(int(role_id))
+            if role:
+                role_overwrite = itx.channel.overwrites_for(role)
+                role_overwrite.view_channel = True
+                role_overwrite.send_messages = True
+                await itx.channel.set_permissions(role, overwrite=role_overwrite)
+        overwrite = itx.channel.overwrites_for(itx.user)
+        overwrite.send_messages = None
+        await itx.channel.set_permissions(itx.user, overwrite=overwrite)
+        await itx.channel.edit(
+            topic=f"Ticket • {ticket['category_label']} • بانتظار فريق الدعم"
+        )
+        await itx.response.send_message(
+            "🚪 تركت التذكرة وأصبحت متاحة لفريق الدعم من جديد.",
+            ephemeral=True,
+        )
+
     async def escalate_ticket_from_interaction(self, itx: discord.Interaction):
         ticket = await get_ticket_by_channel(itx.channel.id)
         if not ticket or ticket["status"] == "closed":

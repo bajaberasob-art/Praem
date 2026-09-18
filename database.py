@@ -252,6 +252,55 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_self_role_panels_guild "
                 "ON self_role_panels(guild_id);"
             )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS guild_command_controls (
+                    guild_id INTEGER NOT NULL,
+                    command_name TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    allowed_roles TEXT NOT NULL DEFAULT '[]',
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, command_name)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_controls_guild "
+                "ON guild_command_controls(guild_id);"
+            )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS guild_auto_responders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    trigger TEXT NOT NULL,
+                    match_type TEXT NOT NULL,
+                    response TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    cooldown_seconds REAL NOT NULL DEFAULT 5,
+                    bucket_capacity INTEGER NOT NULL DEFAULT 1,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (guild_id, trigger, match_type)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_auto_responders_guild "
+                "ON guild_auto_responders(guild_id, enabled);"
+            )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS guild_shortcuts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    trigger TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target TEXT NOT NULL DEFAULT '',
+                    announcement TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (guild_id, trigger)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_shortcuts_guild "
+                "ON guild_shortcuts(guild_id, enabled);"
+            )
 
             await db.commit()
             logger.info("[DB] جميع الجداول والفهارس تعمل بكفاءة عالية.")
@@ -771,6 +820,196 @@ async def get_self_role_panels(guild_id: int) -> list[dict[str, Any]]:
                     item["role_specs"] = []
                 rows.append(item)
             return rows
+
+
+def _json_ids(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value = []
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).isdigit()]
+
+
+async def get_command_controls(guild_id: int) -> dict[str, dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT command_name, enabled, allowed_roles, updated_at
+            FROM guild_command_controls
+            WHERE guild_id = ?
+            ORDER BY command_name
+            """,
+            (int(guild_id),),
+        ) as cur:
+            result = {}
+            for row in await cur.fetchall():
+                item = dict(row)
+                item["enabled"] = bool(item["enabled"])
+                item["allowed_roles"] = _json_ids(item["allowed_roles"])
+                result[item["command_name"]] = item
+            return result
+
+
+async def save_command_control(
+    guild_id: int,
+    command_name: str,
+    enabled: bool,
+    allowed_roles: list[int | str] | None = None,
+) -> dict[str, Any]:
+    roles = [str(role_id) for role_id in (allowed_roles or []) if str(role_id).isdigit()]
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            INSERT INTO guild_command_controls
+                (guild_id, command_name, enabled, allowed_roles, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id, command_name) DO UPDATE SET
+                enabled = excluded.enabled,
+                allowed_roles = excluded.allowed_roles,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                int(guild_id),
+                str(command_name).strip().lower(),
+                int(bool(enabled)),
+                json.dumps(roles, ensure_ascii=False),
+            ),
+        )
+        await db.commit()
+    return {
+        "command_name": str(command_name).strip().lower(),
+        "enabled": bool(enabled),
+        "allowed_roles": roles,
+    }
+
+
+async def get_auto_responders(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, trigger, match_type, response, enabled,
+                   cooldown_seconds, bucket_capacity, updated_at
+            FROM guild_auto_responders
+            WHERE guild_id = ? AND enabled = 1
+            ORDER BY id
+            """,
+            (int(guild_id),),
+        ) as cur:
+            rows = []
+            for row in await cur.fetchall():
+                item = dict(row)
+                item["enabled"] = bool(item["enabled"])
+                item["cooldown_seconds"] = max(0.0, float(item["cooldown_seconds"]))
+                item["bucket_capacity"] = max(1, int(item["bucket_capacity"]))
+                rows.append(item)
+            return rows
+
+
+async def save_auto_responder(
+    guild_id: int,
+    trigger: str,
+    match_type: str,
+    response: str,
+    *,
+    enabled: bool = True,
+    cooldown_seconds: float = 5.0,
+    bucket_capacity: int = 1,
+) -> dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO guild_auto_responders
+                (guild_id, trigger, match_type, response, enabled,
+                 cooldown_seconds, bucket_capacity, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id, trigger, match_type) DO UPDATE SET
+                response = excluded.response,
+                enabled = excluded.enabled,
+                cooldown_seconds = excluded.cooldown_seconds,
+                bucket_capacity = excluded.bucket_capacity,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id, guild_id, trigger, match_type, response, enabled,
+                      cooldown_seconds, bucket_capacity, updated_at
+            """,
+            (
+                int(guild_id),
+                str(trigger).strip(),
+                str(match_type).strip().lower(),
+                str(response)[:2000],
+                int(bool(enabled)),
+                max(0.0, float(cooldown_seconds)),
+                max(1, int(bucket_capacity)),
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+    item = dict(row) if row else {}
+    item["enabled"] = bool(item.get("enabled", enabled))
+    return item
+
+
+async def get_shortcuts(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, trigger, target_type, target, announcement,
+                   enabled, updated_at
+            FROM guild_shortcuts
+            WHERE guild_id = ? AND enabled = 1
+            ORDER BY id
+            """,
+            (int(guild_id),),
+        ) as cur:
+            rows = []
+            for row in await cur.fetchall():
+                item = dict(row)
+                item["enabled"] = bool(item["enabled"])
+                rows.append(item)
+            return rows
+
+
+async def save_shortcut(
+    guild_id: int,
+    trigger: str,
+    target_type: str,
+    *,
+    target: str = "",
+    announcement: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO guild_shortcuts
+                (guild_id, trigger, target_type, target, announcement,
+                 enabled, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id, trigger) DO UPDATE SET
+                target_type = excluded.target_type,
+                target = excluded.target,
+                announcement = excluded.announcement,
+                enabled = excluded.enabled,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id, guild_id, trigger, target_type, target, announcement,
+                      enabled, updated_at
+            """,
+            (
+                int(guild_id),
+                str(trigger).strip(),
+                str(target_type).strip().lower(),
+                str(target)[:100],
+                str(announcement)[:2000],
+                int(bool(enabled)),
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+    item = dict(row) if row else {}
+    item["enabled"] = bool(item.get("enabled", enabled))
+    return item
 
 
 async def get_recent_warnings(guild_id: int, limit: int = 50) -> List[Dict[str, Any]]:

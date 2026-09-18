@@ -276,10 +276,22 @@ async def init_db() -> None:
                     enabled INTEGER NOT NULL DEFAULT 1,
                     cooldown_seconds REAL NOT NULL DEFAULT 5,
                     bucket_capacity INTEGER NOT NULL DEFAULT 1,
+                    channel_id INTEGER DEFAULT NULL,
+                    execution_count INTEGER NOT NULL DEFAULT 0,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (guild_id, trigger, match_type)
                 );
             """)
+            async with db.execute("PRAGMA table_info(guild_auto_responders)") as cur:
+                responder_columns = {row[1] for row in await cur.fetchall()}
+            if "channel_id" not in responder_columns:
+                await db.execute(
+                    "ALTER TABLE guild_auto_responders ADD COLUMN channel_id INTEGER DEFAULT NULL"
+                )
+            if "execution_count" not in responder_columns:
+                await db.execute(
+                    "ALTER TABLE guild_auto_responders ADD COLUMN execution_count INTEGER NOT NULL DEFAULT 0"
+                )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_auto_responders_guild "
                 "ON guild_auto_responders(guild_id, enabled);"
@@ -891,7 +903,8 @@ async def get_auto_responders(guild_id: int) -> list[dict[str, Any]]:
         async with db.execute(
             """
             SELECT id, guild_id, trigger, match_type, response, enabled,
-                   cooldown_seconds, bucket_capacity, updated_at
+                   cooldown_seconds, bucket_capacity, channel_id,
+                   execution_count, updated_at
             FROM guild_auto_responders
             WHERE guild_id = ? AND enabled = 1
             ORDER BY id
@@ -904,6 +917,10 @@ async def get_auto_responders(guild_id: int) -> list[dict[str, Any]]:
                 item["enabled"] = bool(item["enabled"])
                 item["cooldown_seconds"] = max(0.0, float(item["cooldown_seconds"]))
                 item["bucket_capacity"] = max(1, int(item["bucket_capacity"]))
+                item["channel_id"] = (
+                    str(item["channel_id"]) if item["channel_id"] is not None else None
+                )
+                item["execution_count"] = max(0, int(item["execution_count"] or 0))
                 rows.append(item)
             return rows
 
@@ -917,22 +934,25 @@ async def save_auto_responder(
     enabled: bool = True,
     cooldown_seconds: float = 5.0,
     bucket_capacity: int = 1,
+    channel_id: int | str | None = None,
 ) -> dict[str, Any]:
     async with connect(aiosqlite.Row) as db:
         cursor = await db.execute(
             """
             INSERT INTO guild_auto_responders
                 (guild_id, trigger, match_type, response, enabled,
-                 cooldown_seconds, bucket_capacity, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 cooldown_seconds, bucket_capacity, channel_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(guild_id, trigger, match_type) DO UPDATE SET
                 response = excluded.response,
                 enabled = excluded.enabled,
                 cooldown_seconds = excluded.cooldown_seconds,
                 bucket_capacity = excluded.bucket_capacity,
+                channel_id = excluded.channel_id,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id, guild_id, trigger, match_type, response, enabled,
-                      cooldown_seconds, bucket_capacity, updated_at
+                      cooldown_seconds, bucket_capacity, channel_id,
+                      execution_count, updated_at
             """,
             (
                 int(guild_id),
@@ -942,13 +962,49 @@ async def save_auto_responder(
                 int(bool(enabled)),
                 max(0.0, float(cooldown_seconds)),
                 max(1, int(bucket_capacity)),
+                int(channel_id) if channel_id is not None else None,
             ),
         )
         row = await cursor.fetchone()
         await db.commit()
     item = dict(row) if row else {}
     item["enabled"] = bool(item.get("enabled", enabled))
+    item["channel_id"] = (
+        str(item["channel_id"]) if item.get("channel_id") is not None else None
+    )
+    item["execution_count"] = int(item.get("execution_count") or 0)
     return item
+
+
+async def delete_auto_responder(guild_id: int, rule_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM guild_auto_responders WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(rule_id)),
+        )
+        deleted = cursor.rowcount > 0
+        await db.commit()
+    return deleted
+
+
+async def record_auto_responder_execution(guild_id: int, rule_id: int) -> int:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            UPDATE guild_auto_responders
+            SET execution_count = execution_count + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ? AND id = ?
+            """,
+            (int(guild_id), int(rule_id)),
+        )
+        async with db.execute(
+            "SELECT execution_count FROM guild_auto_responders WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(rule_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return int(row["execution_count"]) if row else 0
 
 
 async def get_shortcuts(guild_id: int) -> list[dict[str, Any]]:

@@ -120,7 +120,18 @@ async def callback(req):
             }
             async with session.post(f"{DISCORD_API}/oauth2/token", data=data) as response:
                 if response.status != 200:
-                    return web.Response(text="فشل استخراج توكن المصادقة.", status=400)
+                    logger.warning(
+                        "Discord OAuth token exchange rejected with status=%s",
+                        response.status,
+                    )
+                    return web.Response(
+                        text=(
+                            "فشل تسجيل الدخول عبر Discord. تحقق من أن CLIENT_SECRET هو "
+                            "Client Secret الموجود في OAuth2 → General، وليس Bot Token "
+                            "أو Public Key، وأن Redirect URI مطابق تماماً."
+                        ),
+                        status=400,
+                    )
                 token = (await response.json()).get("access_token")
                 if not token:
                     return web.Response(text="استجابة المصادقة غير صالحة.", status=502)

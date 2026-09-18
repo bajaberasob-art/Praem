@@ -714,6 +714,48 @@ class Utilities(commands.Cog):
                 await self._send_command_help(message, shortcut["target"])
                 return True
             return await self._dispatch_command_shortcut(message, shortcut["target"])
+        command = self._text_command_for_trigger(trigger)
+        if command is None:
+            return False
+        target = f"/{command.qualified_name}"
+        required = [
+            parameter
+            for parameter in getattr(command, "parameters", []) or []
+            if getattr(parameter, "required", False)
+        ]
+        if required:
+            await self._send_command_help(message, target)
+            return True
+        return await self._dispatch_command_shortcut(message, target)
+
+    def _text_command_for_trigger(self, trigger: str):
+        """Resolve a bare chat keyword to a loaded Slash/Prefix command."""
+        candidates = []
+        tree = getattr(self.bot, "tree", None)
+        if tree and hasattr(tree, "walk_commands"):
+            candidates.extend(tree.walk_commands())
+        candidates.extend(getattr(self.bot, "commands", []) or [])
+        arabic_labels = {
+            label.casefold(): name
+            for name, label in COMMAND_HELP_LABELS.items()
+        }
+        for command in candidates:
+            if getattr(command, "hidden", False):
+                continue
+            names = {
+                str(getattr(command, "name", "")).casefold(),
+                str(getattr(command, "qualified_name", "")).casefold(),
+            }
+            names.update(
+                str(alias).strip().casefold()
+                for alias in getattr(command, "aliases", []) or []
+            )
+            command_name = str(getattr(command, "name", "")).casefold()
+            if arabic_labels.get(trigger) == command_name:
+                return command
+            if trigger in names:
+                return command
+        return None
         return False
 
     def _command_for_target(self, target: str):

@@ -6,3 +6,4 @@
 - [Durable background jobs](durable-background-jobs.md) — long-lived reminders must be persisted and resumed by a polling worker, not held in command-local sleeps.
 - [Persistent interactive state](persistent-interactive-state.md) — giveaway and tournament entries live in SQLite, with unique custom IDs and view restoration during cog loading.
 - [Discord emoji tokens](discord-emoji-serialization.md) — custom guild emojis and stickers are separate Discord assets; replies need the emoji token, not only its CDN URL.
+- [Shortcut execution policies](shortcut-execution-policies.md) — synthetic Prefix/Slash shortcut callbacks must invoke the same command policy checks as native Discord commands.

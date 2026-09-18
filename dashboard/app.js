@@ -1726,7 +1726,15 @@
           toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ الاختصار", "warn");
           return false;
         }
-        state.commandStudio.shortcuts.push(data.shortcut);
+        const shortcutIndex = state.commandStudio.shortcuts.findIndex(
+          (item) => item.id === data.shortcut.id
+            || String(item.trigger).toLowerCase() === trigger.toLowerCase(),
+        );
+        if (shortcutIndex >= 0) {
+          state.commandStudio.shortcuts[shortcutIndex] = data.shortcut;
+        } else {
+          state.commandStudio.shortcuts.push(data.shortcut);
+        }
       }
       for (const shortcut of existing) {
         if (wanted.has(String(shortcut.trigger).toLowerCase())) continue;

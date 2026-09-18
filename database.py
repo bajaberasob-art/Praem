@@ -397,6 +397,22 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_canned_responses_guild "
                 "ON canned_responses(guild_id, updated_at DESC);"
             )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    reminder TEXT NOT NULL,
+                    due_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_reminders_due "
+                "ON reminders(status, due_at);"
+            )
 
             await db.commit()
             logger.info("[DB] جميع الجداول والفهارس تعمل بكفاءة عالية.")
@@ -1629,3 +1645,97 @@ async def delete_warning(warning_id: int) -> bool:
         await cur.close()
         await db.commit()
         return changed
+
+
+# -------------------------------------------------------------
+# التذكيرات الدائمة (Persistent reminders)
+# -------------------------------------------------------------
+async def create_reminder(
+    guild_id: int,
+    user_id: int,
+    channel_id: int,
+    reminder: str,
+    due_at: str,
+) -> int:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            INSERT INTO reminders
+                (guild_id, user_id, channel_id, reminder, due_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                int(user_id),
+                int(channel_id),
+                str(reminder).strip()[:1000],
+                str(due_at),
+            ),
+        )
+        reminder_id = cur.lastrowid
+        await db.commit()
+    return int(reminder_id)
+
+
+async def get_due_reminders(now: Optional[str] = None) -> list[Dict[str, Any]]:
+    current = now or _utc_now()
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, user_id, channel_id, reminder, due_at
+            FROM reminders
+            WHERE status = 'pending' AND due_at <= ?
+            ORDER BY due_at ASC, id ASC
+            LIMIT 100
+            """,
+            (current,),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_user_reminders(
+    guild_id: int,
+    user_id: int,
+    limit: int = 20,
+) -> list[Dict[str, Any]]:
+    limit = max(1, min(int(limit), 50))
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, channel_id, reminder, due_at, status
+            FROM reminders
+            WHERE guild_id = ? AND user_id = ? AND status = 'pending'
+            ORDER BY due_at ASC
+            LIMIT ?
+            """,
+            (int(guild_id), int(user_id), limit),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def cancel_reminder(guild_id: int, user_id: int, reminder_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            UPDATE reminders SET status = 'cancelled'
+            WHERE id = ? AND guild_id = ? AND user_id = ? AND status = 'pending'
+            """,
+            (int(reminder_id), int(guild_id), int(user_id)),
+        )
+        changed = cur.rowcount > 0
+        await db.commit()
+    return changed
+
+
+async def complete_reminder(reminder_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            UPDATE reminders SET status = 'completed'
+            WHERE id = ? AND status = 'pending'
+            """,
+            (int(reminder_id),),
+        )
+        changed = cur.rowcount > 0
+        await db.commit()
+    return changed

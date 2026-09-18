@@ -3717,6 +3717,21 @@
       if (error.message !== "unauth") updatePing("wait");
     }
   }
+  async function refreshDashboardStats(id, redraw = false) {
+    if (state.guild?.id !== id) return;
+    try {
+      const [statsResponse, actionsResponse] = await Promise.all([
+        api(`api/guild/${id}/stats`),
+        api(`api/guild/${id}/actions`),
+      ]);
+      if (state.guild?.id !== id) return;
+      if (statsResponse.ok) state.stats = await statsResponse.json();
+      if (actionsResponse.ok) state.actions = (await actionsResponse.json()).actions || [];
+      if (redraw && state.activeView !== "settings") renderPage();
+    } catch (error) {
+      if (error.message !== "unauth") updatePing("wait");
+    }
+  }
   function startIncidentRefresh(id) {
     stopIncidentRefresh();
     state.incidentTimer = setInterval(() => refreshIncidents(id, true), 15000);
@@ -3727,6 +3742,9 @@
     state.guild = g;
     sessionStorage.setItem("dashboard-guild", id);
     state.meta = state.baseline = state.draft = null;
+    state.stats = null;
+    state.actions = [];
+    state.drawerOpen = false;
     state.onboarding = null;
     state.commandStudio = { commands: [], roles: [], channels: [], shortcuts: [] };
     state.shortcutCommandId = "";
@@ -3742,7 +3760,7 @@
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc] = await Promise.all([
+      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr] = await Promise.all([
         api(`api/guild/${id}/meta`),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
@@ -3753,9 +3771,11 @@
         api(`api/guild/${id}/tickets/archive`),
         api(`api/guild/${id}/tickets/kpis`),
         api(`api/guild/${id}/tickets/canned`),
+        api(`api/guild/${id}/stats`),
+        api(`api/guild/${id}/actions`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned] = await Promise.all([
+      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions] = await Promise.all([
         mr.json(),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
@@ -3766,6 +3786,8 @@
         tv.ok ? tv.json() : Promise.resolve({ tickets: [] }),
         tk.ok ? tk.json() : Promise.resolve({ kpis: [] }),
         tc.ok ? tc.json() : Promise.resolve({ responses: [] }),
+        str.ok ? str.json() : Promise.resolve({ counts: {}, series: [] }),
+        acr.ok ? acr.json() : Promise.resolve({ actions: [] }),
       ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
@@ -3791,6 +3813,8 @@
       state.incidents = incidents.incidents || [];
       state.whitelist = incidents.whitelist || [];
       state.lockdown = Boolean(incidents.locked);
+      state.stats = stats;
+      state.actions = actions.actions || [];
       state.baseline = clone(settings.settings);
       state.onboarding = onboarding;
       state.baseline = { ...state.baseline, ...(onboarding.settings || {}) };
@@ -3874,6 +3898,12 @@
       updatePing(d.online ? "online" : "offline", d.latency_ms);
     });
     state.source.addEventListener("expired", redirect);
+    state.source.addEventListener("action", (e) => {
+      if (state.guild?.id !== id) return;
+      const payload = JSON.parse(e.data);
+      state.actions = [{ ...payload, timestamp: new Date().toISOString() }, ...(state.actions || [])].slice(0, 100);
+      if (state.activeView !== "settings") renderPage();
+    });
     state.source.onerror = () => {
       updatePing("wait");
       setOffline(true);
@@ -3912,6 +3942,7 @@
       $(".net-banner")?.remove();
       const b = $(".dock .primary");
       if (b) b.disabled = false;
+      await refreshDashboardStats(state.guild?.id, false);
     } catch (e) {
       state.failures++;
       if (state.failures >= 2) setOffline(true);

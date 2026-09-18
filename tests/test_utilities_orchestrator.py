@@ -187,6 +187,48 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("تحذير", embed.fields[2].value)
         self.assertIn("طرد الأعضاء", embed.fields[3].value)
 
+    async def test_command_shortcut_executes_the_real_slash_callback(self):
+        async def callback(interaction):
+            await interaction.response.send_message("نفّذ الأمر فعلياً")
+
+        command = SimpleNamespace(
+            name="warn",
+            qualified_name="warn",
+            callback=callback,
+            binding=None,
+        )
+        self.bot.tree.get_command = lambda name: command if name == "warn" else None
+        await self.cog.add_shortcut(700, "تحذير", "command", target="/warn")
+
+        message = FakeMessage("تحذير")
+        await self.cog.on_message(message)
+
+        self.assertEqual(len(message.channel.sent), 1)
+        self.assertEqual(message.channel.sent[0][0], "نفّذ الأمر فعلياً")
+
+    async def test_command_shortcut_cannot_bypass_channel_policy(self):
+        executed = []
+
+        async def callback(interaction):
+            executed.append(True)
+            await interaction.response.send_message("لا يجب أن يصل هنا")
+
+        command = SimpleNamespace(
+            name="warn",
+            qualified_name="warn",
+            callback=callback,
+            binding=None,
+        )
+        self.bot.tree.get_command = lambda name: command if name == "warn" else None
+        await self.cog.toggle_command(700, "warn", True, [], [301])
+        await self.cog.add_shortcut(700, "تحذير", "command", target="/warn")
+
+        message = FakeMessage("تحذير")
+        await self.cog.on_message(message)
+
+        self.assertEqual(executed, [])
+        self.assertIn("غير مسموح", message.channel.sent[0][0])
+
 
 if __name__ == "__main__":
     unittest.main()

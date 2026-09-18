@@ -41,6 +41,8 @@
     selectedCommandIds: [],
     commandSimulatorText: "",
     commandDetail: null,
+    shortcutCommandId: "",
+    shortcutInputText: null,
     tickets: {
       active: [],
       archive: [],

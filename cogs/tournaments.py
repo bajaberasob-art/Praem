@@ -4,6 +4,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from database import get_tournament_scores, record_tournament_score
+
 
 class TournamentEntryView(discord.ui.View):
     def __init__(self, title: str, max_players: int):
@@ -270,8 +272,10 @@ class Tournaments(commands.Cog):
         loser_team: str,
         score: str,
     ):
-        self.team_scores[winner_team] = (
-            self.team_scores.get(winner_team, 0) + 3
+        await record_tournament_score(
+            itx.guild.id,
+            winner_team,
+            loser_team,
         )
         embed = discord.Embed(
             title="🏆 توثيق نتيجة مباراة رسمية",
@@ -300,6 +304,29 @@ class Tournaments(commands.Cog):
             "✅ تم تسجيل النتيجة وتحديث النقاط.",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="standings",
+        description="عرض ترتيب فرق البطولات المحفوظ",
+    )
+    async def standings(self, itx: discord.Interaction):
+        rows = await get_tournament_scores(itx.guild.id)
+        if not rows:
+            return await itx.response.send_message(
+                "لا توجد نتائج بطولات محفوظة بعد.",
+                ephemeral=True,
+            )
+        lines = [
+            f"**{index}.** {row['team_name']} — "
+            f"`{row['points']}` نقطة · {row['wins']} فوز · {row['losses']} خسارة"
+            for index, row in enumerate(rows, 1)
+        ]
+        embed = discord.Embed(
+            title="🏆 ترتيب البطولات",
+            description="\n".join(lines),
+            color=0xF1C40F,
+        )
+        await itx.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):

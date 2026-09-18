@@ -714,12 +714,12 @@ class Utilities(commands.Cog):
             and command.name != "help"
         ]
         aliases = {
-            "mod": {"timeout", "untimeout", "warn", "warnings", "clear", "lockdown"},
+            "mod": {"timeout", "untimeout", "warn", "unwarn", "warnings", "clear", "lockdown", "slowmode"},
             "security": {"setup_captcha"},
             "tickets": {"setup_tickets", "suggest"},
             "ai": {"ask_ai", "imagine", "summarize", "transcript", "backup_structure"},
-            "economy": {"profile", "daily", "work", "deposit", "withdraw", "rob", "giveaway"},
-            "tournament": {"scrim_split", "scrim_teams", "map_randomizer", "tournament_open", "match_record"},
+            "economy": {"profile", "daily", "work", "pay", "leaderboard", "deposit", "withdraw", "rob", "giveaway"},
+            "tournament": {"scrim_split", "scrim_teams", "map_randomizer", "tournament_open", "match_record", "standings"},
             "server": {"ping", "serverinfo", "avatar", "say", "setup_voice", "radio", "stop_radio"},
             "community": {"poll", "remind", "reminders", "reminder_cancel", "setup_counters"},
         }

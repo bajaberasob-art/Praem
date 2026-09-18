@@ -243,7 +243,18 @@ def same_origin(req) -> bool:
     origin = req.headers.get("Origin") or req.headers.get("Referer")
     if not origin:
         return False
-    return urlsplit(origin).netloc.lower() == req.host.lower()
+    origin_host = urlsplit(origin).netloc.lower()
+    expected_hosts = {req.host.lower()}
+    # The dashboard is served through Replit's path proxy. In that path,
+    # aiohttp can see the internal host while the browser sends the public
+    # forwarded host in Origin/Referer.
+    forwarded = req.headers.get("X-Forwarded-Host", "")
+    expected_hosts.update(
+        item.strip().lower().split(",", 1)[0]
+        for item in forwarded.split(",")
+        if item.strip()
+    )
+    return origin_host in expected_hosts
 
 
 def csrf_ok(req, session) -> bool:

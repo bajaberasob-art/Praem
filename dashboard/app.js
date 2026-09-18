@@ -147,6 +147,37 @@
     }
     return r;
   }
+  async function refreshSession() {
+    const r = await api("api/me", { cache: "no-store" });
+    const data = await r.json();
+    if (!data.auth || !data.session) return false;
+    state.session = data.session;
+    return true;
+  }
+  async function writeApi(url, body, retry = true) {
+    const options = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": state.session.csrf,
+      },
+      body: JSON.stringify(body),
+    };
+    let response = await api(url, options);
+    if (response.status === 403 && retry) {
+      let data = {};
+      try {
+        data = await response.clone().json();
+      } catch (_) {
+        data = {};
+      }
+      if (data.error === "csrf" && await refreshSession()) {
+        options.headers["X-CSRF-Token"] = state.session.csrf;
+        response = await api(url, options);
+      }
+    }
+    return response;
+  }
   // Shared components
   function avatar(src, name) {
     const a = el("div", { class: "avatar" });
@@ -2110,13 +2141,9 @@
     b.disabled = true;
     b.replaceChildren(el("span", { class: "spinner" }));
     try {
-      const r = await api(`api/guild/${guildId}/settings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": state.session.csrf,
-        },
-        body: JSON.stringify({ revision: state.revision, changes: snap }),
+      const r = await writeApi(`api/guild/${guildId}/settings`, {
+        revision: state.revision,
+        changes: snap,
       });
       if (guildId !== state.guild.id) return;
       const data = await r.json();
@@ -2142,7 +2169,12 @@
         state.fields = data.fields || {};
         toast("يرجى مراجعة الحقول المعلّمة");
         renderDynamic();
-      } else if (r.status === 403) toast("لا تملك صلاحية تعديل هذا السيرفر");
+      } else if (r.status === 403) {
+        const reason = data.error === "csrf"
+          ? "انتهت جلسة الحماية. أعد تحميل الصفحة ثم جرّب الحفظ."
+          : "لا تملك صلاحية تعديل هذا السيرفر";
+        toast(reason);
+      }
       else if (r.status === 409) conflict(data);
       else if (r.status === 429)
         toast(`تم تجاوز الحد، حاول بعد ${data.retry_after} ثانية`, "warn", 5000);
@@ -2170,13 +2202,9 @@
       button.replaceChildren(el("span", { class: "spinner" }), document.createTextNode(" جارٍ الحفظ…"));
     }
     try {
-      const r = await api(`api/guild/${guildId}/onboarding`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": state.session.csrf,
-        },
-        body: JSON.stringify({ revision: state.revision, changes: snap }),
+      const r = await writeApi(`api/guild/${guildId}/onboarding`, {
+        revision: state.revision,
+        changes: snap,
       });
       if (guildId !== state.guild.id) return false;
       const data = await r.json();
@@ -2202,7 +2230,12 @@
         state.fields = data.fields || {};
         toast("يرجى مراجعة حقول onboarding");
         renderDynamic();
-      } else if (r.status === 403) toast("لا تملك صلاحية تعديل هذا السيرفر");
+      } else if (r.status === 403) {
+        const reason = data.error === "csrf"
+          ? "انتهت جلسة الحماية. أعد تحميل الصفحة ثم جرّب الحفظ."
+          : "لا تملك صلاحية تعديل هذا السيرفر";
+        toast(reason);
+      }
       else if (r.status === 409) onboardingConflict(data);
       else if (r.status === 429) toast(`تم تجاوز الحد، حاول بعد ${data.retry_after || 5} ثانية`, "warn", 5000);
       else toast("تعذر حفظ إعدادات onboarding");

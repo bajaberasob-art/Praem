@@ -979,7 +979,10 @@ class Community(commands.Cog):
             embed.add_field(name=str(key)[:256], value=str(value)[:1024] or "—", inline=True)
         embed.add_field(
             name="التعليمات",
-            value="استلم التذكرة، صعّدها عند الحاجة، ثم أغلقها بعد حل الطلب.",
+            value=(
+                "استلم التذكرة، أضف أو أزل أعضاء عند الحاجة، حوّلها لموظف آخر "
+                "أو اتركها للفريق، ثم أغلقها بعد حل الطلب."
+            ),
             inline=False,
         )
         return embed

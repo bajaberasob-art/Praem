@@ -109,6 +109,50 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("@everyone", assignable)
         self.assertEqual((assignable["مدير"], assignable["Nitro Booster"], assignable["قيد التحقق"]), (False, False, True))
 
+    async def test_commands_and_auto_responses_api(self):
+        status, data = await call(ws.api_guild_commands, request("GET", "/x", "s10"))
+        self.assertEqual(status, 200)
+        self.assertEqual(data["commands"][0]["command_name"], "ping")
+        self.assertEqual(data["commands"][0]["enabled"], True)
+
+        body = {
+            "command_name": "ping",
+            "enabled": False,
+            "allowed_roles": [str(ROLES[2].id)],
+        }
+        status, data = await call(
+            ws.api_guild_commands_toggle,
+            request("POST", "/x", "s10", body, self.headers),
+        )
+        self.assertEqual((status, data["command"]["enabled"]), (200, False))
+        status, data = await call(ws.api_guild_commands, request("GET", "/x", "s10"))
+        command = next(item for item in data["commands"] if item["command_name"] == "ping")
+        self.assertEqual((command["enabled"], command["allowed_roles"]), (False, [str(ROLES[2].id)]))
+
+        rule_body = {
+            "trigger": "hello",
+            "match_type": "contains",
+            "response": "Hi {user}",
+            "cooldown_seconds": 10,
+            "channel_id": str(CHANNELS[1].id),
+        }
+        status, data = await call(
+            ws.api_guild_auto_responses_save,
+            request("POST", "/x", "s10", rule_body, self.headers),
+        )
+        self.assertEqual(status, 200)
+        rule_id = data["rule"]["id"]
+        self.assertEqual(data["rule"]["channel_id"], str(CHANNELS[1].id))
+        status, data = await call(ws.api_guild_auto_responses, request("GET", "/x", "s10"))
+        self.assertEqual((status, len(data["rules"])), (200, 1))
+        delete_req = request("DELETE", "/x", "s10", headers=self.headers)
+        delete_req.match_info["rule_id"] = str(rule_id)
+        status, data = await call(
+            ws.api_guild_auto_responses_delete,
+            delete_req,
+        )
+        self.assertEqual((status, data["deleted"]), (200, True))
+
 
 if __name__ == "__main__":
     unittest.main()

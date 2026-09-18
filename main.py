@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from database import init_db
+from cogs.utilities import dynamic_prefix
 from web_server import start_web_server
 
 
@@ -52,7 +53,7 @@ def configured_sync_guild() -> discord.Object | None:
 class EnterpriseBot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix="!",
+            command_prefix=dynamic_prefix,
             intents=intents,
             help_command=None,
             max_messages=1000,

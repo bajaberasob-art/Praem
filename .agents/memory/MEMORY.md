@@ -3,3 +3,4 @@
 - [Engagement onboarding rules](engagement-onboarding.md) — serialize invite comparisons and restore persistent component views after every ready event.
 - [Command orchestrator architecture](command-orchestrator.md) — dynamic prefixes, Slash-aware policy checks, and ready-time trigger hydration.
 - [Ticket system architecture](ticket-system.md) — persistent custom IDs, SQLite transcripts, and null-safe staff KPI timing.
+- [Durable background jobs](durable-background-jobs.md) — long-lived reminders must be persisted and resumed by a polling worker, not held in command-local sleeps.

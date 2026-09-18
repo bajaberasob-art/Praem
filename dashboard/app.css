@@ -150,6 +150,14 @@ a {
   place-items: center;
   font-size: 11px;
   flex: none;
+  overflow: hidden;
+}
+.guild-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 .ell {
   overflow: hidden;
@@ -350,6 +358,7 @@ textarea {
   border-radius: 12px;
   padding: 8px;
   box-shadow: 0 20px 45px #000c;
+  max-width: min(100%, calc(100vw - 24px));
 }
 .popover[hidden] {
   display: none;
@@ -654,6 +663,10 @@ textarea {
   }
 }
 @media (max-width: 650px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
   .topbar-inner {
     flex-wrap: wrap;
     padding: 10px 12px;
@@ -705,6 +718,18 @@ textarea {
   }
   .toast {
     top: 125px;
+  }
+  .popover {
+    max-height: min(360px, calc(100dvh - 105px));
+    overflow: auto;
+  }
+  .modal-back {
+    padding: 12px;
+  }
+  .modal {
+    max-height: calc(100dvh - 24px);
+    overflow: auto;
+    padding: 18px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

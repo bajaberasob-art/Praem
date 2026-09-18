@@ -344,10 +344,18 @@ async def init_db() -> None:
                     command_name TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     allowed_roles TEXT NOT NULL DEFAULT '[]',
+                    allowed_channels TEXT NOT NULL DEFAULT '[]',
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (guild_id, command_name)
                 );
             """)
+            async with db.execute("PRAGMA table_info(guild_command_controls)") as cur:
+                command_control_columns = {row[1] for row in await cur.fetchall()}
+            if "allowed_channels" not in command_control_columns:
+                await db.execute(
+                    "ALTER TABLE guild_command_controls "
+                    "ADD COLUMN allowed_channels TEXT NOT NULL DEFAULT '[]'"
+                )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_command_controls_guild "
                 "ON guild_command_controls(guild_id);"
@@ -1453,7 +1461,7 @@ async def get_command_controls(guild_id: int) -> dict[str, dict[str, Any]]:
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
             """
-            SELECT command_name, enabled, allowed_roles, updated_at
+            SELECT command_name, enabled, allowed_roles, allowed_channels, updated_at
             FROM guild_command_controls
             WHERE guild_id = ?
             ORDER BY command_name
@@ -1465,6 +1473,7 @@ async def get_command_controls(guild_id: int) -> dict[str, dict[str, Any]]:
                 item = dict(row)
                 item["enabled"] = bool(item["enabled"])
                 item["allowed_roles"] = _json_ids(item["allowed_roles"])
+                item["allowed_channels"] = _json_ids(item["allowed_channels"])
                 result[item["command_name"]] = item
             return result
 
@@ -1474,17 +1483,20 @@ async def save_command_control(
     command_name: str,
     enabled: bool,
     allowed_roles: list[int | str] | None = None,
+    allowed_channels: list[int | str] | None = None,
 ) -> dict[str, Any]:
     roles = [str(role_id) for role_id in (allowed_roles or []) if str(role_id).isdigit()]
+    channels = [str(channel_id) for channel_id in (allowed_channels or []) if str(channel_id).isdigit()]
     async with connect(aiosqlite.Row) as db:
         await db.execute(
             """
             INSERT INTO guild_command_controls
-                (guild_id, command_name, enabled, allowed_roles, updated_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (guild_id, command_name, enabled, allowed_roles, allowed_channels, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(guild_id, command_name) DO UPDATE SET
                 enabled = excluded.enabled,
                 allowed_roles = excluded.allowed_roles,
+                allowed_channels = excluded.allowed_channels,
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
@@ -1492,6 +1504,7 @@ async def save_command_control(
                 str(command_name).strip().lower(),
                 int(bool(enabled)),
                 json.dumps(roles, ensure_ascii=False),
+                json.dumps(channels, ensure_ascii=False),
             ),
         )
         await db.commit()
@@ -1499,6 +1512,7 @@ async def save_command_control(
         "command_name": str(command_name).strip().lower(),
         "enabled": bool(enabled),
         "allowed_roles": roles,
+        "allowed_channels": channels,
     }
 
 

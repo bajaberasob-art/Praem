@@ -212,6 +212,7 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
             "command_name": "ping",
             "enabled": False,
             "allowed_roles": [str(ROLES[2].id)],
+            "allowed_channels": [str(CHANNELS[1].id)],
         }
         status, data = await call(
             ws.api_guild_commands_toggle,
@@ -220,7 +221,14 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((status, data["command"]["enabled"]), (200, False))
         status, data = await call(ws.api_guild_commands, request("GET", "/x", "s10"))
         command = next(item for item in data["commands"] if item["command_name"] == "ping")
-        self.assertEqual((command["enabled"], command["allowed_roles"]), (False, [str(ROLES[2].id)]))
+        self.assertEqual(
+            (
+                command["enabled"],
+                command["allowed_roles"],
+                command["allowed_channels"],
+            ),
+            (False, [str(ROLES[2].id)], [str(CHANNELS[1].id)]),
+        )
 
         rule_body = {
             "trigger": "hello",

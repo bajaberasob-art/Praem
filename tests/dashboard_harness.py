@@ -215,6 +215,7 @@ class FakeBot:
                 "cog": "Utilities",
                 "enabled": True,
                 "allowed_roles": [],
+                "allowed_channels": [],
                 "configured": False,
                 "aliases": [],
             }]
@@ -240,9 +241,11 @@ class FakeBot:
                 "commands": commands,
             }
 
-        async def toggle_command(self, guild_id, command_name, enabled, allowed_roles):
+        async def toggle_command(
+            self, guild_id, command_name, enabled, allowed_roles, allowed_channels=None
+        ):
             result = await database.save_command_control(
-                guild_id, command_name, enabled, allowed_roles
+                guild_id, command_name, enabled, allowed_roles, allowed_channels or []
             )
             item = next((x for x in self.commands if x["command_name"] == command_name), None)
             if item is None:
@@ -253,7 +256,12 @@ class FakeBot:
                     "aliases": [],
                 }
                 self.commands.append(item)
-            item.update(enabled=enabled, allowed_roles=allowed_roles, configured=True)
+            item.update(
+                enabled=enabled,
+                allowed_roles=allowed_roles,
+                allowed_channels=allowed_channels or [],
+                configured=True,
+            )
             return result
 
         async def add_auto_responder(self, guild_id, trigger, match_type, response, **kwargs):

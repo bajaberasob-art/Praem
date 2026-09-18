@@ -14,3 +14,9 @@ Response time starts at ticket creation and ends at the first verified support-s
 **Why:** These timestamps map directly to support KPIs and avoid counting the ticket owner's messages as staff response.
 
 **How to apply:** Record the first staff message once, preserve null response times for unanswered tickets, and calculate averages with null-safe SQL.
+
+The dashboard transcript viewer should remain an in-page, sandboxed iframe fed by the no-store HTML endpoint.
+
+**Why:** Staff need to inspect archived conversations without losing dashboard context, while transcript HTML must not gain script privileges in the operator's page.
+
+**How to apply:** Keep transcript responses inline and uncached, set an empty iframe sandbox for the viewer, and scope every transcript lookup to both guild ID and ticket ID.

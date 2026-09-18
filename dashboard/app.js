@@ -2028,8 +2028,28 @@
         ),
       ),
       el("div", { class: "ticket-category-heading" },
-        el("div", {}, el("h4", { text: "تصنيفات التذاكر" }), el("small", { text: "يمكن اختيار رتب الدعم لكل تصنيف" })),
-        el("span", { class: "live-dot", text: `${state.ticketCategories.length} تصنيفات` }),
+        el("div", {}, el("h4", { text: "تصنيفات التذاكر" }), el("small", { text: "أضف أقسام الدعم وحدد فريق المتابعة ورتب التصعيد لكل قسم." })),
+        el("div", { class: "ticket-category-heading-actions" },
+          el("span", { class: "live-dot", text: `${state.ticketCategories.length} تصنيفات` }),
+          el("button", {
+            class: "btn ghost ticket-add-category",
+            type: "button",
+            text: "＋ قسم جديد",
+            onClick: () => {
+              if (state.ticketCategories.length >= 25) return toast("لا يمكن إضافة أكثر من 25 قسماً");
+              const next = state.ticketCategories.length + 1;
+              state.ticketCategories.push({
+                key: `support_${Date.now()}_${next}`,
+                label: `قسم دعم ${next}`,
+                emoji: "🎫",
+                support_role_ids: [],
+                senior_role_ids: [],
+                intake_fields: [],
+              });
+              renderPage();
+            },
+          }),
+        ),
       ),
       ticketCategoryEditor(),
       el("button", { class: "btn primary ticket-deploy", type: "submit", text: "نشر لوحة التذاكر للسيرفر 🚀" }),
@@ -2098,15 +2118,73 @@
       ),
     )));
      const cannedForm = el("form", { class: "canned-form" },
-      el("input", { name: "title", class: "studio-input", placeholder: "عنوان سريع: سياسة الاسترداد" }),
-      el("input", { name: "category", class: "studio-input", placeholder: "التصنيف", value: "عام" }),
-      el("textarea", { name: "content", class: "studio-textarea", placeholder: "نص الرد الجاهز…" }),
-       el("button", { class: "btn primary canned-submit", type: "submit", text: "حفظ الرد الجاهز" }),
-    );
+       el("div", { class: "canned-form-heading" },
+         el("div", {}, el("span", { class: "eyebrow", text: "REPLY KIT" }), el("h4", { text: "رد سريع للموظفين" })),
+         el("small", { text: "يستخدمه الموظف داخل التذكرة عبر /ticket_reply" }),
+       ),
+       el("div", { class: "canned-form-fields" },
+         el("label", { class: "canned-field" }, "العنوان",
+           el("input", { name: "title", class: "studio-input", maxlength: "120", placeholder: "سياسة الاسترداد" }),
+         ),
+         el("label", { class: "canned-field" }, "التصنيف",
+           el("input", { name: "category", class: "studio-input", maxlength: "80", placeholder: "عام", value: "عام" }),
+         ),
+         el("label", { class: "canned-field" }, "الاختصار",
+           el("input", { name: "shortcut", class: "studio-input", maxlength: "80", placeholder: "refund أو /refund" }),
+         ),
+         el("label", { class: "canned-field" }, "ملصق اختياري",
+           el("select", { name: "sticker_id", class: "studio-input canned-sticker-select" },
+             el("option", { value: "" }, "بدون ملصق"),
+             (state.meta?.stickers || []).map((sticker) => el("option", { value: sticker.id }, `◇ ${sticker.name}`)),
+           ),
+         ),
+       ),
+       el("div", { class: "canned-token-bar" },
+         el("small", { text: "متغيرات قابلة للإدراج" }),
+         ["{user}", "{staff}", "{channel}", "{server}", "{count}", "{members}", "{ticket}", "{subject}", "{category}", "{random:أهلاً|مرحباً}"].map((token) =>
+           el("button", {
+             class: "token-chip",
+             type: "button",
+             text: token,
+             title: `إدراج ${token}`,
+             onClick: () => {
+               const textarea = cannedForm.elements.content;
+               const start = textarea.selectionStart ?? textarea.value.length;
+               const end = textarea.selectionEnd ?? start;
+               textarea.value = `${textarea.value.slice(0, start)}${token}${textarea.value.slice(end)}`;
+               textarea.focus();
+               textarea.setSelectionRange(start + token.length, start + token.length);
+             },
+           }),
+         ),
+       ),
+       el("label", { class: "canned-content-field" }, "نص الرد",
+         el("textarea", { name: "content", class: "studio-textarea", maxlength: "2000", rows: "5", placeholder: "أهلاً {user}، سيتابع {staff} طلبك في {channel}…" }),
+       ),
+       el("div", { class: "canned-form-actions" },
+         el("button", { class: "btn ghost canned-cancel", type: "button", text: "تفريغ الحقول", onClick: () => {
+           delete cannedForm.dataset.id;
+           cannedForm.reset();
+           cannedForm.elements.category.value = "عام";
+           cannedForm.querySelector(".canned-submit").textContent = "حفظ الرد الجاهز";
+         } }),
+         el("button", { class: "btn primary canned-submit", type: "submit", text: "حفظ الرد الجاهز" }),
+       ),
+     );
     cannedForm.onsubmit = (event) => { event.preventDefault(); saveCannedResponse(cannedForm); };
     const cannedList = el("div", { class: "canned-list" });
      state.tickets.canned.forEach((item) => cannedList.append(el("div", { class: "canned-row" },
-       el("div", {}, el("strong", { text: item.title }), el("p", { text: item.content })),
+        el("div", { class: "canned-row-copy" },
+          el("div", { class: "canned-row-title" },
+            el("strong", { text: item.title }),
+            item.shortcut ? el("code", { class: "canned-shortcut", text: item.shortcut }) : null,
+          ),
+          el("div", { class: "canned-row-meta" },
+            el("span", { text: item.category || "عام" }),
+            item.sticker_id ? el("span", { class: "canned-sticker-badge", text: "◇ ملصق مرفق" }) : null,
+          ),
+          el("p", { text: item.content }),
+        ),
        el("div", { class: "canned-actions" },
          el("button", {
            class: "icon-action",
@@ -2117,6 +2195,8 @@
              cannedForm.dataset.id = item.id;
              cannedForm.elements.title.value = item.title || "";
              cannedForm.elements.category.value = item.category || "عام";
+              cannedForm.elements.shortcut.value = item.shortcut || "";
+              cannedForm.elements.sticker_id.value = item.sticker_id || "";
              cannedForm.elements.content.value = item.content || "";
              cannedForm.querySelector(".canned-submit").textContent = "تحديث الرد";
              cannedForm.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2132,11 +2212,11 @@
         el("h2", { text: "منصة التذاكر والأرشيف" }),
         el("p", { text: "انشر لوحة الدعم، راقب سرعة الفريق، وافتح المحادثات المغلقة داخل لوحة AMOLED نفسها." }),
       ),
-      card("Ticket Launcher Studio", launchForm),
+      card("استوديو لوحة الدعم", launchForm),
       el("section", { class: "ticket-kpi-section" }, el("div", { class: "section-heading" }, el("div", {}, el("div", { class: "eyebrow", text: "STAFF VELOCITY" }), el("h3", { text: "مؤشرات فريق الدعم" })), el("span", { class: "live-dot", text: `${kpis.length} موظفين` })), kpiCards),
        el("section", { class: "ticket-radar-section" }, el("div", { class: "section-heading" }, el("div", {}, el("div", { class: "eyebrow", text: "ACTIVE RADAR" }), el("h3", { text: "التذاكر النشطة" })), el("span", { class: "live-dot", text: `${state.tickets.active.length} مفتوحة` })), active),
-      card("Searchable Transcript Vault", el("div", { class: "ticket-vault" }, archiveSearch, archiveRows)),
-      card("Canned Responses Drawer", el("div", { class: "canned-drawer" }, cannedForm, cannedList)),
+       card("خزينة السجلات", el("div", { class: "ticket-vault" }, archiveSearch, archiveRows)),
+       card("مكتبة الردود السريعة", el("div", { class: "canned-drawer" }, cannedForm, cannedList)),
     );
   }
   function commandsView() {

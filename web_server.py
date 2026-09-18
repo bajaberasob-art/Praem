@@ -20,6 +20,8 @@ from database import (
     get_auto_responders,
     get_shortcuts,
     get_warning,
+    get_recent_warnings,
+    get_dashboard_stats,
     get_guild_settings,
     delete_shortcut,
     save_shortcut,
@@ -127,54 +129,56 @@ async def callback(req):
     if not C_ID or not C_SEC or not R_URI:
         return web.Response(text="إعدادات تسجيل الدخول غير مكتملة.", status=503)
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-            data = {
-                "client_id": C_ID, "client_secret": C_SEC,
-                "grant_type": "authorization_code", "code": code,
-                "redirect_uri": R_URI,
-            }
-            async with session.post(f"{DISCORD_API}/oauth2/token", data=data) as response:
+        session = getattr(bot_ref, "session", None)
+        if session is None or session.closed:
+            return web.Response(text="خدمة الاتصال غير جاهزة.", status=503)
+        data = {
+            "client_id": C_ID, "client_secret": C_SEC,
+            "grant_type": "authorization_code", "code": code,
+            "redirect_uri": R_URI,
+        }
+        async with session.post(f"{DISCORD_API}/oauth2/token", data=data) as response:
+            if response.status != 200:
+                logger.warning(
+                    "Discord OAuth token exchange rejected with status=%s",
+                    response.status,
+                )
+                return web.Response(
+                    text=(
+                        "فشل تسجيل الدخول عبر Discord. تحقق من أن CLIENT_SECRET هو "
+                        "Client Secret الموجود في OAuth2 → General، وليس Bot Token "
+                        "أو Public Key، وأن Redirect URI مطابق تماماً."
+                    ),
+                    status=400,
+                )
+            token = (await response.json()).get("access_token")
+            if not token:
+                return web.Response(text="استجابة المصادقة غير صالحة.", status=502)
+        headers = {"Authorization": f"Bearer {token}"}
+        async with session.get(f"{DISCORD_API}/users/@me", headers=headers) as response:
+            if response.status != 200:
+                return web.Response(text="تعذر جلب بيانات المستخدم.", status=502)
+            user_data = await response.json()
+        guild_data, after = [], None
+        while True:
+            params = {"limit": "200"}
+            if after:
+                params["after"] = after
+            async with session.get(
+                f"{DISCORD_API}/users/@me/guilds", headers=headers, params=params,
+            ) as response:
                 if response.status != 200:
-                    logger.warning(
-                        "Discord OAuth token exchange rejected with status=%s",
-                        response.status,
-                    )
-                    return web.Response(
-                        text=(
-                            "فشل تسجيل الدخول عبر Discord. تحقق من أن CLIENT_SECRET هو "
-                            "Client Secret الموجود في OAuth2 → General، وليس Bot Token "
-                            "أو Public Key، وأن Redirect URI مطابق تماماً."
-                        ),
-                        status=400,
-                    )
-                token = (await response.json()).get("access_token")
-                if not token:
-                    return web.Response(text="استجابة المصادقة غير صالحة.", status=502)
-            headers = {"Authorization": f"Bearer {token}"}
-            async with session.get(f"{DISCORD_API}/users/@me", headers=headers) as response:
-                if response.status != 200:
-                    return web.Response(text="تعذر جلب بيانات المستخدم.", status=502)
-                user_data = await response.json()
-            guild_data, after = [], None
-            while True:
-                params = {"limit": "200"}
-                if after:
-                    params["after"] = after
-                async with session.get(
-                    f"{DISCORD_API}/users/@me/guilds", headers=headers, params=params,
-                ) as response:
-                    if response.status != 200:
-                        return web.Response(text="تعذر جلب السيرفرات.", status=502)
-                    page = await response.json()
-                if not isinstance(page, list):
-                    raise ValueError("Invalid guild list")
-                guild_data.extend(page)
-                if len(page) < 200:
-                    break
-                next_after = str(page[-1]["id"])
-                if next_after == after:
-                    raise ValueError("Invalid pagination")
-                after = next_after
+                    return web.Response(text="تعذر جلب السيرفرات.", status=502)
+                page = await response.json()
+            if not isinstance(page, list):
+                raise ValueError("Invalid guild list")
+            guild_data.extend(page)
+            if len(page) < 200:
+                break
+            next_after = str(page[-1]["id"])
+            if next_after == after:
+                raise ValueError("Invalid pagination")
+            after = next_after
 
         guilds = []
         for guild in guild_data:
@@ -234,6 +238,21 @@ async def api_me(req):
 # -------------------------------------------------------------
 def json_error(status: int, error: str, **extra):
     return web.json_response({"error": error, **extra}, status=status)
+
+
+async def read_json_body(req) -> dict:
+    """Read a bounded JSON object for action endpoints."""
+    if req.content_length and req.content_length > MAX_BODY:
+        raise web.HTTPRequestEntityTooLarge(max_size=MAX_BODY, actual_size=req.content_length)
+    if not req.content_type.startswith("application/json"):
+        raise web.HTTPUnsupportedMediaType()
+    try:
+        body = json.loads((await req.content.read(MAX_BODY + 1))[:MAX_BODY].decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise web.HTTPBadRequest(text=json.dumps({"error": "invalid_json"}), content_type="application/json") from error
+    if not isinstance(body, dict):
+        raise web.HTTPBadRequest(text=json.dumps({"error": "validation"}), content_type="application/json")
+    return body
 
 
 def rate_limited(key: tuple, limit: tuple[int, float]) -> float:
@@ -493,6 +512,96 @@ async def api_health(req):
 async def api_guild_meta(req):
     _, guild = await authorize(req)
     return web.json_response(await guild_meta(guild))
+
+
+@routes.get('/api/guild/{guild_id}/stats')
+async def api_guild_stats(req):
+    _, guild = await authorize(req)
+    metrics = (
+        bot_ref.metrics_for_guild(guild.id)
+        if bot_ref and hasattr(bot_ref, "metrics_for_guild")
+        else []
+    )
+    return web.json_response(
+        await get_dashboard_stats(
+            guild.id,
+            member_count=guild.member_count,
+            latency_series=metrics,
+        )
+    )
+
+
+def _security_cog():
+    return bot_ref.get_cog("Security") if bot_ref else None
+
+
+def _moderation_cog():
+    return bot_ref.get_cog("Moderation") if bot_ref else None
+
+
+@routes.get('/api/guild/{guild_id}/actions')
+async def api_guild_actions(req):
+    _, guild = await authorize(req)
+    security = _security_cog()
+    incidents = security.get_incidents(guild.id) if security else []
+    warnings = await get_recent_warnings(guild.id, 50)
+    actions = [
+        {
+            "id": f"security-{index}",
+            "kind": "security",
+            "action": item.get("action_type", item.get("action", "security")),
+            "reason": item.get("mitigation_taken", item.get("reason", "")),
+            "timestamp": item.get("timestamp"),
+        }
+        for index, item in enumerate(incidents)
+    ]
+    actions.extend(
+        {
+            "id": f"infraction-{item['id']}",
+            "kind": "moderation",
+            "action": "warning",
+            "reason": item.get("reason", ""),
+            "timestamp": item.get("timestamp"),
+        }
+        for item in warnings
+    )
+    actions.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+    return web.json_response({"actions": actions[:100]})
+
+
+@routes.post('/api/guild/{guild_id}/actions')
+async def api_guild_action(req):
+    session, guild = await authorize(req, write=True)
+    body = await read_json_body(req)
+    action = str(body.get("action", "")).strip()
+    result: dict
+    if action == "lockdown":
+        security = _security_cog()
+        if security is None or "locked" not in body:
+            return json_error(503, "security_unavailable")
+        result = await security.emergency_lockdown(guild.id, bool(body["locked"]))
+    elif action == "revoke_warning":
+        moderation = _moderation_cog()
+        warning_id = body.get("warning_id")
+        if moderation is None or not str(warning_id).isdigit():
+            return json_error(400, "validation", fields={"warning_id": "رقم المخالفة غير صالح"})
+        result = {"deleted": bool(await moderation.revoke_warning(int(warning_id)))}
+    elif action == "quick_unmute":
+        moderation = _moderation_cog()
+        user_id = body.get("user_id")
+        if moderation is None or not str(user_id).isdigit():
+            return json_error(400, "validation", fields={"user_id": "رقم العضو غير صالح"})
+        result = await moderation.quick_unmute(guild.id, int(user_id))
+    else:
+        return json_error(400, "unsupported_action")
+    logger.info(
+        "Dashboard action %s applied in guild %s by user %s",
+        action,
+        guild.id,
+        session["id"],
+    )
+    broadcast(guild.id, {"type": "action", "action": action, "result": result})
+    return web.json_response({"ok": True, "action": action, "result": result})
 
 
 def _utilities_cog():

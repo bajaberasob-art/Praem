@@ -1784,7 +1784,7 @@
         }),
       ),
     );
-    main.append(commandsView(), onboardingView(), securityView());
+    main.append(ticketsView(), commandsView(), onboardingView(), securityView());
     const general = el("div", { class: "fields" });
     general.append(
       input("prefix", "بادئة الأوامر", "text", {

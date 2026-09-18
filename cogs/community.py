@@ -574,13 +574,109 @@ class Community(commands.Cog):
         category: str = "عام",
         created_by: int | str | None = None,
         response_id: int | None = None,
+        shortcut: str | None = None,
+        sticker_id: int | str | None = None,
     ) -> dict:
         return await save_canned_response(
-            guild_id, title, content, category, created_by, response_id
+            guild_id,
+            title,
+            content,
+            category,
+            created_by,
+            response_id,
+            shortcut,
+            sticker_id,
         )
 
     async def delete_canned_response(self, guild_id: int, response_id: int) -> bool:
         return await delete_canned_response(guild_id, response_id)
+
+    @staticmethod
+    def _render_ticket_reply(template: str, itx: discord.Interaction, ticket: dict) -> str:
+        guild = itx.guild
+        channel = itx.channel
+        values = {
+            "user": f"<@{ticket['user_id']}>",
+            "staff": getattr(itx.user, "mention", f"<@{itx.user.id}>"),
+            "channel": getattr(channel, "mention", f"#{getattr(channel, 'name', 'ticket')}"),
+            "server": getattr(guild, "name", "السيرفر"),
+            "count": f"{getattr(guild, 'member_count', 0):,}",
+            "members": f"{getattr(guild, 'member_count', 0):,}",
+            "ticket": str(ticket["id"]),
+            "subject": ticket.get("subject", ""),
+            "category": ticket.get("category_label", ""),
+        }
+        rendered = str(template or "")
+        for key, value in values.items():
+            rendered = rendered.replace("{" + key + "}", str(value))
+
+        def choose(match: re.Match) -> str:
+            options = [item.strip() for item in match.group(1).split("|") if item.strip()]
+            return options[0] if options else ""
+
+        return re.sub(r"\{random:([^{}|]+(?:\|[^{}|]+)+)\}", choose, rendered)[:2000]
+
+    async def _find_ticket_sticker(self, guild, sticker_id):
+        if sticker_id in (None, ""):
+            return None
+        for sticker in getattr(guild, "stickers", ()) or ():
+            if int(getattr(sticker, "id", 0)) == int(sticker_id):
+                return sticker
+        fetch_stickers = getattr(guild, "fetch_stickers", None)
+        if fetch_stickers is not None:
+            try:
+                for sticker in await fetch_stickers():
+                    if int(getattr(sticker, "id", 0)) == int(sticker_id):
+                        return sticker
+            except (discord.Forbidden, discord.HTTPException):
+                logger.debug("Unable to resolve canned response sticker", exc_info=True)
+        return None
+
+    @app_commands.command(
+        name="ticket_reply",
+        description="إرسال رد سريع داخل التذكرة مع دعم المتغيرات والملصقات",
+    )
+    @app_commands.describe(response="اسم الرد السريع أو اختصاره")
+    async def ticket_reply(self, itx: discord.Interaction, response: str):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] == "closed":
+            return await itx.response.send_message("هذا الأمر يعمل داخل تذكرة مفتوحة فقط.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        query = str(response).strip().casefold()
+        choices = await get_canned_responses(itx.guild.id)
+        selected = next(
+            (
+                item for item in choices
+                if query in {
+                    str(item.get("title", "")).casefold(),
+                    str(item.get("shortcut", "")).casefold(),
+                    str(item.get("id", "")),
+                }
+            ),
+            None,
+        )
+        if not selected:
+            return await itx.response.send_message(
+                "لم أجد رداً سريعاً بهذا الاسم أو الاختصار.", ephemeral=True
+            )
+        content = self._render_ticket_reply(selected["content"], itx, ticket)
+        sticker = await self._find_ticket_sticker(itx.guild, selected.get("sticker_id"))
+        try:
+            await itx.channel.send(
+                content,
+                stickers=[sticker] if sticker else [],
+                allowed_mentions=discord.AllowedMentions(
+                    users=True, roles=False, everyone=False
+                ),
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return await itx.response.send_message("تعذر إرسال الرد السريع في هذه القناة.", ephemeral=True)
+        await record_ticket_response(ticket["guild_id"], ticket["id"])
+        await itx.response.send_message(
+            f"✅ تم إرسال الرد السريع: **{selected['title']}**",
+            ephemeral=True,
+        )
 
     async def add_internal_note(
         self, guild_id: int, ticket_id: int, staff_id: int, content: str

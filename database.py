@@ -2204,7 +2204,8 @@ async def get_canned_responses(guild_id: int) -> list[dict[str, Any]]:
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
             """
-            SELECT id, guild_id, title, content, category, created_by, updated_at
+            SELECT id, guild_id, title, content, category, shortcut, sticker_id,
+                   created_by, updated_at
             FROM canned_responses
             WHERE guild_id = ?
             ORDER BY updated_at DESC, id DESC
@@ -2221,18 +2222,22 @@ async def save_canned_response(
     category: str = "عام",
     created_by: int | str | None = None,
     response_id: int | None = None,
+    shortcut: str | None = None,
+    sticker_id: int | str | None = None,
 ) -> dict[str, Any]:
     async with connect(aiosqlite.Row) as db:
         if response_id is not None:
             cursor = await db.execute(
                 """
                 UPDATE canned_responses
-                SET title = ?, content = ?, category = ?,
+                SET title = ?, content = ?, category = ?, shortcut = ?, sticker_id = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE guild_id = ? AND id = ?
                 """,
                 (
                     str(title)[:120], str(content)[:2000], str(category)[:80],
+                    str(shortcut).strip()[:80] if shortcut else None,
+                    int(sticker_id) if sticker_id not in (None, "") else None,
                     int(guild_id), int(response_id),
                 ),
             )
@@ -2240,16 +2245,20 @@ async def save_canned_response(
             cursor = await db.execute(
                 """
                 INSERT INTO canned_responses
-                    (guild_id, title, content, category, created_by)
-                VALUES (?, ?, ?, ?, ?)
+                    (guild_id, title, content, category, shortcut, sticker_id, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(guild_id, title) DO UPDATE SET
                     content = excluded.content,
                     category = excluded.category,
+                    shortcut = excluded.shortcut,
+                    sticker_id = excluded.sticker_id,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
                     int(guild_id), str(title)[:120], str(content)[:2000],
                     str(category)[:80],
+                    str(shortcut).strip()[:80] if shortcut else None,
+                    int(sticker_id) if sticker_id not in (None, "") else None,
                     int(created_by) if created_by is not None else None,
                 ),
             )
@@ -2258,7 +2267,8 @@ async def save_canned_response(
             return {}
         async with db.execute(
             """
-            SELECT id, guild_id, title, content, category, created_by, updated_at
+            SELECT id, guild_id, title, content, category, shortcut, sticker_id,
+                   created_by, updated_at
             FROM canned_responses
             WHERE guild_id = ? AND title = ?
             """,

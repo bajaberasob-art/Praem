@@ -2240,6 +2240,192 @@ textarea {
   color: #7388a4;
   font-weight: 500;
 }
+.command-section-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid #171c2b;
+  border-radius: 12px;
+  padding: 9px 11px;
+  background: linear-gradient(180deg, #0b0a13, #07070d);
+  color: #f3e8ff;
+  cursor: pointer;
+  direction: rtl;
+  text-align: right;
+  box-shadow: inset 0 1px #ffffff08;
+}
+.command-section-head:hover {
+  border-color: #3a2452;
+  background: #100b18;
+}
+.command-section-icon,
+.command-list-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 7px;
+  font-size: .82rem;
+}
+.command-section-icon {
+  width: 28px;
+  height: 28px;
+  font-size: .78rem;
+}
+.command-section-icon.tone-pink,
+.command-list-icon.tone-pink { background: #4a1c3a; color: #f9a8d4; }
+.command-section-icon.tone-red,
+.command-list-icon.tone-red { background: #3e1524; color: #fb7185; }
+.command-section-icon.tone-gold,
+.command-list-icon.tone-gold { background: #4c3512; color: #facc15; }
+.command-section-icon.tone-blue,
+.command-list-icon.tone-blue { background: #122f57; color: #60a5fa; }
+.command-section-icon.tone-purple,
+.command-list-icon.tone-purple { background: #30195a; color: #c084fc; }
+.command-section-icon.tone-slate,
+.command-list-icon.tone-slate { background: #1b2635; color: #a5b4fc; }
+.command-section-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.command-section-copy strong {
+  color: #f5edf9;
+  font-size: .76rem;
+}
+.command-section-copy small {
+  color: #656176;
+  font-size: .59rem;
+}
+.command-section-chevron {
+  color: #777183;
+  font-size: .75rem;
+}
+.command-section-list {
+  display: grid;
+  gap: 4px;
+  padding: 2px 0 0;
+}
+.command-list-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  border-bottom: 1px solid #15141e;
+  padding: 8px 10px;
+  background: linear-gradient(90deg, #08080e, #0a0911 72%, #0b0912);
+  direction: rtl;
+  transition: background .18s, border-color .18s;
+}
+.command-list-row:hover {
+  border-color: #30233c;
+  background: #110c17;
+}
+.command-list-row.has-warning {
+  border-inline-start: 2px solid #fb7185;
+}
+.command-list-icon {
+  width: 29px;
+  height: 29px;
+  font-size: .75rem;
+}
+.command-list-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  text-align: right;
+}
+.command-list-title {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.command-list-title strong {
+  overflow: hidden;
+  color: #e7e3ea;
+  font-size: .72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-list-copy > small {
+  overflow: hidden;
+  color: #696474;
+  font-size: .58rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-pro-badge {
+  flex: none;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #f58ab4;
+  color: #47132e;
+  font-size: .52rem;
+  font-weight: 800;
+}
+.command-list-aliases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.command-list-aliases code {
+  border-radius: 999px;
+  padding: 1px 5px;
+  background: #211327;
+  color: #cf9beb;
+  font: .52rem ui-monospace, monospace;
+}
+.command-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  direction: ltr;
+}
+.command-list-check {
+  width: 13px;
+  height: 13px;
+  accent-color: #f5a6c7;
+}
+.command-list-settings {
+  width: 25px;
+  height: 25px;
+  border: 1px solid #252332;
+  border-radius: 7px;
+  background: #12111a;
+  color: #888395;
+  cursor: pointer;
+  font-size: .7rem;
+}
+.command-list-settings:hover {
+  border-color: #d98bb2;
+  color: #f4b6d3;
+}
+.command-list-switch {
+  width: 32px;
+  height: 18px;
+  padding: 2px;
+  border-color: #292630;
+  background: #111018;
+}
+.command-list-switch i {
+  width: 12px;
+  height: 12px;
+}
+.command-list-switch.on {
+  border-color: #e579a8;
+  background: #d85a91;
+  box-shadow: 0 0 10px #d85a9166;
+}
+.command-list-switch.on i {
+  background: #fff0f7;
+  transform: translateX(13px);
+}
 .command-row {
   display: grid;
   grid-template-columns: minmax(135px, 0.65fr) minmax(0, 1.55fr) auto;

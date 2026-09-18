@@ -1573,6 +1573,7 @@
           state.selectedCommandIds = select.checked
             ? [...new Set([...state.selectedCommandIds, commandId])]
             : state.selectedCommandIds.filter((id) => id !== commandId);
+          renderPage();
         };
         const row = el("article", { class: `command-list-row${warnings.length ? " has-warning" : ""}` },
           el("div", { class: `command-list-icon tone-${visual.tone}`, text: visual.icon }),

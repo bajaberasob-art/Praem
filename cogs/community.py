@@ -493,6 +493,45 @@ class Community(commands.Cog):
     async def delete_canned_response(self, guild_id: int, response_id: int) -> bool:
         return await delete_canned_response(guild_id, response_id)
 
+    async def reassign_ticket(
+        self,
+        guild_id: int,
+        ticket_id: int,
+        staff_id: int,
+    ) -> dict | None:
+        return await claim_ticket(guild_id, ticket_id, staff_id)
+
+    async def force_close_ticket(
+        self,
+        guild_id: int,
+        ticket_id: int,
+        staff_id: int,
+        reason: str = "أُغلقت من لوحة الإدارة",
+    ) -> dict | None:
+        active = await get_active_tickets(guild_id)
+        ticket = next((item for item in active if item["id"] == int(ticket_id)), None)
+        if not ticket:
+            return None
+        channel = self.bot.get_channel(ticket["channel_id"])
+        if channel is not None:
+            text, content_html = await self._build_transcript(channel, ticket)
+            text += f"\n\nClose reason: {reason}"
+            content_html = content_html.replace(
+                "</body></html>",
+                f"<hr><p><strong>سبب الإغلاق:</strong> {html.escape(reason)}</p></body></html>",
+            )
+            await save_ticket_transcript(
+                ticket["id"], ticket["guild_id"], ticket["channel_id"], text, content_html
+            )
+            try:
+                await channel.edit(
+                    name=f"archived-ticket-{ticket['id']}"[:100],
+                    topic=f"Archived ticket • closed by dashboard",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Could not archive ticket channel %s", ticket["channel_id"])
+        return await close_ticket(guild_id, ticket_id, staff_id, reason)
+
     @staticmethod
     def _is_ticket_staff(member, ticket: dict) -> bool:
         permissions = getattr(member, "guild_permissions", None)

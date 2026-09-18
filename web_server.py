@@ -655,6 +655,46 @@ async def api_guild_tickets_kpis(req):
     return web.json_response({"kpis": await community.get_staff_kpis(guild.id)})
 
 
+@routes.post('/api/guild/{guild_id}/tickets/action')
+async def api_guild_tickets_action(req):
+    session, guild = await authorize(req, write=True)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    try:
+        body = await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    try:
+        ticket_id = int(body.get("ticket_id"))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"ticket_id": "معرف التذكرة غير صالح"})
+    action = str(body.get("action", "")).strip().lower()
+    if action == "close":
+        result = await community.force_close_ticket(
+            guild.id,
+            ticket_id,
+            int(session["id"]),
+            str(body.get("reason") or "أُغلقت من لوحة الإدارة"),
+        )
+    elif action == "reassign":
+        try:
+            staff_id = int(body.get("staff_id"))
+        except (TypeError, ValueError):
+            return json_error(400, "validation", fields={"staff_id": "معرف الموظف غير صالح"})
+        member = guild.get_member(staff_id)
+        if member is None:
+            return json_error(400, "validation", fields={"staff_id": "الموظف غير موجود في السيرفر"})
+        result = await community.reassign_ticket(guild.id, ticket_id, staff_id)
+    else:
+        return json_error(400, "validation", fields={"action": "الإجراء يجب أن يكون close أو reassign"})
+    if not result:
+        return json_error(404, "ticket_not_found")
+    return web.json_response({"ok": True, "ticket": result})
+
+
 @routes.post('/api/guild/{guild_id}/tickets/canned')
 async def api_guild_tickets_canned(req):
     session, guild = await authorize(req, write=True)

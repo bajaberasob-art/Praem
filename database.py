@@ -313,6 +313,74 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_shortcuts_guild "
                 "ON guild_shortcuts(guild_id, enabled);"
             )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_panels (
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    categories TEXT NOT NULL DEFAULT '[]',
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, channel_id, message_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL UNIQUE,
+                    user_id INTEGER NOT NULL,
+                    category_key TEXT NOT NULL,
+                    category_label TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    details TEXT NOT NULL DEFAULT '',
+                    support_role_ids TEXT NOT NULL DEFAULT '[]',
+                    senior_role_ids TEXT NOT NULL DEFAULT '[]',
+                    priority TEXT NOT NULL DEFAULT 'normal',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    claimed_by INTEGER DEFAULT NULL,
+                    opened_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    first_response_at DATETIME DEFAULT NULL,
+                    closed_at DATETIME DEFAULT NULL,
+                    closed_by INTEGER DEFAULT NULL,
+                    close_reason TEXT NOT NULL DEFAULT '',
+                    rating INTEGER DEFAULT NULL
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tickets_guild_status "
+                "ON tickets(guild_id, status);"
+            )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_transcripts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticket_id INTEGER NOT NULL,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    content_text TEXT NOT NULL,
+                    content_html TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_guild "
+                "ON ticket_transcripts(guild_id, created_at DESC);"
+            )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_ratings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticket_id INTEGER NOT NULL UNIQUE,
+                    guild_id INTEGER NOT NULL,
+                    staff_id INTEGER DEFAULT NULL,
+                    user_id INTEGER NOT NULL,
+                    stars INTEGER NOT NULL,
+                    feedback TEXT NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticket_ratings_staff "
+                "ON ticket_ratings(guild_id, staff_id);"
+            )
 
             await db.commit()
             logger.info("[DB] جميع الجداول والفهارس تعمل بكفاءة عالية.")

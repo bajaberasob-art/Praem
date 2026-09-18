@@ -100,7 +100,17 @@ class TournamentEntryView(discord.ui.View):
 class Tournaments(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.team_scores: dict[str, int] = {}
+
+    async def cog_load(self):
+        for tournament in await get_open_tournaments():
+            self.bot.add_view(
+                TournamentEntryView(
+                    tournament["id"],
+                    tournament["title"],
+                    tournament["max_players"],
+                ),
+                message_id=int(tournament["message_id"]),
+            )
 
     @app_commands.command(
         name="scrim_split",
@@ -252,6 +262,18 @@ class Tournaments(commands.Cog):
         title: str,
         max_players: int = 16,
     ):
+        if not 2 <= max_players <= 100:
+            return await itx.response.send_message(
+                "❌ عدد المشاركين يجب أن يكون بين 2 و100.",
+                ephemeral=True,
+            )
+        tournament_id = await create_tournament(
+            itx.guild.id,
+            itx.channel.id,
+            title,
+            max_players,
+            itx.user.id,
+        )
         embed = discord.Embed(
             title=f"🏆 إعلان بطولة: {title}",
             description=(
@@ -263,12 +285,15 @@ class Tournaments(commands.Cog):
         embed.set_footer(
             text="سيقوم المنظم بإنشاء جدول المواجهات عند اكتمال العدد",
         )
-        await itx.channel.send(
+        view = TournamentEntryView(tournament_id, title, max_players)
+        message = await itx.channel.send(
             embed=embed,
-            view=TournamentEntryView(title, max_players),
+            view=view,
         )
+        await set_tournament_message(tournament_id, message.id)
+        self.bot.add_view(view, message_id=message.id)
         await itx.response.send_message(
-            "✅ تم فتح التسجيل للبطولة.",
+            f"✅ تم فتح التسجيل للبطولة رقم `{tournament_id}`.",
             ephemeral=True,
         )
 

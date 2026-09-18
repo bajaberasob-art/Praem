@@ -65,6 +65,7 @@ LEGACY_ALIASES = {
 CACHE_TTL = 60.0
 CACHE_MAX = 1024
 _settings_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict()
+_stats_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict()
 _guild_locks: Dict[int, asyncio.Lock] = {}
 _db_semaphore: Optional[asyncio.Semaphore] = None
 
@@ -157,6 +158,40 @@ async def _migrate_guild_settings(db: aiosqlite.Connection) -> None:
             )
     await db.execute("UPDATE guild_settings SET revision = 0 WHERE revision IS NULL;")
     await db.execute("UPDATE guild_settings SET updated_at = ? WHERE updated_at IS NULL;", (_utc_now(),))
+
+
+async def _ensure_canonical_views(db: aiosqlite.Connection) -> None:
+    """Expose one stable read contract while preserving existing live tables."""
+    views = {
+        "infractions": """
+            SELECT id, guild_id, user_id, moderator_id AS mod_id,
+                   'warning' AS type, reason, timestamp
+            FROM warnings
+        """,
+        "auto_responses": """
+            SELECT id, guild_id, trigger AS trigger_word,
+                   response AS response_text, match_type
+            FROM guild_auto_responders
+        """,
+        "economy_vault": """
+            SELECT user_id, guild_id, balance AS wallet,
+                   bank, xp, level
+            FROM users
+        """,
+    }
+    for name, query in views.items():
+        async with db.execute(
+            "SELECT type FROM sqlite_master WHERE name = ?",
+            (name,),
+        ) as cursor:
+            existing = await cursor.fetchone()
+        if existing and existing[0] != "view":
+            logger.warning(
+                "[DB_SCHEMA] canonical name %s is already a table; keeping it intact",
+                name,
+            )
+            continue
+        await db.execute(f"CREATE VIEW IF NOT EXISTS {name} AS {query}")
 
 
 async def init_db() -> None:
@@ -546,6 +581,7 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_reminders_due "
                 "ON reminders(status, due_at);"
             )
+            await _ensure_canonical_views(db)
 
             await db.commit()
             logger.info("[DB] جميع الجداول والفهارس تعمل بكفاءة عالية.")
@@ -553,6 +589,7 @@ async def init_db() -> None:
         logger.error(f"[DB_FATAL] خطأ أثناء إنشاء الجداول: {e}")
         raise
     _settings_cache.clear()
+    _stats_cache.clear()
 
 
 # -------------------------------------------------------------

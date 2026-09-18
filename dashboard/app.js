@@ -461,7 +461,12 @@
       list = el("div", { class: "options" });
     pop.append(search, list);
     wrap.append(b, pop);
-    let choices = type === "channel" ? state.meta.channels : state.meta.roles,
+    let choices =
+        type === "channel"
+          ? state.meta.channels
+          : type === "sticker"
+            ? state.meta.stickers || []
+            : state.meta.roles,
       active = 0;
     const value = () => state.draft[key];
     const nameFor = (id) =>
@@ -475,7 +480,9 @@
           { class: "choice" },
           type === "channel"
             ? el("span", { text: "#" })
-            : el("span", {
+            : type === "sticker"
+              ? el("span", { text: "✦" })
+              : el("span", {
                 class: "role-dot",
                 style: `background:${found.color || "#64748b"}`,
               }),
@@ -501,7 +508,12 @@
       renderDynamic();
     }
     function build() {
-      choices = type === "channel" ? state.meta.channels : state.meta.roles;
+      choices =
+        type === "channel"
+          ? state.meta.channels
+          : type === "sticker"
+            ? state.meta.stickers || []
+            : state.meta.roles;
       const q = search.value.trim().toLowerCase();
       list.replaceChildren();
       const add = (x, txt, group) => {
@@ -519,7 +531,9 @@
           },
           type === "channel"
             ? el("span", { text: "#" })
-            : el("span", {
+            : type === "sticker"
+              ? el("span", { text: "✦" })
+              : el("span", {
                 class: "role-dot",
                 style: `background:${x.color || "#64748b"}`,
               }),
@@ -612,7 +626,71 @@
       .replace(/\{count\}/g, guild.members == null ? "1,284th" : `${Number(guild.members).toLocaleString("en-US")}th`)
       .replace(/\{inviter\}/g, "دعوة تجريبية");
   }
+  function embedTemplate(template) {
+    return String(template || "")
+      .replace(/\{user\}/g, "@عضو_جديد")
+      .replace(/\{username\}/g, "عضو جديد")
+      .replace(/\{server\}/g, state.guild?.name || "السيرفر")
+      .replace(/\{count\}/g, state.guild?.members == null ? "1,284" : Number(state.guild.members).toLocaleString("en-US"))
+      .replace(/\{inviter\}/g, "دعوة تجريبية");
+  }
+  function normalizeEmbedColor(value) {
+    return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : "#7c3aed";
+  }
+  function welcomeEmbedPreview() {
+    const draft = state.draft || {};
+    const sticker = (state.meta?.stickers || []).find(
+      (item) => String(item.id) === String(draft.welcome_embed_sticker_id),
+    );
+    const image = draft.welcome_embed_image_url || sticker?.url;
+    const color = normalizeEmbedColor(draft.welcome_embed_color);
+    const title = embedTemplate(draft.welcome_embed_title || "أهلاً بك في {server} ✨");
+    const description = embedTemplate(
+      draft.welcome_embed_description ||
+        draft.welcome_message ||
+        "يا هلا {user} في {server}! أنت العضو رقم {count}.",
+    );
+    const card = el(
+      "div",
+      { id: "welcome-embed-preview", class: "welcome-embed-preview", style: `--embed-accent:${color}` },
+      el("div", { class: "embed-preview-author" },
+        el("span", { class: "embed-avatar", text: "✦" }),
+        el("strong", { text: "PRIME | TEAM" }),
+        el("small", { text: "BOT" }),
+      ),
+      el("h3", { text: title }),
+      el("p", { text: description }),
+      el("div", { class: "embed-preview-stats" },
+        el("span", { text: `العضو رقم  #${state.guild?.members || "1,284"}` }),
+        el("span", { text: `${state.guild?.members || "1,284"} عضو` }),
+      ),
+    );
+    if (draft.welcome_embed_show_avatar !== false) {
+      card.append(el("div", { class: "embed-preview-member", text: "@عضو_جديد  •  عضو جديد" }));
+    }
+    if (image) {
+      const imageNode = el("img", { class: "embed-preview-image", src: image, alt: "صورة المعاينة" });
+      imageNode.onerror = () => imageNode.remove();
+      card.append(imageNode);
+    }
+    if (draft.welcome_embed_footer || draft.welcome_embed_enabled) {
+      card.append(el("small", { class: "embed-preview-footer", text: draft.welcome_embed_footer || "PRIME | TEAM" }));
+    }
+    return card;
+  }
+  function refreshEmbedPreview() {
+    const current = $("#welcome-embed-preview");
+    if (current) current.replaceWith(welcomeEmbedPreview());
+  }
   function preview() {
+    if (state.draft?.welcome_embed_enabled) {
+      return el(
+        "div",
+        { id: "preview" },
+        el("div", { class: "preview-title" }, el("span", { text: "معاينة Embed احترافية" }), el("small", { text: "تتحدث بعد كل تعديل" })),
+        welcomeEmbedPreview(),
+      );
+    }
     const body = el("div", { class: "embed" });
     appendSafeMarkdown(body, onboardingTemplate() || "اكتب رسالة الترحيب لرؤية المعاينة.");
     return el(

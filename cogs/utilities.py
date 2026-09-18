@@ -130,11 +130,13 @@ class ShortcutFollowup:
 class ShortcutInteraction:
     """Small interaction adapter for no-argument slash command shortcuts."""
 
-    def __init__(self, message: discord.Message):
+    def __init__(self, message: discord.Message, command=None):
         self.message = message
         self.user = message.author
         self.guild = message.guild
         self.channel = message.channel
+        self.channel_id = message.channel.id
+        self.command = command
         self.client = message._state._get_client() if getattr(message, "_state", None) else None
         self.response = ShortcutInteractionResponse(self)
         self.followup = ShortcutFollowup(self)
@@ -757,8 +759,10 @@ class Utilities(commands.Cog):
         slash_command = self.bot.tree.get_command(command_name)
         if slash_command is not None and target.startswith("/"):
             callback = slash_command.callback
-            interaction = ShortcutInteraction(message)
+            interaction = ShortcutInteraction(message, slash_command)
             try:
+                if not await self.app_command_interceptor(interaction):
+                    return True
                 binding = getattr(slash_command, "binding", None)
                 if binding is not None:
                     await callback(binding, interaction)
@@ -775,12 +779,15 @@ class Utilities(commands.Cog):
             await message.channel.send(f"⚠️ الأمر `{command_name}` غير موجود حالياً.")
             return True
         ctx = await self.bot.get_context(message)
+        ctx.command = command
         try:
+            if not await self.command_interceptor(ctx):
+                return True
             await ctx.invoke(command)
             return True
         except Exception:
             LOGGER.exception("[SHORTCUT] فشل تشغيل الأمر %s", command_name)
-            return False
+            return True
 
     @commands.Cog.listener()
     async def on_voice_state_update(

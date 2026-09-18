@@ -14,3 +14,9 @@ Auto-responder registries are process-local views of durable SQLite rows and mus
 **Why:** Discord reconnects recreate the in-memory event environment, but trigger definitions and shortcut bindings must survive restarts while user-level token buckets should not block users after a restart.
 
 **How to apply:** Load enabled responders and shortcuts on ready or first message, compile regexes during sync, and treat invalid patterns as inactive rather than crashing message dispatch.
+
+The commands dashboard should reuse the existing settings revision endpoint for prefix edits and the shared live guild authorization plus CSRF checks for all mutations.
+
+**Why:** The dashboard already has conflict-safe settings saves and live permission rechecks; introducing a second write protocol would create inconsistent authorization and stale prefix state.
+
+**How to apply:** Keep command/trigger routes behind `authorize(req, write=True)`, send the current settings revision for prefix updates, and refresh the orchestrator registry after trigger changes.

@@ -19,6 +19,7 @@ from database import (
     add_ticket_note,
     get_active_tickets,
     get_ticket_archive,
+    get_ticket,
     get_staff_kpis,
     get_ticket_by_channel,
     get_ticket_panels,
@@ -31,6 +32,8 @@ from database import (
     record_ticket_response,
     record_ticket_user_message,
     set_ticket_status,
+    set_ticket_priority,
+    reopen_ticket,
     get_ticket_notes,
     save_ticket_panel,
     save_ticket_rating,
@@ -95,6 +98,21 @@ def normalize_ticket_categories(categories_config):
             "category_id": str(raw["category_id"]) if raw.get("category_id") else None,
             "support_role_ids": [str(item) for item in raw.get("support_role_ids", []) if str(item).isdigit()],
             "senior_role_ids": [str(item) for item in raw.get("senior_role_ids", []) if str(item).isdigit()],
+            "intake_fields": [
+                {
+                    "key": re.sub(
+                        r"[^a-zA-Z0-9_-]+",
+                        "_",
+                        str(field.get("key") or f"field_{field_index + 1}").strip().lower(),
+                    ).strip("_")[:40] or f"field_{field_index + 1}",
+                    "label": str(field.get("label") or f"معلومة إضافية {field_index + 1}").strip()[:45],
+                    "placeholder": str(field.get("placeholder") or "").strip()[:100],
+                    "required": bool(field.get("required", False)),
+                }
+                for field_index, field in enumerate(raw.get("intake_fields", [])[:3])
+                if isinstance(field, dict)
+                and str(field.get("label") or "").strip()
+            ],
         })
     return normalized or normalize_ticket_categories(DEFAULT_TICKET_CATEGORIES)
 
@@ -545,6 +563,9 @@ class Community(commands.Cog):
     async def get_ticket_notes(self, guild_id: int, ticket_id: int) -> list[dict]:
         return await get_ticket_notes(guild_id, ticket_id)
 
+    async def get_ticket(self, guild_id: int, ticket_id: int) -> dict | None:
+        return await get_ticket(guild_id, ticket_id)
+
     async def save_canned_response(
         self,
         guild_id: int,
@@ -573,6 +594,43 @@ class Community(commands.Cog):
         staff_id: int,
     ) -> dict | None:
         return await claim_ticket(guild_id, ticket_id, staff_id)
+
+    async def update_ticket_priority(
+        self, guild_id: int, ticket_id: int, priority: str
+    ) -> dict | None:
+        return await set_ticket_priority(guild_id, ticket_id, priority)
+
+    async def reopen_ticket(
+        self, guild_id: int, ticket_id: int, staff_id: int
+    ) -> dict | None:
+        ticket = await reopen_ticket(guild_id, ticket_id, staff_id)
+        if not ticket:
+            return None
+        channel = self.bot.get_channel(ticket["channel_id"])
+        if channel is not None:
+            try:
+                await channel.edit(
+                    name=f"ticket-reopened-{ticket['id']}"[:100],
+                    topic=f"Ticket • {ticket['category_label']} • reopened by dashboard",
+                )
+                member = channel.guild.get_member(ticket["user_id"])
+                if member:
+                    overwrite = channel.overwrites_for(member)
+                    overwrite.view_channel = True
+                    overwrite.send_messages = True
+                    overwrite.read_message_history = True
+                    await channel.set_permissions(member, overwrite=overwrite)
+                for role_id in ticket.get("support_role_ids", []):
+                    role = channel.guild.get_role(int(role_id))
+                    if role:
+                        overwrite = channel.overwrites_for(role)
+                        overwrite.view_channel = True
+                        overwrite.send_messages = True
+                        overwrite.read_message_history = True
+                        await channel.set_permissions(role, overwrite=overwrite)
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Could not reopen ticket channel %s", ticket["channel_id"])
+        return ticket
 
     async def force_close_ticket(
         self,
@@ -753,7 +811,7 @@ class Community(commands.Cog):
 
     async def claim_ticket_from_interaction(self, itx: discord.Interaction):
         ticket = await get_ticket_by_channel(itx.channel.id)
-        if not ticket or ticket["status"] != "active":
+        if not ticket or ticket["status"] == "closed":
             return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
         if not self._is_ticket_staff(itx.user, ticket):
             return await self._ticket_denied(itx)
@@ -780,7 +838,7 @@ class Community(commands.Cog):
 
     async def escalate_ticket_from_interaction(self, itx: discord.Interaction):
         ticket = await get_ticket_by_channel(itx.channel.id)
-        if not ticket or ticket["status"] != "active":
+        if not ticket or ticket["status"] == "closed":
             return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
         if not self._is_ticket_staff(itx.user, ticket):
             return await self._ticket_denied(itx)
@@ -838,7 +896,7 @@ class Community(commands.Cog):
 
     async def show_close_modal(self, itx: discord.Interaction):
         ticket = await get_ticket_by_channel(itx.channel.id)
-        if not ticket or ticket["status"] != "active":
+        if not ticket or ticket["status"] == "closed":
             return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
         if not self._is_ticket_staff(itx.user, ticket):
             return await self._ticket_denied(itx)
@@ -850,7 +908,7 @@ class Community(commands.Cog):
         reason: str,
     ):
         ticket = await get_ticket_by_channel(itx.channel.id)
-        if not ticket or ticket["status"] != "active":
+        if not ticket or ticket["status"] == "closed":
             return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
         if not self._is_ticket_staff(itx.user, ticket):
             return await self._ticket_denied(itx)

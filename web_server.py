@@ -658,7 +658,31 @@ def _ticket_role_ids(guild, categories):
                 parent = None
             if not isinstance(parent, discord.CategoryChannel):
                 return None, f"الفئة الأب للتصنيف رقم {index + 1} غير موجودة"
-        clean.append(raw)
+        intake_fields = raw.get("intake_fields", [])
+        if not isinstance(intake_fields, list) or len(intake_fields) > 3:
+            return None, f"حقول نموذج التصنيف رقم {index + 1} غير صالحة"
+        clean_fields = []
+        for field_index, field in enumerate(intake_fields):
+            if not isinstance(field, dict):
+                return None, f"حقل نموذج غير صالح في التصنيف رقم {index + 1}"
+            field_label = str(field.get("label") or "").strip()
+            if not field_label or len(field_label) > 45:
+                return None, f"اسم حقل نموذج غير صالح في التصنيف رقم {index + 1}"
+            field_key = re.sub(
+                r"[^a-zA-Z0-9_-]+", "_",
+                str(field.get("key") or f"field_{field_index + 1}").strip().lower(),
+            ).strip("_")[:40]
+            if not field_key:
+                return None, f"مفتاح حقل نموذج غير صالح في التصنيف رقم {index + 1}"
+            clean_fields.append({
+                "key": field_key,
+                "label": field_label,
+                "placeholder": str(field.get("placeholder") or "").strip()[:100],
+                "required": bool(field.get("required", False)),
+            })
+        normalized = dict(raw)
+        normalized["intake_fields"] = clean_fields
+        clean.append(normalized)
     return clean, None
 
 
@@ -740,6 +764,25 @@ async def api_guild_ticket_transcript(req):
     )
 
 
+@routes.get('/api/guild/{guild_id}/tickets/{ticket_id}')
+async def api_guild_ticket_detail(req):
+    _, guild = await authorize(req)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    try:
+        ticket_id = int(req.match_info["ticket_id"])
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"ticket_id": "معرف التذكرة غير صالح"})
+    ticket = await community.get_ticket(guild.id, ticket_id)
+    if not ticket:
+        return json_error(404, "ticket_not_found")
+    return web.json_response({
+        "ticket": ticket,
+        "notes": await community.get_ticket_notes(guild.id, ticket_id),
+    })
+
+
 @routes.get('/api/guild/{guild_id}/tickets/kpis')
 async def api_guild_tickets_kpis(req):
     _, guild = await authorize(req)
@@ -782,8 +825,32 @@ async def api_guild_tickets_action(req):
         if member is None:
             return json_error(400, "validation", fields={"staff_id": "الموظف غير موجود في السيرفر"})
         result = await community.reassign_ticket(guild.id, ticket_id, staff_id)
+    elif action == "status":
+        status = str(body.get("status", "")).strip().lower()
+        if status not in {"active", "waiting_user", "waiting_staff"}:
+            return json_error(400, "validation", fields={"status": "حالة التذكرة غير صالحة"})
+        result = await community.set_ticket_status(
+            guild.id, ticket_id, status, int(session["id"])
+        )
+    elif action == "priority":
+        priority = str(body.get("priority", "")).strip().lower()
+        if priority not in {"normal", "high", "management"}:
+            return json_error(400, "validation", fields={"priority": "أولوية التذكرة غير صالحة"})
+        result = await community.update_ticket_priority(guild.id, ticket_id, priority)
+    elif action == "reopen":
+        result = await community.reopen_ticket(guild.id, ticket_id, int(session["id"]))
+    elif action == "note":
+        content = str(body.get("content") or "").strip()
+        if not content or len(content) > 2000:
+            return json_error(400, "validation", fields={"content": "الملاحظة يجب أن تكون بين 1 و2000 حرف"})
+        result = await community.add_internal_note(
+            guild.id, ticket_id, int(session["id"]), content
+        )
     else:
-        return json_error(400, "validation", fields={"action": "الإجراء يجب أن يكون close أو reassign"})
+        return json_error(
+            400, "validation",
+            fields={"action": "الإجراء يجب أن يكون close أو reassign أو status أو priority أو reopen أو note"},
+        )
     if not result:
         return json_error(404, "ticket_not_found")
     return web.json_response({"ok": True, "ticket": result})

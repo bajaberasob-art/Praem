@@ -1635,7 +1635,7 @@
       return;
     }
     const existing = commandShortcuts(command);
-    const existingByTrigger = new Map(existing.map((item) => [String(item.trigger).casefold?.() || String(item.trigger).toLowerCase(), item]));
+    const existingByTrigger = new Map(existing.map((item) => [String(item.trigger).toLowerCase(), item]));
     const wanted = new Set(requested.map((value) => value.toLowerCase()));
     try {
       for (const trigger of requested) {

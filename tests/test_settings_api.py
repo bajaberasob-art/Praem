@@ -14,6 +14,77 @@ from tests.dashboard_harness import CHANNELS, ROLES, FakeBot, FakeGuild
 GID = str(FakeGuild.id)
 
 
+class TicketCommunityStub:
+    def __init__(self):
+        self.ticket = {
+            "id": 42,
+            "guild_id": FakeGuild.id,
+            "channel_id": 300000000000000002,
+            "subject": "مشكلة في الشحن",
+            "category_label": "دعم الشحن",
+            "priority": "high",
+            "claimed_by": None,
+            "status": "active",
+        }
+        self.responses = []
+        self.calls = []
+
+    async def get_active_tickets(self, guild_id):
+        self.calls.append(("active", guild_id))
+        return [dict(self.ticket)]
+
+    async def get_ticket_archive(self, guild_id, query=""):
+        self.calls.append(("archive", guild_id, query))
+        return [{
+            "id": 7,
+            "guild_id": guild_id,
+            "subject": "تذكرة مغلقة",
+            "category_label": "عام",
+            "close_reason": "تم الحل",
+        }]
+
+    async def get_ticket_transcript(self, guild_id, ticket_id):
+        self.calls.append(("transcript", guild_id, ticket_id))
+        return {
+            "ticket_id": ticket_id,
+            "content_html": "<!doctype html><html><body><p>Transcript</p></body></html>",
+        }
+
+    async def get_staff_kpis(self, guild_id):
+        self.calls.append(("kpis", guild_id))
+        return [{"staff_id": "10", "tickets_handled": 2, "avg_rating": 5.0}]
+
+    async def get_canned_responses(self, guild_id):
+        self.calls.append(("canned", guild_id))
+        return list(self.responses)
+
+    async def save_canned_response(self, guild_id, title, content, category, created_by, response_id=None):
+        item = {
+            "id": response_id or 1,
+            "guild_id": guild_id,
+            "title": title,
+            "content": content,
+            "category": category,
+            "created_by": created_by,
+        }
+        self.responses = [item]
+        self.calls.append(("save_canned", guild_id, response_id))
+        return item
+
+    async def delete_canned_response(self, guild_id, response_id):
+        self.calls.append(("delete_canned", guild_id, response_id))
+        self.responses = []
+        return True
+
+    async def reassign_ticket(self, guild_id, ticket_id, staff_id):
+        self.calls.append(("reassign", guild_id, ticket_id, staff_id))
+        return {**self.ticket, "claimed_by": staff_id}
+
+    async def force_close_ticket(self, guild_id, ticket_id, staff_id, reason):
+        self.calls.append(("close", guild_id, ticket_id, staff_id, reason))
+        return {**self.ticket, "status": "closed", "closed_by": staff_id}
+
+
 def request(method, path, sid=None, body=None, headers=None):
     h = {"Host": "dash.test", **(headers or {})}
     if sid:
@@ -47,12 +118,18 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         await database.init_db()
         ws.bot_ref = FakeBot()
         ws.SESSIONS.clear(), ws.RATE_BUCKETS.clear(), ws.GRANT_CACHE.clear()
+        self.community = TicketCommunityStub()
+        self._community_cog = ws._community_cog
+        ws._community_cog = lambda: self.community
         for uid in (10, 11):
             ws.SESSIONS[f"s{uid}"] = {
                 "id": str(uid), "username": "u", "avatar": "", "csrf": f"csrf{uid}",
                 "guilds": [{"id": GID}], "expires_at": time.time() + 60,
             }
         self.headers = {"X-CSRF-Token": "csrf10", "Origin": "https://dash.test"}
+
+    async def asyncTearDown(self):
+        ws._community_cog = self._community_cog
 
     async def test_authorization_is_enforced_server_side(self):
         self.assertEqual((await call(ws.api_get_settings, request("GET", "/x")))[0], 401)
@@ -152,6 +229,64 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
             delete_req,
         )
         self.assertEqual((status, data["deleted"]), (200, True))
+
+    async def test_ticket_studio_read_and_write_contracts(self):
+        status, data = await call(ws.api_guild_tickets_active, request("GET", "/x", "s10"))
+        self.assertEqual((status, data["tickets"][0]["id"]), (200, 42))
+
+        status, data = await call(
+            ws.api_guild_tickets_archive,
+            request("GET", "/x?q=shipping", "s10"),
+        )
+        self.assertEqual((status, data["query"], data["tickets"][0]["id"]), (200, "shipping", 7))
+
+        status, data = await call(ws.api_guild_tickets_kpis, request("GET", "/x", "s10"))
+        self.assertEqual((status, data["kpis"][0]["avg_rating"]), (200, 5.0))
+
+        status, data = await call(ws.api_guild_tickets_canned_get, request("GET", "/x", "s10"))
+        self.assertEqual((status, data["responses"]), (200, []))
+
+        body = {"title": "سياسة الاسترداد", "content": "سنراجع طلبك.", "category": "billing"}
+        status, data = await call(
+            ws.api_guild_tickets_canned,
+            request("POST", "/x", "s10", body, self.headers),
+        )
+        self.assertEqual((status, data["response"]["title"]), (200, "سياسة الاسترداد"))
+
+        status, data = await call(
+            ws.api_guild_tickets_action,
+            request(
+                "POST",
+                "/x",
+                "s10",
+                {"ticket_id": 42, "action": "reassign", "staff_id": 10},
+                self.headers,
+            ),
+        )
+        self.assertEqual((status, data["ticket"]["claimed_by"]), (200, 10))
+
+        transcript_request = request("GET", "/x", "s10")
+        transcript_request.match_info["ticket_id"] = "42"
+        transcript = await ws.api_guild_ticket_transcript(transcript_request)
+        self.assertEqual((transcript.status, transcript.content_type), (200, "text/html"))
+        self.assertIn("Transcript", transcript.text)
+        self.assertEqual(
+            transcript.headers["Cache-Control"],
+            "no-store",
+        )
+
+        status, data = await call(
+            ws.api_guild_tickets_canned,
+            request(
+                "POST",
+                "/x",
+                "s10",
+                {"action": "delete", "id": 1},
+                self.headers,
+            ),
+        )
+        self.assertEqual((status, data["deleted"]), (200, True))
+        self.assertIn(("reassign", FakeGuild.id, 42, 10), self.community.calls)
 
 
 if __name__ == "__main__":

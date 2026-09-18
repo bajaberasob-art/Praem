@@ -38,6 +38,7 @@
     commandStatusFilter: "all",
     commandRoleFilter: "all",
     commandTab: "commands",
+    commandCollapsedGroups: {},
     selectedCommandIds: [],
     commandSimulatorText: "",
     commandDetail: null,
@@ -1470,6 +1471,42 @@
       (state.commandRoleFilter === "all" || commandRoles(command).has(roleId))
     );
   }
+  const COMMAND_UI_LABELS = {
+    warn: ["تحذير", "إرسال تحذير لعضو من السيرفر", "⚠️", "violet"],
+    ban: ["حظر", "حظر عضو ومنعه من دخول السيرفر", "🔨", "red"],
+    kick: ["طرد", "طرد عضو من السيرفر", "👤", "red"],
+    timeout: ["تايم أوت", "إسكات عضو لمدة محددة", "⏱", "red"],
+    untimeout: ["فك التايم أوت", "السماح للعضو بالكلام من جديد", "🔓", "red"],
+    clear: ["مسح الرسائل", "حذف رسائل القناة بسرعة", "🗑", "blue"],
+    lockdown: ["قفل القناة", "منع الأعضاء من الكتابة في القناة", "🔒", "blue"],
+    unlock: ["فتح القناة", "السماح للأعضاء بالكتابة", "🔓", "blue"],
+    slowmode: ["الوضع البطيء", "تحديد وقت بين رسائل الأعضاء", "🐌", "blue"],
+    mute: ["إسكات", "منع العضو من التحدث", "🔇", "gold"],
+    unmute: ["فك الإسكات", "إعادة صلاحية التحدث للعضو", "🔊", "gold"],
+    poll: ["استطلاع", "إنشاء استطلاع داخل القناة", "📊", "gold"],
+    ticket: ["التذاكر", "إدارة تذاكر الدعم والمساعدة", "🎫", "purple"],
+  };
+  function commandVisual(command) {
+    const name = String(command.command_name || "").toLowerCase().split(/\s+/).pop();
+    const item = COMMAND_UI_LABELS[name];
+    return {
+      name: item?.[0] || `/${name}`,
+      description: item?.[1] || command.description || "إدارة هذا الأمر من إعدادات السيرفر.",
+      icon: item?.[2] || "✦",
+      tone: item?.[3] || "slate",
+      premium: Boolean(command.premium || command.is_premium || command.pro),
+    };
+  }
+  function commandSectionVisual(cog) {
+    const value = String(cog || "").toLowerCase();
+    if (value.includes("moder")) return { label: "الطرد والحظر", icon: "📌", tone: "red" };
+    if (value.includes("econom")) return { label: "مزایا", icon: "✦", tone: "pink" };
+    if (value.includes("engage") || value.includes("community")) return { label: "الإسكات والصوت", icon: "🔇", tone: "gold" };
+    if (value.includes("ticket") || value.includes("channel")) return { label: "إدارة القنوات", icon: "🖌", tone: "blue" };
+    if (value.includes("security")) return { label: "Blacklist", icon: "⛔", tone: "red" };
+    if (value.includes("utility") || value.includes("command")) return { label: "التحذيرات والإدارة", icon: "★", tone: "purple" };
+    return { label: cog || "الأوامر", icon: "✦", tone: "slate" };
+  }
   function commandRows() {
     const commands = (state.commandStudio.commands || []).filter(commandMatchesFilters);
     const groups = new Map();
@@ -1484,38 +1521,39 @@
       return root;
     }
     groups.forEach((items, cog) => {
-      const group = el("section", { class: "command-group" });
-      group.append(el("div", { class: "command-group-title" }, el("span", { text: cog }), el("small", { text: `${items.length} أمر` })));
+      const section = commandSectionVisual(cog);
+      const collapsed = Boolean(state.commandCollapsedGroups[cog]);
+      const group = el("section", { class: `command-group${collapsed ? " is-collapsed" : ""}` });
+      const groupButton = el("button", {
+        class: "command-section-head",
+        type: "button",
+        "aria-expanded": String(!collapsed),
+        onClick: () => {
+          state.commandCollapsedGroups[cog] = !state.commandCollapsedGroups[cog];
+          renderPage();
+        },
+      },
+        el("span", { class: `command-section-icon tone-${section.tone}`, text: section.icon }),
+        el("span", { class: "command-section-copy" },
+          el("strong", { text: section.label }),
+          el("small", { text: `${items.length} أمر` }),
+        ),
+        el("span", { class: "command-section-chevron", text: collapsed ? "⌄" : "⌃" }),
+      );
+      group.append(groupButton);
+      if (collapsed) {
+        root.append(group);
+        return;
+      }
+      const list = el("div", { class: "command-section-list" });
       items.forEach((command) => {
         const roles = commandRoles(command);
         const commandId = String(command.command_name);
         const warnings = commandPermissionWarnings(command);
         const shortcuts = commandShortcuts(command);
-        const aliasPreview = el("div", { class: "command-alias-preview" },
-          shortcuts.length
-            ? shortcuts.slice(0, 4).map((item) => el("code", { text: item.trigger }))
-            : el("span", { text: "بدون اختصار" }),
-        );
-        const roleWrap = el("div", { class: "command-role-tags" });
-        (state.commandStudio.roles || []).forEach((role) => {
-          const active = roles.has(String(role.id));
-          const tag = el("button", {
-            class: `role-tag${active ? " active" : ""}`,
-            type: "button",
-            title: active ? "إزالة الرتبة" : "السماح للرتبة",
-            text: `@${role.name}`,
-          });
-          tag.onclick = () => {
-            pulse();
-            const next = new Set(roles);
-            if (next.has(String(role.id))) next.delete(String(role.id));
-            else next.add(String(role.id));
-            updateCommand(command, command.enabled, [...next]);
-          };
-          roleWrap.append(tag);
-        });
+        const visual = commandVisual(command);
         const toggleButton = el("button", {
-          class: `studio-switch${command.enabled ? " on" : ""}`,
+          class: `studio-switch command-list-switch${command.enabled ? " on" : ""}`,
           type: "button",
           role: "switch",
           "aria-checked": String(!!command.enabled),
@@ -1526,7 +1564,7 @@
           updateCommand(command, !command.enabled, [...roles]);
         };
         const select = el("input", {
-          class: "command-select",
+          class: "command-select command-list-check",
           type: "checkbox",
           checked: state.selectedCommandIds.includes(commandId),
           "aria-label": `تحديد ${command.command_name}`,
@@ -1535,29 +1573,26 @@
           state.selectedCommandIds = select.checked
             ? [...new Set([...state.selectedCommandIds, commandId])]
             : state.selectedCommandIds.filter((id) => id !== commandId);
-          renderPage();
         };
-        group.append(el("article", { class: `command-row${warnings.length ? " has-warning" : ""}` },
-          el("div", { class: "command-row-select" }, select),
-          el("div", { class: "command-name" },
-            el("button", { class: "command-name-button", type: "button", onClick: () => openCommandDetail(command) },
-              el("strong", { text: `/${command.command_name}` }),
-              el("small", { text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
+        const row = el("article", { class: `command-list-row${warnings.length ? " has-warning" : ""}` },
+          el("div", { class: `command-list-icon tone-${visual.tone}`, text: visual.icon }),
+          el("div", { class: "command-list-copy" },
+            el("div", { class: "command-list-title" },
+              el("strong", { text: visual.name }),
+              visual.premium ? el("span", { class: "command-pro-badge", text: "Pro ✨" }) : [],
             ),
-            aliasPreview,
+            el("small", { text: visual.description }),
+            shortcuts.length ? el("div", { class: "command-list-aliases" }, shortcuts.slice(0, 3).map((item) => el("code", { text: item.trigger }))) : [],
           ),
-          el("div", { class: "command-role-picker" },
-            el("span", { class: "command-role-label", text: "الرتب المسموحة — اتركها فارغة للجميع" }),
-            roleWrap,
+          el("div", { class: "command-list-actions" },
+            select,
+            el("button", { class: "command-list-settings", type: "button", text: "⚙", title: "إعدادات الأمر", onClick: () => openCommandDetail(command) }),
+            toggleButton,
           ),
-          el("div", { class: "command-row-status" },
-            warnings.length ? el("span", { class: "command-warning", text: "تحذير صلاحيات", title: warnings.join("، ") }) : el("span", { class: "command-ok", text: "جاهز" }),
-            el("button", { class: "command-shortcut-link", type: "button", text: `اختصارات ${shortcuts.length}`, onClick: () => openCommandDetail(command) }),
-            el("button", { class: "command-detail-link", type: "button", text: "التفاصيل", onClick: () => openCommandDetail(command) }),
-          ),
-          toggleButton,
-        ));
+        );
+        list.append(row);
       });
+      group.append(list);
       root.append(group);
     });
     return root;

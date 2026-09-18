@@ -34,3 +34,14 @@ root path is not the public domain root.
 
 **How to apply:** Keep the mounted base path configurable and use it for both
 successful login and logout redirects.
+
+Dashboard write requests must validate the browser origin against both the
+direct service host and any forwarded public host, while the client should
+refresh its session CSRF token once before reporting a stale-session failure.
+
+**Why:** The dashboard is mounted behind a path proxy and users can keep a page
+open across a session refresh or service restart; strict internal-host
+comparison or an old token makes valid saves appear to fail with a generic 403.
+
+**How to apply:** Preserve the CSRF check, account for `X-Forwarded-Host`, and
+retry only after fetching a fresh authenticated session.

@@ -10,6 +10,11 @@ from discord.ext import commands, tasks
 
 from database import init_db
 from cogs.utilities import dynamic_prefix
+from interaction_runtime import (
+    install_ui_guards,
+    send_interaction_message,
+    wrap_application_command,
+)
 from web_server import start_web_server
 
 
@@ -52,6 +57,7 @@ def configured_sync_guild() -> discord.Object | None:
 
 class EnterpriseBot(commands.Bot):
     def __init__(self):
+        install_ui_guards()
         super().__init__(
             command_prefix=dynamic_prefix,
             intents=intents,
@@ -62,6 +68,25 @@ class EnterpriseBot(commands.Bot):
         self.dashboard_runner = None
         self.presence_step = 0
         self.sync_guild = configured_sync_guild()
+
+    async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):
+        result = await super().add_cog(
+            cog,
+            override=override,
+            guild=guild,
+            guilds=guilds,
+        )
+        self.install_interaction_guards()
+        return result
+
+    def install_interaction_guards(self) -> int:
+        wrapped = 0
+        for command in self.tree.walk_commands():
+            if isinstance(command, app_commands.Command):
+                wrapped += int(wrap_application_command(command))
+        if wrapped:
+            logger.info("🛡️ تم تأمين %d أمر Slash بطبقة ACK والأخطاء الموحدة.", wrapped)
+        return wrapped
 
     async def setup_hook(self):
         self.session = aiohttp.ClientSession()
@@ -103,6 +128,7 @@ class EnterpriseBot(commands.Bot):
             except Exception as error:
                 logger.error(f"❌ خطأ أثناء تحميل {module}: {error}")
 
+        self.install_interaction_guards()
         try:
             if self.sync_guild is not None:
                 self.tree.copy_global_to(guild=self.sync_guild)
@@ -234,13 +260,7 @@ async def on_app_command_error(
             "تم تدوين الخطأ لمراجعته."
         )
 
-    try:
-        if itx.response.is_done():
-            await itx.followup.send(message, ephemeral=True)
-        else:
-            await itx.response.send_message(message, ephemeral=True)
-    except Exception:
-        pass
+    await send_interaction_message(itx, message, ephemeral=True)
 
 
 async def main():

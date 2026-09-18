@@ -10,7 +10,7 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
-import traceback
+import time
 from typing import Any, Awaitable, Callable
 
 import discord
@@ -191,7 +191,7 @@ async def guarded_view_task(
         if not allow:
             return
         if view.timeout:
-            view._View__timeout_expiry = discord.utils.utcnow().timestamp() + view.timeout
+            view._View__timeout_expiry = time.monotonic() + view.timeout
         await item.callback(proxy)
     except Exception as error:
         LOGGER.error(

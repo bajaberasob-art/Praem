@@ -22,6 +22,7 @@ from database import (
     save_command_control,
     save_shortcut,
 )
+from interaction_runtime import InteractionProxy, defer_if_needed
 
 
 HUB_NAME = "➕ اضغط للإنشاء"
@@ -486,6 +487,19 @@ class Utilities(commands.Cog):
         """Apply the same policy to Slash Commands before Discord invokes them."""
         if interaction.guild is None or interaction.command is None:
             return True
+        # ACK before loading policy state or touching any guild data. The
+        # command runtime will pass a follow-up-aware proxy to the callback.
+        await defer_if_needed(interaction)
+        if self._original_tree_check is not None:
+            try:
+                original_allowed = await self._original_tree_check(
+                    InteractionProxy(interaction, deferred=True)
+                )
+            except Exception:
+                LOGGER.exception("[COMMAND_POLICY] original interaction check failed")
+                return False
+            if original_allowed is False:
+                return False
         guild_id = int(interaction.guild.id)
         controls = self.command_controls.get(guild_id)
         if controls is None:

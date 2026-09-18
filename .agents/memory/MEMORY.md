@@ -7,3 +7,4 @@
 - [Persistent interactive state](persistent-interactive-state.md) — giveaway and tournament entries live in SQLite, with unique custom IDs and view restoration during cog loading.
 - [Discord emoji tokens](discord-emoji-serialization.md) — custom guild emojis and stickers are separate Discord assets; replies need the emoji token, not only its CDN URL.
 - [Shortcut execution policies](shortcut-execution-policies.md) — synthetic Prefix/Slash shortcut callbacks must invoke the same command policy checks as native Discord commands.
+- [Interaction runtime](interaction-runtime.md) — central ACK/proxy/error guards protect all Slash commands and UI callbacks while preserving existing response code.

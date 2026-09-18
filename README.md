@@ -27,12 +27,12 @@ The configured project workflow runs `python main.py` automatically.
 ## Dashboard access
 
 The Discord bot serves its dashboard on port `8099`, and the API service exposes
-it through the public project domain at `/dashboard/`.
+it through the public project domain at `/api/dashboard/`.
 
 Open:
 
 ```text
-https://<REPLIT_DEV_DOMAIN>/dashboard/
+https://<REPLIT_DEV_DOMAIN>/api/dashboard/
 ```
 
 The root URL redirects there automatically. Select **تسجيل الدخول عبر ديسكورد**

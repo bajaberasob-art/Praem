@@ -76,6 +76,13 @@ app.get("/dashboard", (_req, res) => {
   res.redirect(302, "/dashboard/");
 });
 app.use("/dashboard", proxyDashboard);
+app.get("/api", (_req, res) => {
+  res.redirect(302, "/api/dashboard/");
+});
+app.get("/api/dashboard", (_req, res) => {
+  res.redirect(302, "/api/dashboard/");
+});
+app.use("/api/dashboard", proxyDashboard);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

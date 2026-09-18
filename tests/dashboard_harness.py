@@ -141,6 +141,9 @@ class FakeBot:
             return {"ok": True, "guild_id": guild_id, "user_id": user_id}
 
     class EngagementStub:
+        def __init__(self):
+            self.panels = []
+
         async def get_onboarding_snapshot(self, guild_id):
             snapshot = await database.get_guild_settings(guild_id)
             values = snapshot["settings"]
@@ -162,7 +165,7 @@ class FakeBot:
                         "rules_channel_id",
                     )
                 },
-                "self_roles": [],
+                "self_roles": list(self.panels),
             }
 
         async def send_test_welcome(self, guild_id, target_channel_id, template_data):
@@ -177,19 +180,21 @@ class FakeBot:
         async def deploy_self_role_panel(
             self, guild_id, target_channel_id, title, description, color, emoji, roles
         ):
+            panel = {
+                "id": len(self.panels) + 1,
+                "guild_id": guild_id,
+                "channel_id": target_channel_id,
+                "message_id": 800000000000000001 + len(self.panels) + 1,
+                "title": title,
+                "description": description,
+                "color": color,
+                "emoji": emoji,
+                "role_specs": roles,
+            }
+            self.panels.insert(0, panel)
             return {
                 "ok": True,
-                "panel": {
-                    "id": 1,
-                    "guild_id": guild_id,
-                    "channel_id": target_channel_id,
-                    "message_id": 800000000000000002,
-                    "title": title,
-                    "description": description,
-                    "color": color,
-                    "emoji": emoji,
-                    "role_specs": roles,
-                },
+                "panel": panel,
             }
 
     def __init__(self):

@@ -1091,7 +1091,19 @@ class Community(commands.Cog):
                     "لا يمكن إزالة البوت من قناة التذكرة.",
                     ephemeral=True,
                 )
-            await itx.channel.set_permissions(member, overwrite=None)
+            member_role_ids = {str(role.id) for role in getattr(member, "roles", [])}
+            support_role_ids = {str(role_id) for role_id in ticket.get("support_role_ids", [])}
+            if member_role_ids.intersection(support_role_ids):
+                await itx.channel.set_permissions(
+                    member,
+                    overwrite=discord.PermissionOverwrite(
+                        view_channel=False,
+                        send_messages=False,
+                        read_message_history=False,
+                    ),
+                )
+            else:
+                await itx.channel.set_permissions(member, overwrite=None)
             return await itx.response.send_message(
                 f"✅ تمت إزالة {member.mention} من التذكرة.",
                 ephemeral=True,

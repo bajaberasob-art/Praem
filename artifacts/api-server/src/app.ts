@@ -21,6 +21,10 @@ function proxyDashboard(
       headers: {
         ...req.headers,
         host: `127.0.0.1:${dashboardPort}`,
+        "x-forwarded-host":
+          req.headers["x-forwarded-host"] ?? req.headers.host ?? "",
+        "x-forwarded-proto":
+          req.headers["x-forwarded-proto"] ?? req.protocol ?? "https",
       },
     },
     (proxyResponse) => {

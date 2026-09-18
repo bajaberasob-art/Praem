@@ -98,12 +98,19 @@
   ];
   const settingsKeys = keys.filter((key) => !onboardingKeys.includes(key));
   const clone = (x) => JSON.parse(JSON.stringify(x));
+  const sameValue = (a, b) =>
+    a === b ||
+    (a != null &&
+      b != null &&
+      typeof a === "object" &&
+      typeof b === "object" &&
+      JSON.stringify(a) === JSON.stringify(b));
   const changes = () =>
     !state.baseline || !state.draft
       ? {}
       : Object.fromEntries(
           settingsKeys
-            .filter((k) => state.baseline[k] !== state.draft[k])
+            .filter((k) => !sameValue(state.baseline[k], state.draft[k]))
             .map((k) => [k, state.draft[k]]),
         );
   const onboardingChanges = () =>
@@ -111,7 +118,7 @@
       ? {}
       : Object.fromEntries(
           onboardingKeys
-            .filter((k) => state.baseline[k] !== state.draft[k])
+            .filter((k) => !sameValue(state.baseline[k], state.draft[k]))
             .map((k) => [k, state.draft[k]]),
         );
   const dirty = () => Object.keys(changes()).length > 0;
@@ -209,8 +216,9 @@
     inr.append(
       el(
         "div",
-        { class: "brand", text: "لوحة القيادة " },
-        el("i", { text: "المركزية" }),
+        { class: "brand" },
+        el("strong", { text: "PRIME | TEAM" }),
+        el("i", { text: "تطوير abood2026" }),
       ),
       el("div", { class: "head-grow" }),
     );
@@ -2094,7 +2102,7 @@
       if (x) x.textContent = state.fields[k];
     });
     const d = $(".dock");
-    if (d) d.classList.toggle("show", dirty());
+    if (d) d.classList.toggle("show", dirty() || onboardingDirty());
     const onboardingSave = $(".onboarding-save");
     if (onboardingSave) onboardingSave.disabled = !onboardingDirty() || state.saving || !state.online;
     const onboardingTest = $(".onboarding-test");
@@ -2102,6 +2110,10 @@
     document.querySelectorAll("[data-role-matrix-key]").forEach((node) => {
       node.textContent = roleName(state.draft[node.dataset.roleMatrixKey]);
     });
+  }
+  async function saveAll() {
+    if (dirty()) await save();
+    if (onboardingDirty()) await saveOnboarding();
   }
   function renderDock() {
     let d = $(".dock");
@@ -2114,7 +2126,7 @@
         class: "btn primary",
         type: "button",
         text: "حفظ التغييرات",
-        onClick: save,
+         onClick: saveAll,
       }),
       el("button", {
         class: "btn cancel",
@@ -2151,7 +2163,7 @@
         // تعديلات أُجريت أثناء الحفظ فقط هي التي تبقى غير محفوظة
         const later = Object.fromEntries(
           settingsKeys
-            .filter((k) => state.draft[k] !== sent[k])
+            .filter((k) => !sameValue(state.draft[k], sent[k]))
             .map((k) => [k, state.draft[k]]),
         );
         if (data.revision >= state.revision) {

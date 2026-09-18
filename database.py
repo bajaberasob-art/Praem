@@ -224,6 +224,56 @@ async def init_db() -> None:
                 );
             """)
             await db.execute("""
+                CREATE TABLE IF NOT EXISTS giveaways (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL DEFAULT 0,
+                    prize TEXT NOT NULL,
+                    ends_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    created_by INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS giveaway_entries (
+                    giveaway_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (giveaway_id, user_id)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_giveaways_due "
+                "ON giveaways(status, ends_at);"
+            )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tournaments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL DEFAULT 0,
+                    title TEXT NOT NULL,
+                    max_players INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    created_by INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tournament_entries (
+                    tournament_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (tournament_id, user_id)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tournaments_open "
+                "ON tournaments(status, guild_id);"
+            )
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS invite_stats (
                     guild_id INTEGER NOT NULL,
                     inviter_id INTEGER NOT NULL,
@@ -860,6 +910,245 @@ async def get_tournament_scores(
             (int(guild_id), limit),
         ) as cur:
             return [dict(row) for row in await cur.fetchall()]
+
+
+async def create_giveaway(
+    guild_id: int,
+    channel_id: int,
+    prize: str,
+    ends_at: str,
+    created_by: int,
+) -> int:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            INSERT INTO giveaways
+                (guild_id, channel_id, prize, ends_at, created_by)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                int(channel_id),
+                str(prize).strip()[:200],
+                str(ends_at),
+                int(created_by),
+            ),
+        )
+        giveaway_id = cur.lastrowid
+        await db.commit()
+    return int(giveaway_id)
+
+
+async def set_giveaway_message(giveaway_id: int, message_id: int) -> None:
+    async with connect() as db:
+        await db.execute(
+            "UPDATE giveaways SET message_id = ? WHERE id = ?",
+            (int(message_id), int(giveaway_id)),
+        )
+        await db.commit()
+
+
+async def add_giveaway_entry(giveaway_id: int, user_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            INSERT OR IGNORE INTO giveaway_entries (giveaway_id, user_id)
+            SELECT ?, ?
+            WHERE EXISTS (
+                SELECT 1 FROM giveaways
+                WHERE id = ? AND status = 'open'
+            )
+            """,
+            (int(giveaway_id), int(user_id), int(giveaway_id)),
+        )
+        changed = cur.rowcount > 0
+        await db.commit()
+    return changed
+
+
+async def get_open_giveaways() -> list[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, prize, ends_at
+            FROM giveaways
+            WHERE status = 'open' AND message_id > 0
+            ORDER BY id ASC
+            """
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_due_giveaways(now: Optional[str] = None) -> list[Dict[str, Any]]:
+    current = now or _utc_now()
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, prize, ends_at
+            FROM giveaways
+            WHERE status = 'open' AND ends_at <= ?
+            ORDER BY ends_at ASC, id ASC
+            LIMIT 100
+            """,
+            (current,),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_giveaway_entries(giveaway_id: int) -> list[int]:
+    async with connect() as db:
+        async with db.execute(
+            """
+            SELECT user_id FROM giveaway_entries
+            WHERE giveaway_id = ? ORDER BY user_id ASC
+            """,
+            (int(giveaway_id),),
+        ) as cur:
+            return [int(row[0]) for row in await cur.fetchall()]
+
+
+async def complete_giveaway(giveaway_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            UPDATE giveaways SET status = 'completed'
+            WHERE id = ? AND status = 'open'
+            """,
+            (int(giveaway_id),),
+        )
+        changed = cur.rowcount > 0
+        await db.commit()
+    return changed
+
+
+async def cancel_giveaway(giveaway_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            UPDATE giveaways SET status = 'cancelled'
+            WHERE id = ? AND status = 'open'
+            """,
+            (int(giveaway_id),),
+        )
+        changed = cur.rowcount > 0
+        await db.commit()
+    return changed
+
+
+async def create_tournament(
+    guild_id: int,
+    channel_id: int,
+    title: str,
+    max_players: int,
+    created_by: int,
+) -> int:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            INSERT INTO tournaments
+                (guild_id, channel_id, title, max_players, created_by)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                int(channel_id),
+                str(title).strip()[:150],
+                max(2, min(int(max_players), 100)),
+                int(created_by),
+            ),
+        )
+        tournament_id = cur.lastrowid
+        await db.commit()
+    return int(tournament_id)
+
+
+async def set_tournament_message(tournament_id: int, message_id: int) -> None:
+    async with connect() as db:
+        await db.execute(
+            "UPDATE tournaments SET message_id = ? WHERE id = ?",
+            (int(message_id), int(tournament_id)),
+        )
+        await db.commit()
+
+
+async def add_tournament_entry(tournament_id: int, user_id: int) -> tuple[bool, int, int]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT max_players, status FROM tournaments WHERE id = ?",
+            (int(tournament_id),),
+        ) as cur:
+            tournament = await cur.fetchone()
+        if tournament is None or tournament["status"] != "open":
+            return False, 0, 0
+        async with db.execute(
+            "SELECT COUNT(*) FROM tournament_entries WHERE tournament_id = ?",
+            (int(tournament_id),),
+        ) as cur:
+            count = int((await cur.fetchone())[0])
+        if count >= int(tournament["max_players"]):
+            return False, count, int(tournament["max_players"])
+        cur = await db.execute(
+            """
+            INSERT OR IGNORE INTO tournament_entries (tournament_id, user_id)
+            VALUES (?, ?)
+            """,
+            (int(tournament_id), int(user_id)),
+        )
+        if cur.rowcount > 0:
+            count += 1
+        await db.commit()
+        return cur.rowcount > 0, count, int(tournament["max_players"])
+
+
+async def get_open_tournaments() -> list[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, title, max_players
+            FROM tournaments
+            WHERE status = 'open' AND message_id > 0
+            ORDER BY id ASC
+            """
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_tournament_entries(tournament_id: int) -> list[int]:
+    async with connect() as db:
+        async with db.execute(
+            """
+            SELECT user_id FROM tournament_entries
+            WHERE tournament_id = ? ORDER BY created_at ASC, user_id ASC
+            """,
+            (int(tournament_id),),
+        ) as cur:
+            return [int(row[0]) for row in await cur.fetchall()]
+
+
+async def start_tournament(tournament_id: int) -> Optional[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT * FROM tournaments WHERE id = ? AND status = 'open'",
+            (int(tournament_id),),
+        ) as cur:
+            tournament = await cur.fetchone()
+        if tournament is None:
+            return None
+        async with db.execute(
+            "SELECT user_id FROM tournament_entries WHERE tournament_id = ? ORDER BY created_at ASC",
+            (int(tournament_id),),
+        ) as cur:
+            entries = [int(row[0]) for row in await cur.fetchall()]
+        if len(entries) < 2:
+            return None
+        await db.execute(
+            "UPDATE tournaments SET status = 'started' WHERE id = ? AND status = 'open'",
+            (int(tournament_id),),
+        )
+        await db.commit()
+        result = dict(tournament)
+        result["entries"] = entries
+        return result
 
 
 # -------------------------------------------------------------

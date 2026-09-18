@@ -206,16 +206,33 @@ class Utilities(commands.Cog):
                 continue
             known[command.qualified_name] = {
                 "command_name": command.qualified_name,
+                "cog": getattr(command, "cog_name", None) or "Commands",
                 "enabled": True,
                 "allowed_roles": [],
                 "configured": False,
                 "aliases": list(command.aliases),
             }
+        for command in self.bot.tree.walk_commands():
+            if getattr(command, "hidden", False):
+                continue
+            binding = getattr(command, "binding", None)
+            known.setdefault(
+                command.qualified_name,
+                {
+                    "command_name": command.qualified_name,
+                    "cog": binding.__class__.__name__ if binding else "Slash Commands",
+                    "enabled": True,
+                    "allowed_roles": [],
+                    "configured": False,
+                    "aliases": [],
+                },
+            )
         for name, control in controls.items():
             item = known.setdefault(
                 name,
                 {
                     "command_name": name,
+                    "cog": "Configured",
                     "enabled": True,
                     "allowed_roles": [],
                     "configured": False,

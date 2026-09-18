@@ -3415,6 +3415,157 @@ textarea {
   }
 }
 
+/* Commands catalog: phone-first AMOLED layout */
+.commands-list-toolbar {
+  display: grid;
+  gap: 9px;
+}
+.commands-list-toolbar .studio-search {
+  width: 100%;
+  min-height: 38px;
+  border-color: #1b1825;
+  border-radius: 999px;
+  background: #08070d;
+  color: #d9d3df;
+  text-align: right;
+}
+.command-quick-filters {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.command-quick-filters::-webkit-scrollbar { display: none; }
+.command-quick-filter {
+  flex: 0 0 auto;
+  min-height: 28px;
+  border: 1px solid #1c1a25;
+  border-radius: 999px;
+  padding: 4px 14px;
+  background: #0c0b12;
+  color: #7b7484;
+  cursor: pointer;
+  font-size: .62rem;
+}
+.command-quick-filter.active {
+  border-color: #b85c82;
+  background: #3b1b2d;
+  color: #f4b3d1;
+  box-shadow: 0 0 13px #b84e7a33;
+}
+.commands-view .command-filter-bar {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.commands-view .command-filter-bar .command-filter {
+  min-height: 32px;
+  border-color: #1b1825;
+  border-radius: 8px;
+  background: #08070d;
+  color: #777081;
+  font-size: .6rem;
+}
+.commands-view .command-panel {
+  border-color: #17151e;
+  background: linear-gradient(145deg, #05050a, #020204 72%);
+}
+@media (max-width: 600px) {
+  .commands-view {
+    gap: 9px;
+    margin: -8px -7px 20px;
+  }
+  .commands-view > .commands-hero {
+    min-height: 86px;
+    padding: 12px 14px;
+    border-radius: 0 0 14px 14px;
+  }
+  .commands-view .commands-hero h2 {
+    margin: 3px 0;
+    font-size: 1rem;
+  }
+  .commands-view .commands-hero p {
+    display: none;
+  }
+  .commands-view .commands-hero .eyebrow {
+    font-size: .57rem;
+  }
+  .commands-view .command-metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+    padding: 0 8px;
+  }
+  .commands-view .command-metric {
+    min-height: 64px;
+    border-color: #17151e;
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #08070d;
+  }
+  .commands-view .command-metric strong {
+    font-size: 1rem;
+  }
+  .commands-view .command-metric small,
+  .commands-view .command-metric span {
+    font-size: .56rem;
+  }
+  .commands-view > .command-panel {
+    margin: 0 8px;
+    border-radius: 14px;
+    padding: 11px 9px;
+  }
+  .commands-view .command-panel > .card-head {
+    display: none;
+  }
+  .commands-view .command-panel .command-filter-bar {
+    display: none;
+  }
+  .commands-view .command-groups {
+    gap: 9px;
+  }
+  .commands-view .command-group {
+    gap: 3px;
+  }
+  .commands-view .command-section-head {
+    min-height: 43px;
+    border-radius: 9px;
+    padding: 7px 8px;
+  }
+  .commands-view .command-section-list {
+    gap: 0;
+  }
+  .commands-view .command-list-row {
+    min-height: 57px;
+    padding: 7px 6px;
+    gap: 8px;
+  }
+  .commands-view .command-list-check {
+    display: none;
+  }
+  .commands-view .command-list-copy > small {
+    max-width: 210px;
+  }
+  .commands-view .command-list-actions {
+    gap: 4px;
+  }
+  .commands-view .command-list-settings {
+    width: 24px;
+    height: 24px;
+  }
+  .commands-view .command-shortcut-workbench {
+    margin: 0 8px;
+  }
+  .commands-view .prefix-pill,
+  .commands-view .prefix-examples,
+  .commands-view .command-tabs {
+    margin-inline: 8px;
+  }
+  .commands-view .command-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .commands-view .command-tabs::-webkit-scrollbar { display: none; }
+}
+
 /* Ticket studio v2: phone-first AMOLED workspace */
 .tickets-view {
   position: relative;

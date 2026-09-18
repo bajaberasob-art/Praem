@@ -2710,7 +2710,7 @@
       ),
       el("small", { class: "command-shortcut-hint", text: "مثال: اختر /warn ثم اكتب: عيب، تحذير، انذار. اكتب كل الاختصارات بفواصل أو أسطر." }),
     );
-    const commandPanel = card("مصفوفة صلاحيات الأوامر",
+    const commandPanel = card("قائمة الأوامر",
       el("div", { class: "command-panel" },
         el("div", { class: "commands-list-toolbar" }, search, quickFilters),
         filterBar,

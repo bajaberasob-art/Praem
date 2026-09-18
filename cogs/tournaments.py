@@ -4,71 +4,83 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database import get_tournament_scores, record_tournament_score
+from database import (
+    add_tournament_entry,
+    create_tournament,
+    get_open_tournaments,
+    get_tournament_entries,
+    get_tournament_scores,
+    record_tournament_score,
+    set_tournament_message,
+    start_tournament,
+)
 
 
 class TournamentEntryView(discord.ui.View):
-    def __init__(self, title: str, max_players: int):
+    def __init__(self, tournament_id: int, title: str, max_players: int):
         super().__init__(timeout=None)
+        self.tournament_id = int(tournament_id)
         self.title, self.max_players = title, max_players
-        self.players = []
+        join_button = discord.ui.Button(
+            label="تسجيل اشتراك 🎯",
+            style=discord.ButtonStyle.success,
+            custom_id=f"tournament:join:{self.tournament_id}",
+        )
+        join_button.callback = self.join
+        self.add_item(join_button)
+        start_button = discord.ui.Button(
+            label="إغلاق وقرعة المواجهات ⚔️",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"tournament:start:{self.tournament_id}",
+        )
+        start_button.callback = self.generate_bracket
+        self.add_item(start_button)
 
-    @discord.ui.button(
-        label="تسجيل اشتراك 🎯",
-        style=discord.ButtonStyle.success,
-        custom_id="btn_join_tourney",
-    )
-    async def join(
-        self,
-        itx: discord.Interaction,
-        btn: discord.ui.Button,
-    ):
-        if itx.user.id in [player.id for player in self.players]:
-            return await itx.response.send_message(
-                "❌ أنت مسجل بالفعل في هذه البطولة!",
-                ephemeral=True,
-            )
-        if len(self.players) >= self.max_players:
+    async def join(self, itx: discord.Interaction):
+        added, count, maximum = await add_tournament_entry(
+            self.tournament_id,
+            itx.user.id,
+        )
+        if not added and count >= maximum:
             return await itx.response.send_message(
                 "⚠️ اكتمل العدد الأقصى للمشاركين!",
                 ephemeral=True,
             )
-
-        self.players.append(itx.user)
+        if not added:
+            return await itx.response.send_message(
+                "❌ أنت مسجل بالفعل في هذه البطولة أو أُغلقت.",
+                ephemeral=True,
+            )
         await itx.response.send_message(
-            f"✅ تم تسجيلك بنجاح! ({len(self.players)}/{self.max_players})",
+            f"✅ تم تسجيلك بنجاح! ({count}/{maximum})",
             ephemeral=True,
         )
 
-    @discord.ui.button(
-        label="إغلاق وقرعة المواجهات ⚔️",
-        style=discord.ButtonStyle.danger,
-        custom_id="btn_start_bracket",
-    )
-    async def generate_bracket(
-        self,
-        itx: discord.Interaction,
-        btn: discord.ui.Button,
-    ):
+    async def generate_bracket(self, itx: discord.Interaction):
         if not itx.user.guild_permissions.manage_events:
             return await itx.response.send_message(
                 "❌ هذا الإجراء متاح لمنظمي الفعاليات فقط.",
                 ephemeral=True,
             )
-        if len(self.players) < 2:
+        tournament = await start_tournament(self.tournament_id)
+        if tournament is None:
             return await itx.response.send_message(
                 "⚠️ يجب تسجيل لاعبين على الأقل لبدء القرعة!",
                 ephemeral=True,
             )
-
         self.stop()
-        random.shuffle(self.players)
+        players = [
+            itx.guild.get_member(player_id)
+            for player_id in tournament["entries"]
+        ]
+        players = [player for player in players if player is not None]
+        random.shuffle(players)
         matches = []
-        for index in range(0, len(self.players), 2):
-            player_one = self.players[index].mention
+        for index in range(0, len(players), 2):
+            player_one = players[index].mention
             player_two = (
-                self.players[index + 1].mention
-                if index + 1 < len(self.players)
+                players[index + 1].mention
+                if index + 1 < len(players)
                 else "تأهل تلقائي (BYE)"
             )
             matches.append(
@@ -77,7 +89,7 @@ class TournamentEntryView(discord.ui.View):
             )
 
         embed = discord.Embed(
-            title=f"🏆 شجرة مواجهات بطولة: {self.title}",
+            title=f"🏆 شجرة مواجهات بطولة: {tournament['title']}",
             description="\n\n".join(matches),
             color=0xF1C40F,
         )

@@ -986,7 +986,7 @@ async def get_due_giveaways(now: Optional[str] = None) -> list[Dict[str, Any]]:
             """
             SELECT id, guild_id, channel_id, message_id, prize, ends_at
             FROM giveaways
-            WHERE status = 'open' AND ends_at <= ?
+            WHERE status = 'open' AND message_id > 0 AND ends_at <= ?
             ORDER BY ends_at ASC, id ASC
             LIMIT 100
             """,

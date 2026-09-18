@@ -1,10 +1,10 @@
-import asyncio
+import datetime
 import random
 
 import aiosqlite
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from database import (
     DB_NAME,
@@ -12,32 +12,38 @@ from database import (
     get_economy_leaderboard,
     get_guild_settings,
     get_or_create_user,
+    add_giveaway_entry,
+    cancel_giveaway,
+    complete_giveaway,
+    create_giveaway,
+    get_due_giveaways,
+    get_giveaway_entries,
+    get_open_giveaways,
+    set_giveaway_message,
     transfer_balance,
     update_balance,
 )
 
 
 class LiveGiveaway(discord.ui.View):
-    def __init__(self, prize: str):
+    def __init__(self, prize: str, giveaway_id: int):
         super().__init__(timeout=None)
-        self.prize, self.entries = prize, set()
+        self.prize = prize
+        self.giveaway_id = int(giveaway_id)
+        button = discord.ui.Button(
+            label="دخول السحب 🎉",
+            style=discord.ButtonStyle.success,
+            custom_id=f"giveaway:enter:{self.giveaway_id}",
+        )
+        button.callback = self.enter
+        self.add_item(button)
 
-    @discord.ui.button(
-        label="دخول السحب 🎉",
-        style=discord.ButtonStyle.success,
-        custom_id="btn_live_gw",
-    )
-    async def enter(
-        self,
-        itx: discord.Interaction,
-        btn: discord.ui.Button,
-    ):
-        if itx.user.id in self.entries:
+    async def enter(self, itx: discord.Interaction):
+        if not await add_giveaway_entry(self.giveaway_id, itx.user.id):
             return await itx.response.send_message(
                 "❌ أنت مسجل مسبقاً في هذا السحب!",
                 ephemeral=True,
             )
-        self.entries.add(itx.user.id)
         await itx.response.send_message(
             f"✅ تم اشتراكك في السحب على: **{self.prize}**",
             ephemeral=True,
@@ -48,6 +54,52 @@ class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.cooldowns = {}
+        self.giveaway_task.start()
+
+    async def cog_load(self):
+        for giveaway in await get_open_giveaways():
+            self.bot.add_view(
+                LiveGiveaway(giveaway["prize"], giveaway["id"]),
+                message_id=int(giveaway["message_id"]),
+            )
+
+    def cog_unload(self):
+        self.giveaway_task.cancel()
+
+    @tasks.loop(seconds=10)
+    async def giveaway_task(self):
+        for giveaway in await get_due_giveaways():
+            channel = self.bot.get_channel(int(giveaway["channel_id"]))
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(int(giveaway["channel_id"]))
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    continue
+            entries = await get_giveaway_entries(int(giveaway["id"]))
+            try:
+                if entries:
+                    winner_id = random.choice(entries)
+                    winner = channel.guild.get_member(winner_id)
+                    mention = winner.mention if winner else f"<@{winner_id}>"
+                    await channel.send(
+                        f"🎊 مبارك {mention}! فزت بسحب: **{giveaway['prize']}** 🎉"
+                    )
+                else:
+                    await channel.send(
+                        f"⚠️ انتهى السحب على **{giveaway['prize']}** دون أي مشتركين."
+                    )
+                try:
+                    message = await channel.fetch_message(int(giveaway["message_id"]))
+                    await message.edit(view=None)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+            await complete_giveaway(int(giveaway["id"]))
+
+    @giveaway_task.before_loop
+    async def before_giveaway_task(self):
+        await self.bot.wait_until_ready()
 
     def check_cd(self, key: str, sec: int) -> int:
         now = int(discord.utils.utcnow().timestamp())
@@ -348,7 +400,17 @@ class Economy(commands.Cog):
                 "❌ المدة دقيقة على الأقل.",
                 ephemeral=True,
             )
-        view = LiveGiveaway(prize)
+        ends_at = (
+            discord.utils.utcnow() + datetime.timedelta(minutes=minutes)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        giveaway_id = await create_giveaway(
+            itx.guild.id,
+            itx.channel.id,
+            prize,
+            ends_at,
+            itx.user.id,
+        )
+        view = LiveGiveaway(prize, giveaway_id)
         embed = discord.Embed(
             title="🎁 سحب مؤقت!",
             description=(
@@ -358,21 +420,14 @@ class Economy(commands.Cog):
             ),
             color=0x9B59B6,
         )
-        message = await itx.channel.send(embed=embed, view=view)
+        try:
+            message = await itx.channel.send(embed=embed, view=view)
+        except (discord.Forbidden, discord.HTTPException):
+            await cancel_giveaway(giveaway_id)
+            raise
+        await set_giveaway_message(giveaway_id, message.id)
+        self.bot.add_view(view, message_id=message.id)
         await itx.response.send_message("✅ أُطلق السحب.", ephemeral=True)
-
-        await asyncio.sleep(minutes * 60)
-        view.stop()
-        if not view.entries:
-            return await itx.channel.send(
-                f"⚠️ انتهى السحب على **{prize}** دون أي مشتركين."
-            )
-        winner = itx.guild.get_member(random.choice(list(view.entries)))
-        if winner is not None:
-            await itx.channel.send(
-                f"🎊 مبارك {winner.mention}! فزت بسحب: **{prize}** 🎉"
-            )
-        await message.edit(view=None)
 
 
 async def setup(bot: commands.Bot):

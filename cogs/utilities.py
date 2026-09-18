@@ -252,6 +252,7 @@ class Utilities(commands.Cog):
                 "cog": getattr(command, "cog_name", None) or "Commands",
                 "enabled": True,
                 "allowed_roles": [],
+                "allowed_channels": [],
                 "configured": False,
                 "aliases": list(command.aliases),
                 "permission_warnings": [],
@@ -267,6 +268,7 @@ class Utilities(commands.Cog):
                     "cog": binding.__class__.__name__ if binding else "Slash Commands",
                     "enabled": True,
                     "allowed_roles": [],
+                    "allowed_channels": [],
                     "configured": False,
                     "aliases": [],
                     "permission_warnings": [],
@@ -280,6 +282,7 @@ class Utilities(commands.Cog):
                     "cog": "Configured",
                     "enabled": True,
                     "allowed_roles": [],
+                    "allowed_channels": [],
                     "configured": False,
                     "aliases": [],
                     "permission_warnings": [],
@@ -288,6 +291,7 @@ class Utilities(commands.Cog):
             item.update(
                 enabled=bool(control["enabled"]),
                 allowed_roles=list(control["allowed_roles"]),
+                allowed_channels=list(control.get("allowed_channels", [])),
                 configured=True,
                 updated_at=control.get("updated_at"),
             )
@@ -313,6 +317,7 @@ class Utilities(commands.Cog):
         command_name: str,
         enabled: bool,
         allowed_roles: list[int | str] | None = None,
+        allowed_channels: list[int | str] | None = None,
     ) -> dict[str, Any]:
         """Persist and publish a command's enabled/role policy."""
         name = str(command_name).strip().lower()
@@ -321,7 +326,10 @@ class Utilities(commands.Cog):
         roles = [str(role_id) for role_id in (allowed_roles or []) if str(role_id).isdigit()]
         if len(roles) > 25:
             raise ValueError("allowed_roles cannot contain more than 25 roles")
-        result = await save_command_control(guild_id, name, bool(enabled), roles)
+        channels = [str(channel_id) for channel_id in (allowed_channels or []) if str(channel_id).isdigit()]
+        if len(channels) > 25:
+            raise ValueError("allowed_channels cannot contain more than 25 channels")
+        result = await save_command_control(guild_id, name, bool(enabled), roles, channels)
         self.command_controls.setdefault(int(guild_id), {})[name] = result
         return result
 

@@ -141,6 +141,30 @@ class FakeBot:
             return {"ok": True, "guild_id": guild_id, "user_id": user_id}
 
     class EngagementStub:
+        async def get_onboarding_snapshot(self, guild_id):
+            snapshot = await database.get_guild_settings(guild_id)
+            values = snapshot["settings"]
+            return {
+                "revision": snapshot["revision"],
+                "updated_at": snapshot["updated_at"],
+                "settings": {
+                    key: values.get(key)
+                    for key in (
+                        "welcome_channel_id",
+                        "welcome_message",
+                        "leave_message",
+                        "welcome_dm_enabled",
+                        "auto_role_id",
+                        "member_auto_role_id",
+                        "bot_auto_role_id",
+                        "verified_role_id",
+                        "unverified_role_id",
+                        "rules_channel_id",
+                    )
+                },
+                "self_roles": [],
+            }
+
         async def send_test_welcome(self, guild_id, target_channel_id, template_data):
             return {
                 "ok": True,

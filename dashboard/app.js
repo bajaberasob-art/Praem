@@ -437,7 +437,11 @@
         if (start > cursor) parent.append(document.createTextNode(line.slice(cursor, start)));
         const token = match[0];
         const inner = token.slice(token.startsWith("`") ? 1 : 2, token.startsWith("`") ? -1 : -2);
-        const tag = token.startsWith("`") ? "code" : token.startsWith("*") || token.startsWith("_") ? "strong" : "em";
+        const tag = token.startsWith("`")
+          ? "code"
+          : token.startsWith("**") || token.startsWith("__")
+            ? "strong"
+            : "em";
         parent.append(el(tag, { text: inner }));
         cursor = start + token.length;
       }

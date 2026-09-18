@@ -518,6 +518,21 @@ def _command_roles(guild, role_ids):
     return list(dict.fromkeys(clean)), None
 
 
+def _command_channels(guild, channel_ids):
+    if not isinstance(channel_ids, list) or len(channel_ids) > 25:
+        return None, "اختر من 0 إلى 25 قناة"
+    clean = []
+    for channel_id in channel_ids:
+        try:
+            channel = guild.get_channel(int(channel_id))
+        except (TypeError, ValueError):
+            channel = None
+        if channel is None:
+            return None, "توجد قناة غير موجودة في هذا السيرفر"
+        clean.append(str(channel.id))
+    return list(dict.fromkeys(clean)), None
+
+
 @routes.get('/api/guild/{guild_id}/commands')
 async def api_guild_commands(req):
     _, guild = await authorize(req)
@@ -554,11 +569,15 @@ async def api_guild_commands_toggle(req):
     roles, role_error = _command_roles(guild, body.get("allowed_roles", []))
     if role_error:
         return json_error(400, "validation", fields={"allowed_roles": role_error})
+    channels, channel_error = _command_channels(guild, body.get("allowed_channels", []))
+    if channel_error:
+        return json_error(400, "validation", fields={"allowed_channels": channel_error})
     result = await utilities.toggle_command(
         guild.id,
         command_name,
         body["enabled"],
         roles,
+        channels,
     )
     return web.json_response({"command": result})
 

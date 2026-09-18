@@ -300,6 +300,7 @@ class Utilities(commands.Cog):
             if (
                 item["enabled"]
                 and not item["allowed_roles"]
+                and not item.get("allowed_channels")
                 and command_name in SENSITIVE_COMMAND_NAMES
             ):
                 item["permission_warnings"] = [

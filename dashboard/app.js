@@ -1619,6 +1619,61 @@
     document.querySelector(".command-detail-back")?.remove();
     state.commandDetail = null;
   }
+  async function saveCommandShortcuts(command, input) {
+    const requested = [...new Set(
+      input.value
+        .split(/[,،\n]+/)
+        .map((value) => value.trim().replace(/^[/!]/, ""))
+        .filter(Boolean),
+    )];
+    if (requested.length > 20) {
+      toast("يمكن إضافة 20 اختصاراً كحد أقصى للأمر", "warn");
+      return;
+    }
+    if (requested.some((value) => /\s/.test(value) || value.length > 80)) {
+      toast("كل اختصار يجب أن يكون كلمة واحدة وبحد أقصى 80 حرفاً", "warn");
+      return;
+    }
+    const existing = commandShortcuts(command);
+    const existingByTrigger = new Map(existing.map((item) => [String(item.trigger).casefold?.() || String(item.trigger).toLowerCase(), item]));
+    const wanted = new Set(requested.map((value) => value.toLowerCase()));
+    try {
+      for (const trigger of requested) {
+        if (existingByTrigger.has(trigger.toLowerCase())) continue;
+        const response = await api(`api/guild/${state.guild.id}/shortcuts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
+          body: JSON.stringify({
+            trigger,
+            target_type: "command",
+            target: `/${command.command_name}`,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ الاختصار", "warn");
+          return;
+        }
+        state.commandStudio.shortcuts.push(data.shortcut);
+      }
+      for (const shortcut of existing) {
+        if (wanted.has(String(shortcut.trigger).toLowerCase())) continue;
+        const response = await api(`api/guild/${state.guild.id}/shortcuts/${shortcut.id}`, {
+          method: "DELETE",
+          headers: { "X-CSRF-Token": state.session.csrf },
+        });
+        if (response.ok) {
+          state.commandStudio.shortcuts = state.commandStudio.shortcuts.filter((item) => item.id !== shortcut.id);
+        }
+      }
+      pulse();
+      toast(`تم حفظ ${requested.length} اختصاراً لـ /${command.command_name}`, "success", 2300);
+      closeCommandDetail();
+      openCommandDetail(command);
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");
+    }
+  }
   function openCommandDetail(command) {
     closeCommandDetail();
     state.commandDetail = command;
@@ -1650,6 +1705,29 @@
         )
       : el("div", { class: "permission-ok", text: "لا توجد تحذيرات صلاحيات من البيانات الحالية" });
     const roles = [...commandRoles(command)].map((id) => (state.commandStudio.roles || []).find((role) => String(role.id) === id)?.name || id);
+    const shortcuts = commandShortcuts(command);
+    const shortcutInput = el("textarea", {
+      class: "studio-textarea command-alias-input",
+      rows: "2",
+      placeholder: "مثال: عيب، تحذير، انذار",
+      "aria-label": "اختصارات الأمر",
+      text: shortcuts.map((item) => item.trigger).join("، "),
+    });
+    const shortcutChips = el("div", { class: "command-alias-chips" },
+      shortcuts.length
+        ? shortcuts.map((item) => el("code", { class: "command-alias-chip", text: item.trigger }))
+        : el("span", { class: "hint", text: "لا توجد اختصارات مخصصة لهذا الأمر بعد" }),
+    );
+    const shortcutSection = el("section", { class: "command-aliases" },
+      el("div", { class: "section-heading compact" },
+        el("div", {}, el("div", { class: "eyebrow", text: "COMMAND ALIASES" }), el("h3", { text: "اختصارات الأمر" })),
+        el("span", { class: "alias-count", text: `${shortcuts.length}/20` }),
+      ),
+      el("p", { class: "hint", text: "اكتب أكثر من اختصار وافصل بينها بفاصلة. مثال: بدال /warn اكتب عيب أو تحذير." }),
+      shortcutInput,
+      shortcutChips,
+      el("button", { class: "btn ghost alias-save-button", type: "button", text: "حفظ الاختصارات", onClick: () => saveCommandShortcuts(command, shortcutInput) }),
+    );
     const modal = el("aside", { class: "modal command-detail-drawer" },
       el("div", { class: "drawer-head" },
         el("div", {}, el("span", { class: "eyebrow", text: `${command.cog || "COMMANDS"} / POLICY` }), el("h2", { text: `/${command.command_name}` })),
@@ -1660,9 +1738,11 @@
         el("span", { class: "detail-meta", text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
       ),
       permissionBox,
+      shortcutSection,
       el("dl", { class: "command-detail-list" },
         el("div", {}, el("dt", { text: "الـ Cog" }), el("dd", { text: command.cog || "Commands" })),
         el("div", {}, el("dt", { text: "الرتب" }), el("dd", { text: roles.length ? roles.join("، ") : "كل الرتب" })),
+        el("div", {}, el("dt", { text: "اختصارات Discord" }), el("dd", { text: command.aliases?.length ? command.aliases.join("، ") : "لا توجد" })),
         el("div", {}, el("dt", { text: "آخر استخدام" }), el("dd", { text: command.last_used_at ? new Date(command.last_used_at).toLocaleString("ar") : "لا توجد بيانات" })),
       ),
       el("section", { class: "command-simulator" },

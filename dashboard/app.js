@@ -75,6 +75,14 @@
     "leave_channel_id",
     "welcome_message",
     "leave_message",
+    "welcome_embed_enabled",
+    "welcome_embed_color",
+    "welcome_embed_title",
+    "welcome_embed_description",
+    "welcome_embed_image_url",
+    "welcome_embed_sticker_id",
+    "welcome_embed_footer",
+    "welcome_embed_show_avatar",
     "log_channel_id",
     "anti_spam_enabled",
     "anti_link_enabled",
@@ -91,6 +99,14 @@
     "welcome_message",
     "leave_message",
     "welcome_dm_enabled",
+    "welcome_embed_enabled",
+    "welcome_embed_color",
+    "welcome_embed_title",
+    "welcome_embed_description",
+    "welcome_embed_image_url",
+    "welcome_embed_sticker_id",
+    "welcome_embed_footer",
+    "welcome_embed_show_avatar",
     "auto_role_id",
     "member_auto_role_id",
     "bot_auto_role_id",
@@ -432,7 +448,11 @@
     const go = () => {
       state.draft[key] = !state.draft[key];
       b.setAttribute("aria-checked", String(state.draft[key]));
-      renderDynamic();
+      if (key === "welcome_embed_enabled") renderPage();
+      else {
+        renderDynamic();
+        refreshEmbedPreview();
+      }
     };
     b.onclick = go;
     b.onkeydown = (e) => {
@@ -1346,6 +1366,44 @@
     const leaveField = field("رسالة المغادرة", leave, "leave_message");
     leaveField.classList.add("wide");
     leaveField.append(leaveCount);
+    const embedDescription = el("textarea", {
+      id: "in-welcome-embed-description",
+      maxlength: "1000",
+      placeholder: "يا هلا {user} في {server}! أنت العضو رقم {count}.",
+    });
+    embedDescription.value = state.draft.welcome_embed_description || "";
+    embedDescription.oninput = () => {
+      state.draft.welcome_embed_description = embedDescription.value;
+      renderDynamic();
+    };
+    const embedDescriptionField = field(
+      "وصف الـ Embed",
+      embedDescription,
+      "welcome_embed_description",
+      "استخدم {user} و {server} و {count} و {inviter} لإظهار بيانات العضو تلقائياً.",
+    );
+    embedDescriptionField.classList.add("wide");
+    const embedControls = el(
+      "div",
+      { class: "embed-builder-grid" },
+      toggle("welcome_embed_enabled", "تفعيل ترحيب Embed احترافي"),
+      toggle("welcome_embed_show_avatar", "إظهار صورة العضو"),
+      input("welcome_embed_title", "عنوان الترحيب", "text", {
+        maxlength: "256",
+        placeholder: "أهلاً بك في {server} ✨",
+      }),
+      input("welcome_embed_color", "لون الـ Embed", "color"),
+      input("welcome_embed_image_url", "صورة رئيسية اختيارية", "url", {
+        maxlength: "2048",
+        placeholder: "https://example.com/welcome.png",
+      }),
+      selector("welcome_embed_sticker_id", "ملصق من السيرفر", "sticker"),
+      input("welcome_embed_footer", "التذييل", "text", {
+        maxlength: "2048",
+        placeholder: "PRIME | TEAM • تطوير abood2026",
+      }),
+      embedDescriptionField,
+    );
     const actions = el(
       "div",
       { class: "onboarding-actions" },
@@ -1359,7 +1417,11 @@
         el("p", { text: "صمّم لحظة دخول العضو، راجعها بصرياً، ثم انشر تجربة حقيقية في قناة Discord." }),
         actions,
       ),
-      card("قواعد الدخول والترحيب", el("div", { class: "onboarding-card-body" }, onboardingFields, messageField, leaveField)),
+       card("قواعد الدخول والترحيب", el("div", { class: "onboarding-card-body" }, onboardingFields, messageField, leaveField)),
+       card("مصمم الترحيب الاحترافي", el("div", { class: "onboarding-card-body embed-builder-card" },
+         el("p", { class: "hint", text: "أنشئ رسالة Embed تظهر فيها صورة العضو، عدد الأعضاء، الترتيب، صورة رئيسية أو ملصق من السيرفر." }),
+         embedControls,
+       )),
       card("منشئ لوحة الرتب الذاتية", selfRolesBuilder()),
     );
     return section;
@@ -2192,6 +2254,7 @@
     document.querySelectorAll("[data-role-matrix-key]").forEach((node) => {
       node.textContent = roleName(state.draft[node.dataset.roleMatrixKey]);
     });
+    refreshEmbedPreview();
   }
   async function saveAll() {
     if (dirty()) await save();

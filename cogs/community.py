@@ -409,6 +409,345 @@ class Community(commands.Cog):
     def cog_unload(self):
         self.update_counters_task.cancel()
 
+    async def deploy_ticket_panel(
+        self,
+        channel_id: int,
+        categories_config: list[dict] | None = None,
+    ) -> dict:
+        """Publish and persist a category panel with durable custom IDs."""
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None:
+            raise ValueError("ticket panel channel was not found")
+        categories = normalize_ticket_categories(categories_config)
+        embed = discord.Embed(
+            title="🎫 مركز الدعم والتذاكر",
+            description=(
+                "اختر التصنيف الأقرب لطلبك. ستظهر لك نافذة قصيرة لجمع "
+                "التفاصيل قبل فتح قناة خاصة مع فريق الدعم."
+            ),
+            color=0x00D9A6,
+        )
+        embed.set_footer(text="Help Desk • اختر تصنيفاً لبدء المحادثة")
+        view = TicketPanelView(categories)
+        message = await channel.send(embed=embed, view=view)
+        try:
+            await message.pin()
+        except (AttributeError, discord.Forbidden, discord.HTTPException):
+            logger.debug("Unable to pin ticket panel message", exc_info=True)
+        self.bot.add_view(view, message_id=message.id)
+        return await save_ticket_panel(
+            channel.guild.id,
+            channel.id,
+            message.id,
+            categories,
+        )
+
+    async def get_active_tickets(self, guild_id: int) -> list[dict]:
+        return await get_active_tickets(guild_id)
+
+    async def get_ticket_transcripts(
+        self,
+        guild_id: int,
+        query: str = "",
+    ) -> list[dict]:
+        return await get_ticket_transcripts(guild_id, query)
+
+    async def get_staff_kpis(self, guild_id: int) -> list[dict]:
+        return await get_staff_kpis(guild_id)
+
+    @staticmethod
+    def _is_ticket_staff(member, ticket: dict) -> bool:
+        permissions = getattr(member, "guild_permissions", None)
+        if permissions and (
+            getattr(permissions, "administrator", False)
+            or getattr(permissions, "manage_channels", False)
+            or getattr(permissions, "manage_guild", False)
+        ):
+            return True
+        allowed = {str(role_id) for role_id in ticket.get("support_role_ids", [])}
+        return bool(
+            allowed.intersection(
+                {str(role.id) for role in getattr(member, "roles", [])}
+            )
+        )
+
+    async def _ticket_denied(self, itx: discord.Interaction):
+        message = "⛔ هذا الإجراء متاح لفريق الدعم والإدارة فقط."
+        if itx.response.is_done():
+            await itx.followup.send(message, ephemeral=True)
+        else:
+            await itx.response.send_message(message, ephemeral=True)
+
+    async def open_ticket(
+        self,
+        itx: discord.Interaction,
+        category: dict,
+        subject: str,
+        details: str,
+    ) -> dict | None:
+        guild = itx.guild
+        if guild is None:
+            return await itx.response.send_message(
+                "🔒 فتح التذاكر متاح داخل السيرفرات فقط.", ephemeral=True
+            )
+        active = await get_active_tickets(guild.id)
+        if any(ticket["user_id"] == itx.user.id for ticket in active):
+            return await itx.response.send_message(
+                "📌 لديك تذكرة مفتوحة بالفعل. أغلقها قبل فتح تذكرة جديدة.",
+                ephemeral=True,
+            )
+        parent = None
+        if category.get("category_id"):
+            parent = guild.get_channel(int(category["category_id"]))
+            if not isinstance(parent, discord.CategoryChannel):
+                parent = None
+        if parent is None and isinstance(itx.channel, discord.TextChannel):
+            parent = itx.channel.category
+        safe_name = re.sub(r"[^a-zA-Z0-9-]+", "-", itx.user.display_name.lower()).strip("-")
+        safe_name = (safe_name or f"user-{itx.user.id}")[:45]
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            itx.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                attach_files=True,
+            ),
+        }
+        for role_id in category.get("support_role_ids", []):
+            role = guild.get_role(int(role_id))
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                )
+        if guild.me:
+            overwrites[guild.me] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_messages=True,
+            )
+        channel = await guild.create_text_channel(
+            name=f"ticket-{safe_name}-{itx.user.id}"[:100],
+            category=parent,
+            overwrites=overwrites,
+            topic=f"Ticket • {category['label']} • Normal • {subject[:80]}",
+        )
+        ticket = await create_ticket(
+            guild.id,
+            channel.id,
+            itx.user.id,
+            category["key"],
+            category["label"],
+            subject,
+            details,
+            category.get("support_role_ids"),
+            category.get("senior_role_ids"),
+        )
+        embed = self._ticket_embed(ticket)
+        message = await channel.send(
+            content=itx.user.mention,
+            embed=embed,
+            view=TicketControlView(),
+            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+        )
+        try:
+            await message.pin()
+        except (AttributeError, discord.Forbidden, discord.HTTPException):
+            logger.debug("Unable to pin ticket control message", exc_info=True)
+        await itx.response.send_message(
+            f"✅ تم فتح تذكرتك: {channel.mention}", ephemeral=True
+        )
+        return ticket
+
+    @staticmethod
+    def _ticket_embed(ticket: dict) -> discord.Embed:
+        priority = {
+            "normal": "🟢 عادية",
+            "high": "🟠 عالية",
+            "management": "🔴 تصعيد إداري",
+        }.get(ticket.get("priority"), "🟢 عادية")
+        embed = discord.Embed(
+            title=f"🎫 {ticket['category_label']} · #{ticket['id']}",
+            description=ticket["details"],
+            color={
+                "normal": 0x00D9A6,
+                "high": 0xF59E0B,
+                "management": 0xEF4444,
+            }.get(ticket.get("priority"), 0x00D9A6),
+        )
+        embed.add_field(name="الموضوع", value=ticket["subject"], inline=False)
+        embed.add_field(name="الأولوية", value=priority, inline=True)
+        embed.add_field(
+            name="التعليمات",
+            value="استلم التذكرة، صعّدها عند الحاجة، ثم أغلقها بعد حل الطلب.",
+            inline=False,
+        )
+        return embed
+
+    async def claim_ticket_from_interaction(self, itx: discord.Interaction):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] != "active":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        if ticket.get("claimed_by") and ticket["claimed_by"] != itx.user.id:
+            return await itx.response.send_message(
+                "👤 التذكرة مستلمة من عضو آخر في فريق الدعم.", ephemeral=True
+            )
+        ticket = await claim_ticket(itx.guild.id, ticket["id"], itx.user.id)
+        overwrites = itx.channel.overwrites
+        for role_id in ticket.get("support_role_ids", []):
+            role = itx.guild.get_role(int(role_id))
+            if role:
+                overwrite = itx.channel.overwrites_for(role)
+                overwrite.send_messages = False
+                await itx.channel.set_permissions(role, overwrite=overwrite)
+        overwrite = itx.channel.overwrites_for(itx.user)
+        overwrite.view_channel = True
+        overwrite.send_messages = True
+        await itx.channel.set_permissions(itx.user, overwrite=overwrite)
+        await itx.channel.edit(
+            topic=f"Ticket • {ticket['category_label']} • مستلمة بواسطة {itx.user.display_name}"
+        )
+        await itx.response.send_message("✅ تم استلام التذكرة حصرياً لك.", ephemeral=True)
+
+    async def escalate_ticket_from_interaction(self, itx: discord.Interaction):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] != "active":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        current = ticket.get("priority", "normal")
+        priority = TICKET_PRIORITIES[
+            min(TICKET_PRIORITIES.index(current) + 1, len(TICKET_PRIORITIES) - 1)
+        ]
+        ticket = await escalate_ticket(itx.guild.id, ticket["id"], priority)
+        await itx.channel.edit(
+            topic=f"Ticket • {ticket['category_label']} • {priority.upper()}"
+        )
+        mentions = [
+            itx.guild.get_role(int(role_id)).mention
+            for role_id in ticket.get("senior_role_ids", [])
+            if itx.guild.get_role(int(role_id))
+        ]
+        if mentions:
+            await itx.channel.send(
+                " ".join(mentions) + " 🚨 تم تصعيد هذه التذكرة.",
+                allowed_mentions=discord.AllowedMentions(roles=True, everyone=False),
+            )
+        await itx.response.send_message(
+            f"🚨 تم تحديث الأولوية إلى: **{priority}**.", ephemeral=True
+        )
+
+    async def show_close_modal(self, itx: discord.Interaction):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] != "active":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        await itx.response.send_modal(CloseTicketModal())
+
+    async def close_ticket_from_interaction(
+        self,
+        itx: discord.Interaction,
+        reason: str,
+    ):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] != "active":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        text, content_html = await self._build_transcript(itx.channel, ticket)
+        await save_ticket_transcript(
+            ticket["id"], ticket["guild_id"], ticket["channel_id"], text, content_html
+        )
+        ticket = await close_ticket(ticket["guild_id"], ticket["id"], itx.user.id, reason)
+        await itx.channel.edit(
+            name=f"archived-ticket-{ticket['id']}"[:100],
+            topic=f"Archived ticket • closed by {itx.user.display_name}",
+        )
+        for target in [itx.guild.get_member(ticket["user_id"]), itx.user]:
+            if target:
+                overwrite = itx.channel.overwrites_for(target)
+                overwrite.send_messages = False
+                await itx.channel.set_permissions(target, overwrite=overwrite)
+        self.bot.add_view(
+            TicketRatingView(ticket["id"], ticket["user_id"], ticket["guild_id"])
+        )
+        user = itx.guild.get_member(ticket["user_id"])
+        if user is None:
+            try:
+                user = await self.bot.fetch_user(ticket["user_id"])
+            except (discord.NotFound, discord.HTTPException):
+                user = None
+        if user:
+            try:
+                await user.send(
+                    f"📁 تم إغلاق تذكرتك **#{ticket['id']}**.\n"
+                    "نقدّر تقييمك لتجربة الدعم:",
+                    file=discord.File(
+                        io.BytesIO(content_html.encode("utf-8")),
+                        filename=f"ticket-{ticket['id']}.html",
+                    ),
+                    view=TicketRatingView(
+                        ticket["id"], ticket["user_id"], ticket["guild_id"]
+                    ),
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.info("Could not DM transcript for ticket %s", ticket["id"])
+        await itx.response.send_message(
+            "✅ أُغلقت التذكرة وحُفظ transcript وأُرسل للمستخدم.", ephemeral=True
+        )
+
+    async def _build_transcript(self, channel, ticket):
+        lines = [
+            f"Ticket #{ticket['id']} — {ticket['category_label']}",
+            f"Subject: {ticket['subject']}",
+            f"Opened by: {ticket['user_id']}",
+            "",
+        ]
+        html_lines = [
+            "<!doctype html><html lang='ar' dir='rtl'><meta charset='utf-8'>",
+            "<style>body{background:#050505;color:#e5edf8;font:15px system-ui;padding:28px}"
+            ".msg{border:1px solid #1e293b;border-radius:10px;padding:10px;margin:8px 0}"
+            ".meta{color:#7dd3fc;font-size:12px}</style><body>",
+            f"<h1>Ticket #{ticket['id']} · {html.escape(ticket['category_label'])}</h1>",
+            f"<p>{html.escape(ticket['subject'])}</p>",
+        ]
+        try:
+            history = channel.history(limit=None, oldest_first=True)
+            async for message in history:
+                created = getattr(message, "created_at", None)
+                stamp = created.isoformat() if created else ""
+                author = html.escape(getattr(message.author, "display_name", str(message.author)))
+                content = str(getattr(message, "content", "") or "")
+                lines.append(f"[{stamp}] {author}: {content}")
+                html_lines.append(
+                    f"<div class='msg'><div class='meta'>{author} · {html.escape(stamp)}</div>"
+                    f"<div>{html.escape(content).replace(chr(10), '<br>')}</div></div>"
+                )
+        except (AttributeError, discord.HTTPException):
+            logger.warning("Could not read transcript history for ticket %s", ticket["id"])
+        html_lines.append("</body></html>")
+        return "\n".join(lines), "\n".join(html_lines)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or message.guild is None:
+            return
+        ticket = await get_ticket_by_channel(message.channel.id)
+        if (
+            ticket
+            and ticket["status"] == "active"
+            and message.author.id != ticket["user_id"]
+            and self._is_ticket_staff(message.author, ticket)
+        ):
+            await record_ticket_response(ticket["guild_id"], ticket["id"])
+
     @tasks.loop(minutes=10)
     async def update_counters_task(self):
         for guild_id, channels in list(self.counters.items()):
@@ -586,8 +925,16 @@ class Community(commands.Cog):
 
 async def setup(bot: commands.Bot):
     bot.add_view(SuggestionActionView())
-    await bot.add_cog(Community(bot))
+    bot.add_view(TicketControlView())
+    for panel in await get_ticket_panels():
+        if bot.get_channel(panel["channel_id"]):
+            bot.add_view(
+                TicketPanelView(panel["categories"]),
+                message_id=panel["message_id"],
+            )
+    community = Community(bot)
+    await bot.add_cog(community)
     logger.info(
         "Community cog initialized with /suggest, /poll, /remind, "
-        "and /setup_counters."
+        "/setup_counters, and persistent ticket controls."
     )

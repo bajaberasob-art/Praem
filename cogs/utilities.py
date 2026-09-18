@@ -15,6 +15,8 @@ from database import (
     get_command_controls,
     get_guild_settings,
     get_shortcuts,
+    delete_auto_responder,
+    record_auto_responder_execution,
     save_auto_responder,
     save_command_control,
     save_shortcut,
@@ -290,6 +292,7 @@ class Utilities(commands.Cog):
         enabled: bool = True,
         cooldown_seconds: float = 5.0,
         bucket_capacity: int = 1,
+        channel_id: int | str | None = None,
     ) -> dict[str, Any]:
         """Management helper for creating a trigger without touching SQL."""
         match_type = str(match_type).strip().lower()
@@ -310,9 +313,16 @@ class Utilities(commands.Cog):
             enabled=enabled,
             cooldown_seconds=cooldown_seconds,
             bucket_capacity=bucket_capacity,
+            channel_id=channel_id,
         )
         await self.sync_auto_responders(guild_id)
         return item
+
+    async def delete_auto_responder(self, guild_id: int, rule_id: int) -> bool:
+        deleted = await delete_auto_responder(guild_id, rule_id)
+        if deleted:
+            await self.sync_auto_responders(guild_id)
+        return deleted
 
     async def add_shortcut(
         self,
@@ -448,6 +458,11 @@ class Utilities(commands.Cog):
         if await self._dispatch_shortcut(message):
             return
         for responder in self.auto_responders.get(guild_id, []):
+            if (
+                responder.get("channel_id") is not None
+                and str(responder["channel_id"]) != str(message.channel.id)
+            ):
+                continue
             if not self._matches(responder, content):
                 continue
             if not self._consume_bucket(message, responder):
@@ -469,6 +484,10 @@ class Utilities(commands.Cog):
                     "[AUTORESPONDER] تعذر إرسال رد في السيرفر %s",
                     guild_id,
                     exc_info=True,
+                )
+            else:
+                responder["execution_count"] = await record_auto_responder_execution(
+                    guild_id, int(responder["id"])
                 )
             break
 

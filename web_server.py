@@ -16,6 +16,7 @@ from aiohttp import web
 from database import (
     SETTINGS_SCHEMA,
     SettingsConflict,
+    get_auto_responders,
     get_warning,
     get_guild_settings,
     update_guild_settings,
@@ -372,6 +373,161 @@ async def api_health(req):
 async def api_guild_meta(req):
     _, guild = await authorize(req)
     return web.json_response(guild_meta(guild))
+
+
+def _utilities_cog():
+    return bot_ref.get_cog("Utilities") if bot_ref else None
+
+
+def _command_roles(guild, role_ids):
+    if not isinstance(role_ids, list) or len(role_ids) > 25:
+        return None, "اختر من 0 إلى 25 رتبة"
+    clean = []
+    for role_id in role_ids:
+        try:
+            role = guild.get_role(int(role_id))
+        except (TypeError, ValueError):
+            role = None
+        if role is None or role.is_default():
+            return None, "توجد رتبة غير موجودة في هذا السيرفر"
+        clean.append(str(role.id))
+    return list(dict.fromkeys(clean)), None
+
+
+@routes.get('/api/guild/{guild_id}/commands')
+async def api_guild_commands(req):
+    _, guild = await authorize(req)
+    utilities = _utilities_cog()
+    if utilities is None:
+        return json_error(503, "utilities_unavailable")
+    status = await utilities.get_guild_commands_status(guild.id)
+    status["roles"] = guild_meta(guild)["roles"]
+    status["channels"] = [
+        {"id": str(channel.id), "name": channel.name}
+        for channel in guild.text_channels
+    ]
+    return web.json_response(status)
+
+
+@routes.post('/api/guild/{guild_id}/commands/toggle')
+async def api_guild_commands_toggle(req):
+    _, guild = await authorize(req, write=True)
+    utilities = _utilities_cog()
+    if utilities is None:
+        return json_error(503, "utilities_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        body = await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    command_name = str(body.get("command_name", "")).strip().lower()
+    if not command_name or len(command_name) > 100:
+        return json_error(400, "validation", fields={"command_name": "اسم الأمر غير صالح"})
+    if not isinstance(body.get("enabled"), bool):
+        return json_error(400, "validation", fields={"enabled": "القيمة يجب أن تكون تشغيل/إيقاف"})
+    roles, role_error = _command_roles(guild, body.get("allowed_roles", []))
+    if role_error:
+        return json_error(400, "validation", fields={"allowed_roles": role_error})
+    result = await utilities.toggle_command(
+        guild.id,
+        command_name,
+        body["enabled"],
+        roles,
+    )
+    return web.json_response({"command": result})
+
+
+@routes.get('/api/guild/{guild_id}/auto-responses')
+async def api_guild_auto_responses(req):
+    _, guild = await authorize(req)
+    rules = await get_auto_responders(guild.id)
+    return web.json_response({
+        "rules": rules,
+        "channels": [
+            {"id": str(channel.id), "name": channel.name}
+            for channel in guild.text_channels
+        ],
+    })
+
+
+@routes.post('/api/guild/{guild_id}/auto-responses')
+async def api_guild_auto_responses_save(req):
+    _, guild = await authorize(req, write=True)
+    utilities = _utilities_cog()
+    if utilities is None:
+        return json_error(503, "utilities_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        body = await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+
+    trigger = str(body.get("trigger", "")).strip()
+    match_type = str(body.get("match_type", "")).strip().lower()
+    response = str(body.get("response", ""))
+    if not trigger or len(trigger) > 500:
+        return json_error(400, "validation", fields={"trigger": "المشغل يجب أن يكون بين 1 و500 حرف"})
+    if match_type not in {"exact", "contains", "regex"}:
+        return json_error(400, "validation", fields={"match_type": "نوع المطابقة غير صالح"})
+    if not response.strip() or len(response) > 2000:
+        return json_error(400, "validation", fields={"response": "الرد يجب أن يكون بين 1 و2000 حرف"})
+    try:
+        cooldown = float(body.get("cooldown_seconds", 5))
+    except (TypeError, ValueError):
+        cooldown = -1
+    if cooldown < 0 or cooldown > 60:
+        return json_error(400, "validation", fields={"cooldown_seconds": "التبريد يجب أن يكون بين 0 و60 ثانية"})
+
+    channel_id = body.get("channel_id")
+    if channel_id in ("", None):
+        channel_id = None
+    else:
+        try:
+            channel = guild.get_channel(int(channel_id))
+        except (TypeError, ValueError):
+            channel = None
+        if not isinstance(channel, discord.TextChannel):
+            return json_error(400, "validation", fields={"channel_id": "القناة النصية غير موجودة في هذا السيرفر"})
+        channel_id = int(channel.id)
+
+    try:
+        rule = await utilities.add_auto_responder(
+            guild.id,
+            trigger,
+            match_type,
+            response,
+            enabled=bool(body.get("enabled", True)),
+            cooldown_seconds=cooldown,
+            bucket_capacity=max(1, min(20, int(body.get("bucket_capacity", 1)))),
+            channel_id=channel_id,
+        )
+    except (ValueError, re.error) as error:
+        return json_error(400, "validation", fields={"trigger": str(error)})
+    return web.json_response({"rule": rule})
+
+
+@routes.delete('/api/guild/{guild_id}/auto-responses/{rule_id}')
+async def api_guild_auto_responses_delete(req):
+    _, guild = await authorize(req, write=True)
+    utilities = _utilities_cog()
+    if utilities is None:
+        return json_error(503, "utilities_unavailable")
+    try:
+        rule_id = int(req.match_info["rule_id"])
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"rule_id": "معرف القاعدة غير صالح"})
+    if rule_id <= 0:
+        return json_error(400, "validation", fields={"rule_id": "معرف القاعدة غير صالح"})
+    deleted = await utilities.delete_auto_responder(guild.id, rule_id)
+    if not deleted:
+        return json_error(404, "auto_responder_not_found")
+    return web.json_response({"deleted": True, "rule_id": rule_id})
 
 
 @routes.get('/api/guild/{guild_id}/security/incidents')

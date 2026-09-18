@@ -830,7 +830,7 @@ async def api_guild_tickets_action(req):
         if status not in {"active", "waiting_user", "waiting_staff"}:
             return json_error(400, "validation", fields={"status": "حالة التذكرة غير صالحة"})
         result = await community.set_ticket_status(
-            guild.id, ticket_id, status, int(session["id"])
+            guild.id, ticket_id, status
         )
     elif action == "priority":
         priority = str(body.get("priority", "")).strip().lower()

@@ -2806,6 +2806,7 @@
     state.commandSearch = "";
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };
     state.ticketSearch = "";
+    state.ticketStatusFilter = "all";
     state.selfRoleBuilder = null;
     state.fields = {};
     renderShell();

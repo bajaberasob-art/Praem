@@ -992,6 +992,7 @@ async def api_test_welcome(req):
 
 ONBOARDING_KEYS = {
     "welcome_channel_id",
+    "leave_channel_id",
     "welcome_message",
     "leave_message",
     "welcome_dm_enabled",

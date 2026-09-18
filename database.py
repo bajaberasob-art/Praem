@@ -19,6 +19,7 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     "anti_nuke": ("INTEGER", True, "bool"),
     "anti_alt_days": ("INTEGER", 3, "int"),
     "welcome_channel_id": ("INTEGER", None, "id"),
+    "leave_channel_id": ("INTEGER", None, "id"),
     "welcome_message": ("TEXT", "", "str"),
     "auto_role_id": ("INTEGER", None, "id"),
     "log_channel_id": ("INTEGER", None, "id"),

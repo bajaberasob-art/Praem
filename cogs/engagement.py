@@ -256,6 +256,7 @@ class Engagement(commands.Cog):
             values = snapshot["settings"]
             return {
                 "welcome_channel_id": values.get("welcome_channel_id"),
+                "leave_channel_id": values.get("leave_channel_id"),
                 "welcome_message": values.get("welcome_message", ""),
                 "leave_message": values.get("leave_message", ""),
                 "welcome_dm_enabled": bool(values.get("welcome_dm_enabled", False)),
@@ -270,6 +271,7 @@ class Engagement(commands.Cog):
             logger.exception("[ENGAGEMENT_CONFIG] تعذر قراءة إعدادات السيرفر %s", guild_id)
             return {
                 "welcome_channel_id": None,
+                "leave_channel_id": None,
                 "welcome_message": "",
                 "leave_message": "",
                 "welcome_dm_enabled": False,
@@ -576,7 +578,12 @@ class Engagement(commands.Cog):
     @commands.Cog.listener()
     async def on_member_remove(self, mem: discord.Member):
         config = await self.engagement_settings(mem.guild.id)
-        channel = self._welcome_channel(mem.guild, config)
+        channel_id = config.get("leave_channel_id") or config.get("welcome_channel_id")
+        channel = (
+            await self.resolve_text_channel(mem.guild, int(channel_id))
+            if channel_id
+            else mem.guild.system_channel
+        )
         if channel is None:
             return
         template = config["leave_message"] or "{username} غادر {server}. كان عدد الأعضاء {count}."

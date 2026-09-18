@@ -64,6 +64,7 @@
     "captcha_enabled",
     "captcha_role_id",
     "auto_role_id",
+    "leave_channel_id",
     "member_auto_role_id",
     "bot_auto_role_id",
     "verified_role_id",
@@ -71,6 +72,7 @@
     "rules_channel_id",
     "welcome_dm_enabled",
     "welcome_channel_id",
+    "leave_channel_id",
     "welcome_message",
     "leave_message",
     "log_channel_id",
@@ -1234,6 +1236,7 @@
     const onboardingFields = el("div", { class: "fields onboarding-fields" });
     onboardingFields.append(
       selector("welcome_channel_id", "قناة الترحيب", "channel"),
+      selector("leave_channel_id", "قناة المغادرة", "channel"),
       toggle("welcome_dm_enabled", "إرسال ترحيب خاص للعضو"),
       selector("rules_channel_id", "قناة القوانين", "channel"),
       selector("verified_role_id", "رتبة العضو الموثق", "role"),

@@ -663,17 +663,22 @@ class Engagement(commands.Cog):
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_tickets(self, itx: discord.Interaction):
-        embed = discord.Embed(
-            title="🎫 مركز المساعدة والدعم الفني",
-            description=(
-                "هل تحتاج إلى استفسار، إبلاغ، أو طلب مساعدة من الإدارة؟\n"
-                "اضغط على الزر بالأسفل لفتح قناة خاصة."
-            ),
-            color=0x3498DB,
-        )
-        await itx.channel.send(embed=embed, view=TicketLauncher())
+        community = itx.client.get_cog("Community")
+        if community is None:
+            return await itx.response.send_message(
+                "⚠️ نظام التذاكر غير متاح حالياً.",
+                ephemeral=True,
+            )
+        try:
+            panel = await community.deploy_ticket_panel(itx.channel.id)
+        except (ValueError, discord.Forbidden, discord.HTTPException):
+            logger.exception("[TICKETS_SETUP] فشل نشر لوحة التذاكر")
+            return await itx.response.send_message(
+                "❌ تعذر نشر لوحة التذاكر. تحقق من صلاحيات البوت.",
+                ephemeral=True,
+            )
         await itx.response.send_message(
-            "✅ تم تثبيت اللوحة بنجاح.",
+            f"✅ تم تثبيت لوحة التذاكر وحفظها برقم الرسالة `{panel['message_id']}`.",
             ephemeral=True,
         )
 

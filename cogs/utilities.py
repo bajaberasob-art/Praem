@@ -180,6 +180,8 @@ class Utilities(commands.Cog):
         self.command_controls: dict[int, dict[str, dict[str, Any]]] = {}
         self._cooldowns: dict[tuple[int, int, int], TokenBucket] = {}
         self._check_registered = False
+        self._original_tree_check = getattr(self.bot.tree, "interaction_check", None)
+        self.bot.tree.interaction_check = self.app_command_interceptor
         self.bot.add_check(self.command_interceptor)
         self._check_registered = True
 
@@ -187,6 +189,8 @@ class Utilities(commands.Cog):
         if self._check_registered:
             self.bot.remove_check(self.command_interceptor)
             self._check_registered = False
+        if self._original_tree_check is not None:
+            self.bot.tree.interaction_check = self._original_tree_check
 
     async def get_guild_commands_status(self, guild_id: int) -> dict[str, Any]:
         """Return command policy state merged with the commands currently loaded."""
@@ -372,6 +376,46 @@ class Utilities(commands.Cog):
                 )
         return True
 
+    async def app_command_interceptor(self, interaction: discord.Interaction) -> bool:
+        """Apply the same policy to Slash Commands before Discord invokes them."""
+        if interaction.guild is None or interaction.command is None:
+            return True
+        guild_id = int(interaction.guild.id)
+        controls = self.command_controls.get(guild_id)
+        if controls is None:
+            controls = await get_command_controls(guild_id)
+            self.command_controls[guild_id] = controls
+        command_name = interaction.command.qualified_name.lower()
+        control = controls.get(command_name)
+        if not control:
+            return True
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if permissions and getattr(permissions, "administrator", False):
+            return True
+        reason = None
+        if not control["enabled"]:
+            reason = f"الأمر `/{interaction.command.qualified_name}` معطّل في هذا السيرفر."
+        else:
+            allowed_roles = {str(role_id) for role_id in control["allowed_roles"]}
+            member_roles = {
+                str(role.id) for role in getattr(interaction.user, "roles", [])
+            }
+            if allowed_roles and not member_roles.intersection(allowed_roles):
+                reason = (
+                    f"لا تملك رتبة مسموحة للأمر "
+                    f"`/{interaction.command.qualified_name}`."
+                )
+        if reason:
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(reason, ephemeral=True)
+                else:
+                    await interaction.response.send_message(reason, ephemeral=True)
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.debug("[COMMAND_POLICY] تعذر إرسال حظر Slash", exc_info=True)
+            return False
+        return True
+
     @commands.Cog.listener()
     async def on_ready(self):
         for guild in list(self.bot.guilds):
@@ -465,6 +509,8 @@ class Utilities(commands.Cog):
             return False
         bucket.tokens -= 1
         self._cooldowns[key] = bucket
+        if len(self._cooldowns) > 20000:
+            self._prune_buckets()
         return True
 
     def _prune_buckets(self, guild_id: int | None = None) -> None:

@@ -1,12 +1,232 @@
 import asyncio
+import html
+import io
+import json
 import logging
+import re
+import time
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from database import (
+    claim_ticket,
+    close_ticket,
+    create_ticket,
+    escalate_ticket,
+    get_active_tickets,
+    get_staff_kpis,
+    get_ticket_by_channel,
+    get_ticket_panels,
+    get_ticket_transcripts,
+    record_ticket_response,
+    save_ticket_panel,
+    save_ticket_rating,
+    save_ticket_transcript,
+)
+
 
 logger = logging.getLogger(__name__)
+TICKET_PRIORITIES = ("normal", "high", "management")
+DEFAULT_TICKET_CATEGORIES = [
+    {
+        "key": "general",
+        "label": "شكاوى عامة",
+        "emoji": "📣",
+        "support_role_ids": [],
+        "senior_role_ids": [],
+    },
+    {
+        "key": "questions",
+        "label": "استفسارات",
+        "emoji": "❓",
+        "support_role_ids": [],
+        "senior_role_ids": [],
+    },
+    {
+        "key": "billing",
+        "label": "دعم الشحن",
+        "emoji": "💳",
+        "support_role_ids": [],
+        "senior_role_ids": [],
+    },
+    {
+        "key": "tournaments",
+        "label": "بطولات",
+        "emoji": "🏆",
+        "support_role_ids": [],
+        "senior_role_ids": [],
+    },
+]
+
+
+def normalize_ticket_categories(categories_config):
+    source = categories_config or DEFAULT_TICKET_CATEGORIES
+    normalized = []
+    for index, raw in enumerate(source[:25]):
+        if isinstance(raw, str):
+            raw = {"key": raw, "label": raw}
+        if not isinstance(raw, dict):
+            continue
+        label = str(raw.get("label") or raw.get("name") or f"تصنيف {index + 1}").strip()
+        key = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(raw.get("key") or label).strip().lower()).strip("-")
+        if not key or not label:
+            continue
+        normalized.append({
+            "key": key[:60],
+            "label": label[:80],
+            "emoji": str(raw.get("emoji") or "🎫")[:2],
+            "category_id": str(raw["category_id"]) if raw.get("category_id") else None,
+            "support_role_ids": [str(item) for item in raw.get("support_role_ids", []) if str(item).isdigit()],
+            "senior_role_ids": [str(item) for item in raw.get("senior_role_ids", []) if str(item).isdigit()],
+        })
+    return normalized or normalize_ticket_categories(DEFAULT_TICKET_CATEGORIES)
+
+
+class TicketCategoryModal(discord.ui.Modal):
+    def __init__(self, category: dict):
+        super().__init__(title=f"فتح تذكرة · {category['label']}"[:45])
+        self.category = category
+        self.subject = discord.ui.TextInput(
+            label="عنوان المشكلة",
+            placeholder="اكتب عنواناً مختصراً وواضحاً",
+            max_length=200,
+            required=True,
+        )
+        self.details = discord.ui.TextInput(
+            label="التفاصيل والطلب",
+            placeholder="اشرح المشكلة أو ما تحتاجه بالتفصيل",
+            style=discord.TextStyle.paragraph,
+            max_length=4000,
+            required=True,
+        )
+        self.add_item(self.subject)
+        self.add_item(self.details)
+
+    async def on_submit(self, itx: discord.Interaction):
+        cog = itx.client.get_cog("Community")
+        if cog is None:
+            return await itx.response.send_message(
+                "⚠️ نظام التذاكر غير متاح حالياً.", ephemeral=True
+            )
+        await cog.open_ticket(
+            itx,
+            self.category,
+            str(self.subject),
+            str(self.details),
+        )
+
+
+class CloseTicketModal(discord.ui.Modal, title="إغلاق وأرشفة التذكرة"):
+    reason = discord.ui.TextInput(
+        label="سبب الإغلاق",
+        placeholder="اكتب ملخص الحل أو سبب الإغلاق",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=True,
+    )
+
+    async def on_submit(self, itx: discord.Interaction):
+        cog = itx.client.get_cog("Community")
+        if cog is None:
+            return await itx.response.send_message(
+                "⚠️ نظام التذاكر غير متاح حالياً.", ephemeral=True
+            )
+        await cog.close_ticket_from_interaction(itx, str(self.reason))
+
+
+class TicketPanelView(discord.ui.View):
+    def __init__(self, categories_config):
+        super().__init__(timeout=None)
+        self.categories = normalize_ticket_categories(categories_config)
+        for category in self.categories:
+            button = discord.ui.Button(
+                label=category["label"][:80],
+                emoji=category["emoji"],
+                style=discord.ButtonStyle.primary,
+                custom_id=f"ticket:category:{category['key']}",
+            )
+
+            async def callback(itx: discord.Interaction, selected=category):
+                await itx.response.send_modal(TicketCategoryModal(selected))
+
+            button.callback = callback
+            self.add_item(button)
+
+
+class TicketControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _cog(self, itx):
+        return itx.client.get_cog("Community")
+
+    @discord.ui.button(
+        label="استلام التذكرة",
+        style=discord.ButtonStyle.success,
+        emoji="🙋",
+        custom_id="ticket:claim",
+    )
+    async def claim(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.claim_ticket_from_interaction(itx)
+
+    @discord.ui.button(
+        label="تصعيد التذكرة",
+        style=discord.ButtonStyle.primary,
+        emoji="🚨",
+        custom_id="ticket:escalate",
+    )
+    async def escalate(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.escalate_ticket_from_interaction(itx)
+
+    @discord.ui.button(
+        label="إغلاق وأرشفة",
+        style=discord.ButtonStyle.danger,
+        emoji="🔒",
+        custom_id="ticket:close",
+    )
+    async def close(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.show_close_modal(itx)
+
+
+class TicketRatingView(discord.ui.View):
+    def __init__(self, ticket_id: int, user_id: int, guild_id: int):
+        super().__init__(timeout=None)
+        self.ticket_id, self.user_id, self.guild_id = ticket_id, user_id, guild_id
+        for stars in range(1, 6):
+            button = discord.ui.Button(
+                label=f"{stars} نجوم",
+                style=discord.ButtonStyle.secondary if stars < 4 else discord.ButtonStyle.success,
+                custom_id=f"ticket:rating:{ticket_id}:{stars}",
+            )
+
+            async def callback(itx: discord.Interaction, value=stars):
+                if itx.user.id != self.user_id:
+                    return await itx.response.send_message(
+                        "هذا التقييم مخصص لصاحب التذكرة.", ephemeral=True
+                    )
+                await save_ticket_rating(
+                    self.ticket_id,
+                    self.guild_id,
+                    self.user_id,
+                    value,
+                )
+                for child in self.children:
+                    child.disabled = True
+                await itx.response.edit_message(
+                    content=f"✅ شكراً لك، تم تسجيل تقييمك: {value}/5",
+                    view=self,
+                )
+
+            button.callback = callback
+            self.add_item(button)
 
 
 # --- نظام أزرار الاقتراحات المتقدم ---

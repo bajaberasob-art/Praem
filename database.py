@@ -1136,6 +1136,326 @@ async def save_shortcut(
     return item
 
 
+def _ticket_json_ids(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value = []
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+async def save_ticket_panel(
+    guild_id: int,
+    channel_id: int,
+    message_id: int,
+    categories: list[dict[str, Any]],
+) -> dict[str, Any]:
+    encoded = json.dumps(categories, ensure_ascii=False)
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            INSERT INTO ticket_panels
+                (guild_id, channel_id, message_id, categories, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id, channel_id, message_id) DO UPDATE SET
+                categories = excluded.categories,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (int(guild_id), int(channel_id), int(message_id), encoded),
+        )
+        await db.commit()
+    return {
+        "guild_id": str(guild_id),
+        "channel_id": str(channel_id),
+        "message_id": str(message_id),
+        "categories": categories,
+    }
+
+
+async def get_ticket_panels() -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT guild_id, channel_id, message_id, categories FROM ticket_panels"
+        ) as cur:
+            rows = []
+            for row in await cur.fetchall():
+                item = dict(row)
+                item["guild_id"] = int(item["guild_id"])
+                item["channel_id"] = int(item["channel_id"])
+                item["message_id"] = int(item["message_id"])
+                try:
+                    item["categories"] = json.loads(item["categories"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    item["categories"] = []
+                rows.append(item)
+            return rows
+
+
+async def create_ticket(
+    guild_id: int,
+    channel_id: int,
+    user_id: int,
+    category_key: str,
+    category_label: str,
+    subject: str,
+    details: str,
+    support_role_ids: list[int | str] | None = None,
+    senior_role_ids: list[int | str] | None = None,
+) -> dict[str, Any]:
+    support = [str(item) for item in (support_role_ids or [])]
+    senior = [str(item) for item in (senior_role_ids or [])]
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO tickets
+                (guild_id, channel_id, user_id, category_key, category_label,
+                 subject, details, support_role_ids, senior_role_ids)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING *
+            """,
+            (
+                int(guild_id), int(channel_id), int(user_id),
+                str(category_key)[:80], str(category_label)[:120],
+                str(subject)[:200], str(details)[:4000],
+                json.dumps(support), json.dumps(senior),
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+    return _ticket_row(dict(row))
+
+
+def _ticket_row(item: dict[str, Any]) -> dict[str, Any]:
+    for key in ("support_role_ids", "senior_role_ids"):
+        item[key] = _ticket_json_ids(item.get(key))
+    for key in ("guild_id", "channel_id", "user_id", "id", "claimed_by", "closed_by"):
+        if item.get(key) is not None:
+            item[key] = int(item[key])
+    return item
+
+
+async def get_ticket_by_channel(channel_id: int) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT * FROM tickets WHERE channel_id = ?",
+            (int(channel_id),),
+        ) as cur:
+            row = await cur.fetchone()
+    return _ticket_row(dict(row)) if row else None
+
+
+async def get_active_tickets(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT * FROM tickets
+            WHERE guild_id = ? AND status = 'active'
+            ORDER BY opened_at DESC, id DESC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [_ticket_row(dict(row)) for row in await cur.fetchall()]
+
+
+async def claim_ticket(guild_id: int, ticket_id: int, staff_id: int) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            UPDATE tickets SET claimed_by = ?
+            WHERE guild_id = ? AND id = ? AND status = 'active'
+            """,
+            (int(staff_id), int(guild_id), int(ticket_id)),
+        )
+        async with db.execute(
+            "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return _ticket_row(dict(row)) if row else None
+
+
+async def escalate_ticket(
+    guild_id: int,
+    ticket_id: int,
+    priority: str,
+) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            UPDATE tickets SET priority = ?
+            WHERE guild_id = ? AND id = ? AND status = 'active'
+            """,
+            (str(priority), int(guild_id), int(ticket_id)),
+        )
+        async with db.execute(
+            "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return _ticket_row(dict(row)) if row else None
+
+
+async def record_ticket_response(guild_id: int, ticket_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            """
+            UPDATE tickets SET first_response_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ? AND id = ? AND status = 'active'
+              AND first_response_at IS NULL
+            """,
+            (int(guild_id), int(ticket_id)),
+        )
+        await db.commit()
+    return cursor.rowcount > 0
+
+
+async def close_ticket(
+    guild_id: int,
+    ticket_id: int,
+    staff_id: int,
+    reason: str,
+) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            UPDATE tickets
+            SET status = 'closed', closed_at = CURRENT_TIMESTAMP,
+                closed_by = ?, close_reason = ?
+            WHERE guild_id = ? AND id = ? AND status = 'active'
+            """,
+            (int(staff_id), str(reason)[:1000], int(guild_id), int(ticket_id)),
+        )
+        async with db.execute(
+            "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return _ticket_row(dict(row)) if row else None
+
+
+async def save_ticket_transcript(
+    ticket_id: int,
+    guild_id: int,
+    channel_id: int,
+    content_text: str,
+    content_html: str,
+) -> dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO ticket_transcripts
+                (ticket_id, guild_id, channel_id, content_text, content_html)
+            VALUES (?, ?, ?, ?, ?)
+            RETURNING *
+            """,
+            (
+                int(ticket_id), int(guild_id), int(channel_id),
+                str(content_text), str(content_html),
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+    return dict(row)
+
+
+async def get_ticket_transcripts(
+    guild_id: int,
+    query: str = "",
+) -> list[dict[str, Any]]:
+    pattern = f"%{str(query).strip()}%"
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT tt.*, t.user_id, t.category_label, t.subject, t.closed_by
+            FROM ticket_transcripts tt
+            JOIN tickets t ON t.id = tt.ticket_id
+            WHERE tt.guild_id = ?
+              AND (
+                ? = '' OR t.subject LIKE ? OR t.category_label LIKE ?
+                OR tt.content_text LIKE ?
+              )
+            ORDER BY tt.created_at DESC, tt.id DESC
+            LIMIT 100
+            """,
+            (int(guild_id), str(query).strip(), pattern, pattern, pattern),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def save_ticket_rating(
+    ticket_id: int,
+    guild_id: int,
+    user_id: int,
+    stars: int,
+    feedback: str = "",
+) -> dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT closed_by FROM tickets WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            ticket = await cur.fetchone()
+        staff_id = ticket["closed_by"] if ticket else None
+        cursor = await db.execute(
+            """
+            INSERT INTO ticket_ratings
+                (ticket_id, guild_id, staff_id, user_id, stars, feedback)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticket_id) DO UPDATE SET
+                stars = excluded.stars,
+                feedback = excluded.feedback,
+                staff_id = excluded.staff_id
+            RETURNING *
+            """,
+            (
+                int(ticket_id), int(guild_id),
+                int(staff_id) if staff_id is not None else None,
+                int(user_id), max(1, min(5, int(stars))), str(feedback)[:1000],
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.execute(
+            "UPDATE tickets SET rating = ? WHERE guild_id = ? AND id = ?",
+            (max(1, min(5, int(stars))), int(guild_id), int(ticket_id)),
+        )
+        await db.commit()
+    return dict(row)
+
+
+async def get_staff_kpis(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT
+                COALESCE(t.claimed_by, t.closed_by) AS staff_id,
+                COUNT(t.id) AS tickets_handled,
+                ROUND(AVG(
+                    CASE WHEN t.first_response_at IS NOT NULL
+                    THEN (julianday(t.first_response_at) - julianday(t.opened_at)) * 86400
+                    END
+                ), 1) AS avg_response_seconds,
+                ROUND(AVG(
+                    CASE WHEN t.closed_at IS NOT NULL
+                    THEN (julianday(t.closed_at) - julianday(t.opened_at)) * 86400
+                    END
+                ), 1) AS avg_resolution_seconds,
+                COUNT(r.id) AS ratings_count,
+                ROUND(AVG(r.stars), 2) AS avg_rating
+            FROM tickets t
+            LEFT JOIN ticket_ratings r ON r.ticket_id = t.id
+            WHERE t.guild_id = ? AND COALESCE(t.claimed_by, t.closed_by) IS NOT NULL
+            GROUP BY COALESCE(t.claimed_by, t.closed_by)
+            ORDER BY tickets_handled DESC, avg_rating DESC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
 async def get_recent_warnings(guild_id: int, limit: int = 50) -> List[Dict[str, Any]]:
     """جلب أحدث مخالفات السيرفر بصيغة مناسبة للـ API."""
     limit = max(1, min(int(limit), 100))

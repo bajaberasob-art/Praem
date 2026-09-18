@@ -106,7 +106,18 @@ async def callback(req):
         not state or not browser_state or state not in STATES
         or not secrets.compare_digest(state, browser_state)
     ):
-        return web.Response(text="⛔ فشل التحقق الأمني: انتهاء صلاحية جلسة التسجيل أو محاولة غير مصرح بها.", status=403)
+        logger.info("Stale or invalid dashboard OAuth state; starting a fresh login.")
+        login_url = f"{DASHBOARD_BASE_PATH}login"
+        return web.Response(
+            text=(
+                "<!doctype html><meta charset='utf-8'>"
+                f"<meta http-equiv='refresh' content='0;url={login_url}'>"
+                f"<p>انتهت جلسة تسجيل الدخول. <a href='{login_url}'>إعادة تسجيل الدخول</a></p>"
+            ),
+            status=403,
+            content_type="text/html",
+            headers={"Refresh": f"0; url={login_url}"},
+        )
     STATES.pop(state, None)
     if req.query.get("error") or not code:
         return web.Response(text="لم يكتمل تسجيل الدخول عبر ديسكورد.", status=400)

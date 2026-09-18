@@ -1761,6 +1761,11 @@ textarea {
 .embed-builder-grid textarea {
   min-height: 105px;
 }
+@media (max-width: 700px) {
+  .embed-builder-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .message-template-field {
   position: relative;
 }

@@ -317,6 +317,20 @@ class Engagement(commands.Cog):
             logger.debug("[ENGAGEMENT_CONFIG] تعذر تحديث قنوات السيرفر %s", guild.id, exc_info=True)
         return None
 
+    async def resolve_sticker(self, guild: discord.Guild, sticker_id: int):
+        for sticker in getattr(guild, "stickers", ()) or ():
+            if sticker.id == int(sticker_id):
+                return sticker
+        fetch_stickers = getattr(guild, "fetch_stickers", None)
+        if fetch_stickers is not None:
+            try:
+                for sticker in await fetch_stickers():
+                    if sticker.id == int(sticker_id):
+                        return sticker
+            except (discord.Forbidden, discord.HTTPException):
+                logger.debug("[ENGAGEMENT_CONFIG] تعذر تحميل ملصق السيرفر %s", sticker_id, exc_info=True)
+        return None
+
     async def get_onboarding_snapshot(self, guild_id: int) -> dict[str, Any]:
         snapshot = await get_guild_settings(int(guild_id))
         fields = await self.engagement_settings(guild_id)
@@ -423,10 +437,9 @@ class Engagement(commands.Cog):
         image_url = str(config.get("welcome_embed_image_url") or "").strip()
         sticker_id = config.get("welcome_embed_sticker_id")
         if not image_url and sticker_id:
-            for sticker in getattr(guild, "stickers", ()) or ():
-                if sticker.id == int(sticker_id):
-                    image_url = str(sticker.url)
-                    break
+            sticker = await self.resolve_sticker(guild, int(sticker_id))
+            if sticker is not None:
+                image_url = str(sticker.url)
         if image_url:
             embed.set_image(url=image_url)
         footer = str(config.get("welcome_embed_footer") or "").strip()

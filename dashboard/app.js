@@ -55,6 +55,7 @@
     failures: 0,
     source: null,
     newer: false,
+    activeView: sessionStorage.getItem("dashboard-view") || "overview",
   };
   const keys = [
     "prefix",
@@ -230,6 +231,83 @@
     );
     h.append(inr);
     return h;
+  }
+  const viewLabels = {
+    overview: { label: "نظرة عامة", icon: "⌂", hint: "مركز القيادة" },
+    tickets: { label: "التذاكر", icon: "▣", hint: "Help Desk" },
+    commands: { label: "الأوامر والأتمتة", icon: "⌘", hint: "Commands" },
+    onboarding: { label: "الترحيب والأدوار", icon: "✦", hint: "Onboarding" },
+    security: { label: "الحماية", icon: "◈", hint: "Security" },
+    settings: { label: "الإعدادات", icon: "⚙", hint: "Configuration" },
+  };
+  function navigateView(view) {
+    if (!viewLabels[view]) return;
+    state.activeView = view;
+    sessionStorage.setItem("dashboard-view", view);
+    document.querySelectorAll("[data-nav-view]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.navView === view);
+      item.setAttribute("aria-current", item.dataset.navView === view ? "page" : "false");
+    });
+    renderPage();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function navButton(view) {
+    const meta = viewLabels[view];
+    return el(
+      "button",
+      {
+        class: `nav-item ${state.activeView === view ? "active" : ""}`,
+        type: "button",
+        "data-nav-view": view,
+        "aria-current": state.activeView === view ? "page" : "false",
+        onClick: () => navigateView(view),
+      },
+      el("span", { class: "nav-icon", text: meta.icon, "aria-hidden": "true" }),
+      el("span", { class: "nav-copy" }, el("b", { text: meta.label }), el("small", { text: meta.hint })),
+    );
+  }
+  function workspaceNav() {
+    return el(
+      "aside",
+      { class: "workspace-nav", "aria-label": "التنقل الرئيسي" },
+      el(
+        "div",
+        { class: "workspace-nav-head" },
+        el("span", { class: "workspace-kicker", text: "PRIME / CONTROL" }),
+        el("strong", { text: "مركز القيادة" }),
+        el("small", { text: "إدارة البوت من مكان واحد" }),
+      ),
+      el(
+        "nav",
+        { class: "nav-list" },
+        ...Object.keys(viewLabels).map((view) => navButton(view)),
+      ),
+      el(
+        "div",
+        { class: "workspace-nav-foot" },
+        el("span", { class: "nav-status-dot" }),
+        el("span", { text: state.online ? "الخدمات تعمل بشكل طبيعي" : "الاتصال يحتاج مراجعة" }),
+      ),
+    );
+  }
+  function mobileNav() {
+    const primary = ["overview", "tickets", "commands"];
+    return el(
+      "nav",
+      { class: "mobile-nav", "aria-label": "التنقل السريع" },
+      ...primary.map((view) => navButton(view)),
+      el(
+        "button",
+        {
+          class: `nav-item ${["onboarding", "security", "settings"].includes(state.activeView) ? "active" : ""}`,
+          type: "button",
+          "data-nav-view": "more",
+          onClick: () => navigateView(state.activeView === "settings" ? "overview" : "settings"),
+        },
+        el("span", { class: "nav-icon", text: "•••", "aria-hidden": "true" }),
+        el("span", { class: "nav-copy" }, el("b", { text: "المزيد" }), el("small", { text: "إدارة" })),
+      ),
+    );
   }
   function updatePing(kind = "online", latency = null) {
     const p = $("#ping");

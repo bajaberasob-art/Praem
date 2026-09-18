@@ -1932,27 +1932,40 @@
     sessionStorage.setItem("dashboard-guild", id);
     state.meta = state.baseline = state.draft = null;
     state.onboarding = null;
+    state.commandStudio = { commands: [], roles: [], channels: [] };
+    state.autoResponses = [];
+    state.commandSearch = "";
     state.selfRoleBuilder = null;
     state.fields = {};
     renderShell();
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or] = await Promise.all([
+      const [mr, sr, ir, or, cr, ar] = await Promise.all([
         api(`api/guild/${id}/meta`),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
         api(`api/guild/${id}/onboarding`),
+        api(`api/guild/${id}/commands`),
+        api(`api/guild/${id}/auto-responses`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding] = await Promise.all([
+      const [meta, settings, incidents, onboarding, commands, autoResponses] = await Promise.all([
         mr.json(),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
         or.json(),
+        cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [] }),
+        ar.ok ? ar.json() : Promise.resolve({ rules: [], channels: [] }),
       ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
+      state.commandStudio = {
+        commands: commands.commands || [],
+        roles: commands.roles || meta.roles || [],
+        channels: commands.channels || meta.channels || [],
+      };
+      state.autoResponses = autoResponses.rules || [];
       state.incidents = incidents.incidents || [];
       state.whitelist = incidents.whitelist || [];
       state.lockdown = Boolean(incidents.locked);

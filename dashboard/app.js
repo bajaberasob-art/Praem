@@ -2644,6 +2644,17 @@
       filterSelect("تصفية حسب الحالة", state.commandStatusFilter, [["all", "كل الحالات"], ["enabled", "مفعّلة"], ["disabled", "معطّلة"], ["warning", "تحذير صلاحيات"]], "commandStatusFilter"),
       filterSelect("تصفية حسب الرتبة", state.commandRoleFilter, [["all", "كل الرتب"], ...(studio.roles || []).map((role) => [String(role.id), `@${role.name}`])], "commandRoleFilter"),
     );
+    const quickFilters = el("div", { class: "command-quick-filters" },
+      [["all", "الكل"], ["enabled", "مفعل"], ["disabled", "معطل"]].map(([value, label]) => el("button", {
+        class: `command-quick-filter${state.commandStatusFilter === value ? " active" : ""}`,
+        type: "button",
+        text: label,
+        onClick: () => {
+          state.commandStatusFilter = value;
+          renderPage();
+        },
+      })),
+    );
     const bulkBar = el("div", { class: "command-bulk-bar" },
       el("label", { class: "bulk-select-all" },
         el("input", { type: "checkbox", checked: commandListForWorkspace().length > 0 && commandListForWorkspace().every((command) => state.selectedCommandIds.includes(String(command.command_name))), onChange: (event) => {
@@ -2701,10 +2712,7 @@
     );
     const commandPanel = card("مصفوفة صلاحيات الأوامر",
       el("div", { class: "command-panel" },
-        el("div", { class: "panel-intro" },
-          el("p", { text: "تحكم في الأوامر حسب الـ Cog واربط كل أمر بالرتب المسموحة. اترك الرتب فارغة للسماح للجميع." }),
-          search,
-        ),
+        el("div", { class: "commands-list-toolbar" }, search, quickFilters),
         filterBar,
         bulkBar,
         commandRows(),
@@ -2849,11 +2857,11 @@
         el("p", { text: "اضبط الوصول، بدّل prefix فورياً، وابنِ ردوداً تلقائية بواجهة AMOLED سريعة وواضحة." }),
       ),
       commandMetrics,
-      commandTabs,
+      commandPanel,
       prefixForm,
       prefixExamples,
       shortcutWorkbench,
-      commandPanel,
+      commandTabs,
       policyPanel,
       autoCard,
       el("section", { class: "active-trigger-section" },

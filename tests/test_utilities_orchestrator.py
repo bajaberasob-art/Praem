@@ -229,6 +229,25 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executed, [])
         self.assertIn("غير مسموح", message.channel.sent[0][0])
 
+    async def test_bare_command_keyword_shows_adaptive_help_when_arguments_are_missing(self):
+        command = SimpleNamespace(
+            name="warn",
+            qualified_name="warn",
+            description="تحذير عضو",
+            aliases=["تحذير"],
+            parameters=[SimpleNamespace(name="member", required=True)],
+        )
+        self.bot.tree.walk_commands = lambda: [command]
+        self.bot.tree.get_command = lambda name: command if name == "warn" else None
+
+        message = FakeMessage("warn")
+        await self.cog.on_message(message)
+
+        self.assertEqual(len(message.channel.sent), 1)
+        embed = message.channel.sent[0][1]["embed"]
+        self.assertIn("الصيغة", embed.fields[0].name)
+        self.assertIn("warn", embed.fields[0].value)
+
 
 if __name__ == "__main__":
     unittest.main()

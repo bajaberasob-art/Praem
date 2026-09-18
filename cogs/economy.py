@@ -12,6 +12,7 @@ from database import (
     get_economy_leaderboard,
     get_guild_settings,
     get_or_create_user,
+    claim_daily_reward,
     add_giveaway_entry,
     cancel_giveaway,
     complete_giveaway,
@@ -21,6 +22,7 @@ from database import (
     get_open_giveaways,
     set_giveaway_message,
     transfer_balance,
+    move_balance,
     update_balance,
 )
 
@@ -172,34 +174,22 @@ class Economy(commands.Cog):
     @app_commands.command(name="daily", description="المكافأة اليومية")
     async def daily(self, itx: discord.Interaction):
         today = discord.utils.utcnow().strftime("%Y-%m-%d")
-        async with aiosqlite.connect(DB_NAME) as db:
-            cursor = await db.execute(
-                "SELECT last_daily FROM users "
-                "WHERE user_id = ? AND guild_id = ?",
-                (itx.user.id, itx.guild.id),
+        settings = await get_guild_settings(itx.guild.id)
+        base_reward = int(settings["settings"].get("daily_amount", 450))
+        reward = random.randint(
+            max(1, int(base_reward * 0.8)),
+            max(1, int(base_reward * 1.2)),
+        )
+        if not await claim_daily_reward(
+            itx.user.id,
+            itx.guild.id,
+            today,
+            reward,
+        ):
+            return await itx.response.send_message(
+                "❌ استلمت راتبك اليومي مسبقاً! عد غداً.",
+                ephemeral=True,
             )
-            row = await cursor.fetchone()
-            await cursor.close()
-            if row and row[0] == today:
-                return await itx.response.send_message(
-                    "❌ استلمت راتبك اليومي مسبقاً! عد غداً.",
-                    ephemeral=True,
-                )
-            settings = await get_guild_settings(itx.guild.id)
-            base_reward = int(settings["settings"].get("daily_amount", 450))
-            reward = random.randint(max(1, int(base_reward * 0.8)), max(1, int(base_reward * 1.2)))
-            await update_balance(
-                itx.user.id,
-                itx.guild.id,
-                reward,
-                "balance",
-            )
-            await db.execute(
-                "UPDATE users SET last_daily = ? "
-                "WHERE user_id = ? AND guild_id = ?",
-                (today, itx.user.id, itx.guild.id),
-            )
-            await db.commit()
         await itx.response.send_message(
             f"💰 استلمت راتبك اليومي بقيمة **{reward:,}** عملة!"
         )
@@ -278,24 +268,17 @@ class Economy(commands.Cog):
                 "❌ أدخل رقماً صالحاً.",
                 ephemeral=True,
             )
-        user = await get_or_create_user(itx.user.id, itx.guild.id)
-        if user["balance"] < amount:
+        if not await move_balance(
+            itx.user.id,
+            itx.guild.id,
+            amount,
+            "balance",
+            "bank",
+        ):
             return await itx.response.send_message(
                 "❌ رصيد الكاش لا يكفي!",
                 ephemeral=True,
             )
-        await update_balance(
-            itx.user.id,
-            itx.guild.id,
-            -amount,
-            "balance",
-        )
-        await update_balance(
-            itx.user.id,
-            itx.guild.id,
-            amount,
-            "bank",
-        )
         await itx.response.send_message(
             f"🏦 تم إيداع **{amount:,}** عملة في البنك بأمان."
         )
@@ -307,24 +290,17 @@ class Economy(commands.Cog):
                 "❌ أدخل رقماً صالحاً.",
                 ephemeral=True,
             )
-        user = await get_or_create_user(itx.user.id, itx.guild.id)
-        if user["bank"] < amount:
+        if not await move_balance(
+            itx.user.id,
+            itx.guild.id,
+            amount,
+            "bank",
+            "balance",
+        ):
             return await itx.response.send_message(
                 "❌ رصيد البنك لا يكفي!",
                 ephemeral=True,
             )
-        await update_balance(
-            itx.user.id,
-            itx.guild.id,
-            -amount,
-            "bank",
-        )
-        await update_balance(
-            itx.user.id,
-            itx.guild.id,
-            amount,
-            "balance",
-        )
         await itx.response.send_message(
             f"💵 تم سحب **{amount:,}** عملة كاش إلى محفظتك."
         )
@@ -355,18 +331,16 @@ class Economy(commands.Cog):
 
         if random.random() < 0.45:
             stolen = int(target_user["balance"] * random.uniform(0.2, 0.5))
-            await update_balance(
+            if not await transfer_balance(
+                itx.guild.id,
                 target.id,
-                itx.guild.id,
-                -stolen,
-                "balance",
-            )
-            await update_balance(
                 itx.user.id,
-                itx.guild.id,
                 stolen,
-                "balance",
-            )
+            ):
+                return await itx.response.send_message(
+                    "⚠️ تغيّر رصيد الهدف قبل إتمام العملية؛ حاول مجدداً.",
+                    ephemeral=True,
+                )
             await itx.response.send_message(
                 f"🥷 نجحت بالسطو على {target.mention} وسرقت "
                 f"**{stolen:,}** عملة!"

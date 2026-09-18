@@ -93,3 +93,28 @@ class PersistentFeatureTests(unittest.IsolatedAsyncioTestCase):
             [item.custom_id for item in tournament.children],
             ["tournament:join:42", "tournament:start:42"],
         )
+
+    async def test_concurrent_user_creation_and_xp_updates_are_atomic(self):
+        users = await asyncio.gather(
+            *(database.get_or_create_user(77, 700) for _ in range(12))
+        )
+        self.assertTrue(all(user["balance"] == 100 for user in users))
+
+        results = await asyncio.gather(
+            *(database.add_xp(77, 700, 15) for _ in range(20))
+        )
+        user = await database.get_or_create_user(77, 700)
+        self.assertEqual(user["xp"] + (user["level"] - 1) * 120, 300)
+        self.assertEqual(sum(int(leveled) for leveled, _ in results), 2)
+
+    async def test_daily_reward_is_single_use_and_creates_new_account(self):
+        claimed = await asyncio.gather(
+            *(
+                database.claim_daily_reward(88, 700, "2099-01-01", 50)
+                for _ in range(8)
+            )
+        )
+        self.assertEqual(sum(claimed), 1)
+        user = await database.get_or_create_user(88, 700)
+        self.assertEqual(user["balance"], 150)
+        self.assertEqual(user["last_daily"], "2099-01-01")

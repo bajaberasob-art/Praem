@@ -797,54 +797,100 @@ async def update_guild_settings(
 # دوال الاقتصاد والمستويات (Economy & Levels API)
 # -------------------------------------------------------------
 async def get_or_create_user(user_id: int, guild_id: int) -> Dict[str, Any]:
-    """جلب بيانات العضو أو إنشائه بقيم افتراضية بأقل استهلاك للموارد."""
+    """جلب بيانات العضو أو إنشاؤه بأمان عند الطلبات المتزامنة."""
     async with connect() as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM users WHERE user_id = ? AND guild_id = ?",
-            (user_id, guild_id),
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return dict(row)
-
-        # إنشاء حساب جديد إذا لم يكن موجوداً
         await db.execute(
-            "INSERT INTO users (user_id, guild_id) VALUES (?, ?)",
-            (user_id, guild_id),
+            "INSERT OR IGNORE INTO users (user_id, guild_id) VALUES (?, ?)",
+            (int(user_id), int(guild_id)),
         )
         await db.commit()
-        return {
-            "user_id": user_id,
-            "guild_id": guild_id,
-            "xp": 0,
-            "level": 1,
-            "balance": 100,
-            "bank": 0,
-            "last_daily": None,
-        }
+        async with db.execute(
+            "SELECT * FROM users WHERE user_id = ? AND guild_id = ?",
+            (int(user_id), int(guild_id)),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                raise RuntimeError("user row disappeared after atomic creation")
+            return dict(row)
 
 
 async def add_xp(user_id: int, guild_id: int, amount: int = 15) -> Tuple[bool, int]:
-    """إضافة خبرة وفحص الترقية (Level Up) مع منع التضارب."""
-    user = await get_or_create_user(user_id, guild_id)
-    new_xp = user["xp"] + amount
-    current_level = user["level"]
-    xp_needed = current_level * 120
-    leveled_up = False
+    """إضافة خبرة وفحص الترقية داخل معاملة قفل واحدة."""
+    amount = max(0, int(amount))
+    async with connect(aiosqlite.Row) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await db.execute(
+                "INSERT OR IGNORE INTO users (user_id, guild_id) VALUES (?, ?)",
+                (int(user_id), int(guild_id)),
+            )
+            async with db.execute(
+                "SELECT xp, level FROM users WHERE user_id = ? AND guild_id = ?",
+                (int(user_id), int(guild_id)),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                raise RuntimeError("user row disappeared during XP update")
 
-    if new_xp >= xp_needed:
-        current_level += 1
-        new_xp = new_xp - xp_needed
-        leveled_up = True
+            new_xp = int(row["xp"]) + amount
+            current_level = int(row["level"])
+            xp_needed = current_level * 120
+            leveled_up = new_xp >= xp_needed
+            if leveled_up:
+                current_level += 1
+                new_xp -= xp_needed
 
-    async with connect() as db:
-        await db.execute(
-            "UPDATE users SET xp = ?, level = ? WHERE user_id = ? AND guild_id = ?",
-            (new_xp, current_level, user_id, guild_id),
-        )
-        await db.commit()
+            await db.execute(
+                """
+                UPDATE users SET xp = ?, level = ?
+                WHERE user_id = ? AND guild_id = ?
+                """,
+                (new_xp, current_level, int(user_id), int(guild_id)),
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
     return leveled_up, current_level
+
+
+async def claim_daily_reward(
+    user_id: int,
+    guild_id: int,
+    today: str,
+    reward: int,
+) -> bool:
+    """صرف المكافأة اليومية مرة واحدة، مع إنشاء الحساب ضمن نفس المعاملة."""
+    reward = max(0, int(reward))
+    async with connect() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await db.execute(
+                "INSERT OR IGNORE INTO users (user_id, guild_id) VALUES (?, ?)",
+                (int(user_id), int(guild_id)),
+            )
+            cursor = await db.execute(
+                """
+                UPDATE users
+                SET balance = balance + ?, last_daily = ?
+                WHERE user_id = ? AND guild_id = ?
+                  AND (last_daily IS NULL OR last_daily <> ?)
+                """,
+                (
+                    reward,
+                    str(today),
+                    int(user_id),
+                    int(guild_id),
+                    str(today),
+                ),
+            )
+            claimed = cursor.rowcount == 1
+            await db.commit()
+            return claimed
+        except Exception:
+            await db.rollback()
+            raise
 
 
 async def update_balance(
@@ -856,17 +902,67 @@ async def update_balance(
     """تعديل رصيد العضو (كاش أو بنك) بأمان وحماية من الرصيد السالب."""
     col = "bank" if account == "bank" else "balance"
     async with connect() as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO users (user_id, guild_id) VALUES (?, ?)",
+            (int(user_id), int(guild_id)),
+        )
         # استخدام Parameterized Query لتجنب ثغرات حقن الاستعلامات
         query = f"UPDATE users SET {col} = MAX(0, {col} + ?) WHERE user_id = ? AND guild_id = ?"
-        await db.execute(query, (amount, user_id, guild_id))
+        await db.execute(query, (int(amount), int(user_id), int(guild_id)))
         await db.commit()
 
         async with db.execute(
             f"SELECT {col} FROM users WHERE user_id = ? AND guild_id = ?",
-            (user_id, guild_id),
+            (int(user_id), int(guild_id)),
         ) as cur:
             row = await cur.fetchone()
             return row[0] if row else 0
+
+
+async def move_balance(
+    user_id: int,
+    guild_id: int,
+    amount: int,
+    from_account: str,
+    to_account: str,
+) -> bool:
+    """نقل رصيد بين الكاش والبنك دون نافذة سباق بين عمليتي خصم وإضافة."""
+    amount = int(amount)
+    columns = {"balance", "bank"}
+    if amount <= 0 or from_account not in columns or to_account not in columns:
+        return False
+    if from_account == to_account:
+        return False
+
+    async with connect() as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await db.execute(
+                "INSERT OR IGNORE INTO users (user_id, guild_id) VALUES (?, ?)",
+                (int(user_id), int(guild_id)),
+            )
+            cursor = await db.execute(
+                f"""
+                UPDATE users SET {from_account} = {from_account} - ?
+                WHERE user_id = ? AND guild_id = ? AND {from_account} >= ?
+                """,
+                (amount, int(user_id), int(guild_id), amount),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                return False
+            await db.execute(
+                f"""
+                UPDATE users SET {to_account} = {to_account} + ?
+                WHERE user_id = ? AND guild_id = ?
+                """,
+                (amount, int(user_id), int(guild_id)),
+            )
+            await db.commit()
+            return True
+        except Exception:
+            await db.rollback()
+            raise
 
 
 async def transfer_balance(

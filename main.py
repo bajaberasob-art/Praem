@@ -104,7 +104,9 @@ class EnterpriseBot(commands.Bot):
             await init_db()
             logger.info("📦 تم التحقق من سلامة قاعدة البيانات بنجاح.")
         except Exception as error:
-            logger.error(f"❌ فشل فحص قاعدة البيانات: {error}")
+            await self.session.close()
+            self.session = None
+            raise RuntimeError("قاعدة البيانات غير جاهزة؛ أوقف الإقلاع لحماية البيانات.") from error
 
         try:
             self.dashboard_runner = await start_web_server(self)
@@ -113,7 +115,9 @@ class EnterpriseBot(commands.Bot):
                 os.getenv("DASHBOARD_PORT", "8080"),
             )
         except Exception as error:
-            logger.error(f"⚠️ تعذر إطلاق خادم الويب: {error}")
+            await self.session.close()
+            self.session = None
+            raise RuntimeError("تعذر تشغيل لوحة التحكم؛ أوقف الإقلاع بدلاً من تشغيل نسخة ناقصة.") from error
 
         modules = [
             # Load protection before the remaining feature cogs so the security
@@ -135,7 +139,7 @@ class EnterpriseBot(commands.Bot):
             except commands.ExtensionAlreadyLoaded:
                 pass
             except Exception as error:
-                logger.error(f"❌ خطأ أثناء تحميل {module}: {error}")
+                raise RuntimeError(f"فشل تحميل الوحدة {module}; أوقف الإقلاع.") from error
 
         self.install_interaction_guards()
         try:

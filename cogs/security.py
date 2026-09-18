@@ -238,6 +238,20 @@ class Security(commands.Cog):
             return
         self._lockdown_queue = asyncio.Queue(maxsize=64)
         self._lockdown_worker = asyncio.create_task(self._lockdown_worker_loop())
+        self._lockdown_worker.add_done_callback(self._lockdown_worker_done)
+
+    def _lockdown_worker_done(self, task: asyncio.Task) -> None:
+        """Consume worker failures so shutdown never leaves an unobserved task."""
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("[SECURITY_LOCKDOWN] عامل الإغلاق انتهى بخطأ")
+        finally:
+            if self._lockdown_worker is task:
+                self._lockdown_worker = None
+                self._lockdown_queue = None
 
     async def emergency_lockdown(self, guild_id: int, locked: bool) -> dict[str, Any]:
         """Queue public-channel permission changes without blocking the caller."""
@@ -315,6 +329,7 @@ class Security(commands.Cog):
     def cog_unload(self):
         if self._lockdown_worker and not self._lockdown_worker.done():
             self._lockdown_worker.cancel()
+        self._lockdown_states.clear()
         self._captcha_views.clear()
 
     def _captcha_view(self, role_id: int) -> CaptchaView:

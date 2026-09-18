@@ -1,13 +1,11 @@
 import datetime
 import random
 
-import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
 from database import (
-    DB_NAME,
     add_xp,
     get_economy_leaderboard,
     get_guild_settings,
@@ -23,7 +21,6 @@ from database import (
     set_giveaway_message,
     transfer_balance,
     move_balance,
-    update_balance,
 )
 
 

@@ -5,7 +5,8 @@ A Python Discord bot with slash commands for latency checks, greetings, and basi
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `python bot.py` — run the Discord bot
+- `python main.py` — run the Discord bot (the canonical entry point)
+- `python bot.py` — compatibility wrapper for older run commands
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec

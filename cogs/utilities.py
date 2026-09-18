@@ -456,6 +456,13 @@ class Utilities(commands.Cog):
             raise CommandIntercepted(
                 f"الأمر `{ctx.command.qualified_name}` معطّل في هذا السيرفر."
             )
+        allowed_channels = {
+            str(channel_id) for channel_id in control.get("allowed_channels", [])
+        }
+        if allowed_channels and str(ctx.channel.id) not in allowed_channels:
+            raise CommandIntercepted(
+                f"الأمر `{ctx.command.qualified_name}` غير مسموح في هذه القناة."
+            )
         allowed_roles = {str(role_id) for role_id in control["allowed_roles"]}
         if allowed_roles:
             member_roles = {
@@ -487,11 +494,19 @@ class Utilities(commands.Cog):
         if not control["enabled"]:
             reason = f"الأمر `/{interaction.command.qualified_name}` معطّل في هذا السيرفر."
         else:
+            allowed_channels = {
+                str(channel_id) for channel_id in control.get("allowed_channels", [])
+            }
+            if allowed_channels and str(interaction.channel_id) not in allowed_channels:
+                reason = (
+                    f"الأمر `/{interaction.command.qualified_name}` "
+                    "غير مسموح في هذه القناة."
+                )
             allowed_roles = {str(role_id) for role_id in control["allowed_roles"]}
             member_roles = {
                 str(role.id) for role in getattr(interaction.user, "roles", [])
             }
-            if allowed_roles and not member_roles.intersection(allowed_roles):
+            if not reason and allowed_roles and not member_roles.intersection(allowed_roles):
                 reason = (
                     f"لا تملك رتبة مسموحة للأمر "
                     f"`/{interaction.command.qualified_name}`."

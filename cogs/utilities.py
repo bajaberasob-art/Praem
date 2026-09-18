@@ -27,6 +27,18 @@ HUB_NAME = "➕ اضغط للإنشاء"
 LOGGER = logging.getLogger("UtilitiesOrchestrator")
 MATCH_TYPES = {"exact", "contains", "regex"}
 SHORTCUT_TYPES = {"command", "announcement"}
+SENSITIVE_COMMAND_NAMES = {
+    "ban",
+    "clear",
+    "kick",
+    "lockdown",
+    "mute",
+    "nuke",
+    "purge",
+    "unban",
+    "unmute",
+    "warn",
+}
 
 
 async def dynamic_prefix(
@@ -211,6 +223,7 @@ class Utilities(commands.Cog):
                 "allowed_roles": [],
                 "configured": False,
                 "aliases": list(command.aliases),
+                "permission_warnings": [],
             }
         for command in self.bot.tree.walk_commands():
             if getattr(command, "hidden", False):
@@ -225,6 +238,7 @@ class Utilities(commands.Cog):
                     "allowed_roles": [],
                     "configured": False,
                     "aliases": [],
+                    "permission_warnings": [],
                 },
             )
         for name, control in controls.items():
@@ -237,6 +251,7 @@ class Utilities(commands.Cog):
                     "allowed_roles": [],
                     "configured": False,
                     "aliases": [],
+                    "permission_warnings": [],
                 },
             )
             item.update(
@@ -245,6 +260,16 @@ class Utilities(commands.Cog):
                 configured=True,
                 updated_at=control.get("updated_at"),
             )
+        for item in known.values():
+            command_name = str(item["command_name"]).lower().split()[-1]
+            if (
+                item["enabled"]
+                and not item["allowed_roles"]
+                and command_name in SENSITIVE_COMMAND_NAMES
+            ):
+                item["permission_warnings"] = [
+                    "أمر حساس متاح لجميع الأعضاء؛ قيّده برتبة إدارة أو إشراف."
+                ]
         return {
             "guild_id": str(guild_id),
             "prefix": snapshot["settings"].get("prefix", "!"),

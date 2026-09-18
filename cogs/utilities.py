@@ -755,10 +755,10 @@ class Utilities(commands.Cog):
         await itx.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
-        name="bot_status",
+        name="status",
         description="عرض صحة البوت والاتصال والخدمات",
     )
-    async def bot_status(self, itx: discord.Interaction):
+    async def status(self, itx: discord.Interaction):
         websocket = round(self.bot.latency * 1000) if self.bot.latency != float("inf") else 0
         embed = discord.Embed(title="🛰️ حالة PRIME", color=0x2ECC71)
         embed.add_field(name="Discord Gateway", value=f"🟢 متصل · `{websocket}ms`", inline=True)

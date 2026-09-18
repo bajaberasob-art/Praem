@@ -197,6 +197,10 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("@everyone", assignable)
         self.assertEqual((assignable["مدير"], assignable["Nitro Booster"], assignable["قيد التحقق"]), (False, False, True))
+        self.assertEqual(
+            [(emoji["name"], emoji["token"]) for emoji in meta["emojis"]],
+            [("party", "<:party:400000000000000001>"), ("spark", "<a:spark:400000000000000002>")],
+        )
 
     async def test_commands_and_auto_responses_api(self):
         status, data = await call(ws.api_guild_commands, request("GET", "/x", "s10"))

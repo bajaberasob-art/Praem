@@ -31,7 +31,7 @@
     revision: null,
     updated: null,
     onboarding: null,
-    commandStudio: { commands: [], roles: [], channels: [] },
+    commandStudio: { commands: [], roles: [], channels: [], shortcuts: [] },
     autoResponses: [],
     commandSearch: "",
     commandCogFilter: "all",
@@ -1439,6 +1439,13 @@
   }
   function commandRoles(command) {
     return new Set((command.allowed_roles || []).map(String));
+  }
+  function commandShortcuts(command) {
+    const name = String(command.command_name || "").toLowerCase();
+    return (state.commandStudio.shortcuts || []).filter((shortcut) => {
+      const target = String(shortcut.target || "").trim().toLowerCase();
+      return target.replace(/^[/!]/, "").split(/\s+/)[0] === name;
+    });
   }
   function commandPermissionWarnings(command) {
     const raw = [

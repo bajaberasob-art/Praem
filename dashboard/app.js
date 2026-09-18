@@ -1490,6 +1490,12 @@
         const roles = commandRoles(command);
         const commandId = String(command.command_name);
         const warnings = commandPermissionWarnings(command);
+        const shortcuts = commandShortcuts(command);
+        const aliasPreview = el("div", { class: "command-alias-preview" },
+          shortcuts.length
+            ? shortcuts.slice(0, 4).map((item) => el("code", { text: item.trigger }))
+            : el("span", { text: "بدون اختصار" }),
+        );
         const roleWrap = el("div", { class: "command-role-tags" });
         (state.commandStudio.roles || []).forEach((role) => {
           const active = roles.has(String(role.id));
@@ -1538,6 +1544,7 @@
               el("strong", { text: `/${command.command_name}` }),
               el("small", { text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
             ),
+            aliasPreview,
           ),
           el("div", { class: "command-role-picker" },
             el("span", { class: "command-role-label", text: "الرتب المسموحة — اتركها فارغة للجميع" }),
@@ -1545,6 +1552,7 @@
           ),
           el("div", { class: "command-row-status" },
             warnings.length ? el("span", { class: "command-warning", text: "تحذير صلاحيات", title: warnings.join("، ") }) : el("span", { class: "command-ok", text: "جاهز" }),
+            el("button", { class: "command-shortcut-link", type: "button", text: `اختصارات ${shortcuts.length}`, onClick: () => openCommandDetail(command) }),
             el("button", { class: "command-detail-link", type: "button", text: "التفاصيل", onClick: () => openCommandDetail(command) }),
           ),
           toggleButton,
@@ -1621,7 +1629,7 @@
     document.querySelector(".command-detail-back")?.remove();
     state.commandDetail = null;
   }
-  async function saveCommandShortcuts(command, input) {
+  async function saveCommandShortcuts(command, input, options = {}) {
     const requested = [...new Set(
       input.value
         .split(/[,،\n]+/)
@@ -1670,8 +1678,14 @@
       }
       pulse();
       toast(`تم حفظ ${requested.length} اختصاراً لـ /${command.command_name}`, "success", 2300);
-      closeCommandDetail();
-      openCommandDetail(command);
+      state.shortcutCommandId = command.command_name;
+      state.shortcutInputText = requested.join("، ");
+      if (options.reopen !== false) {
+        closeCommandDetail();
+        openCommandDetail(command);
+      } else {
+        renderPage();
+      }
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");
     }

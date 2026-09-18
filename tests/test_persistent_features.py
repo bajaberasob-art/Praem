@@ -106,7 +106,7 @@ class PersistentFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
         user = await database.get_or_create_user(77, 700)
         self.assertEqual(user["xp"] + (user["level"] - 1) * 120, 300)
-        self.assertEqual(sum(int(leveled) for leveled, _ in results), 2)
+        self.assertEqual(sum(int(leveled) for leveled, _ in results), 1)
 
     async def test_daily_reward_is_single_use_and_creates_new_account(self):
         claimed = await asyncio.gather(

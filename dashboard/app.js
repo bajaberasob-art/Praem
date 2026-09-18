@@ -4037,6 +4037,15 @@
     }
   }
   addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+    if (e.key === "Escape") {
+      $(".command-palette-back")?.remove();
+      toggleDrawer(false);
+    }
     if (e.key !== "Escape") return;
     document.querySelectorAll(".popover:not([hidden])").forEach((p) => {
       p.hidden = true;

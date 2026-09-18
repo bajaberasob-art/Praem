@@ -764,7 +764,7 @@ async def api_guild_ticket_transcript(req):
     )
 
 
-@routes.get('/api/guild/{guild_id}/tickets/{ticket_id}')
+@routes.get('/api/guild/{guild_id}/tickets/detail/{ticket_id}')
 async def api_guild_ticket_detail(req):
     _, guild = await authorize(req)
     community = _community_cog()

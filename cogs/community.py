@@ -600,6 +600,11 @@ class Community(commands.Cog):
     ) -> dict | None:
         return await set_ticket_priority(guild_id, ticket_id, priority)
 
+    async def set_ticket_status(
+        self, guild_id: int, ticket_id: int, status: str, staff_id: int | None = None
+    ) -> dict | None:
+        return await set_ticket_status(guild_id, ticket_id, status, staff_id=staff_id)
+
     async def reopen_ticket(
         self, guild_id: int, ticket_id: int, staff_id: int
     ) -> dict | None:

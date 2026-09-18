@@ -41,6 +41,7 @@
       canned: [],
     },
     ticketSearch: "",
+    ticketStatusFilter: "all",
     ticketCategories: [
       { key: "general", label: "شكاوى عامة", emoji: "📣", support_role_ids: [], senior_role_ids: [] },
       { key: "questions", label: "استفسارات", emoji: "❓", support_role_ids: [], senior_role_ids: [] },
@@ -1687,34 +1688,175 @@
       if (error.message !== "unauth") toast("تعذر الاتصال لنشر لوحة التذاكر");
     }
   }
-  async function ticketAction(ticket, action) {
+  const ticketStatusLabels = {
+    active: "قيد المعالجة",
+    waiting_user: "بانتظار العميل",
+    waiting_staff: "بانتظار فريق الدعم",
+    closed: "مغلقة",
+  };
+  const ticketPriorityLabels = {
+    normal: "عادية",
+    high: "عالية",
+    management: "تصعيد إداري",
+  };
+  async function ticketAction(ticket, action, payload = {}) {
     let staffId = null;
     if (action === "reassign") {
       staffId = prompt("أدخل Discord ID للموظف الجديد:", ticket.claimed_by || "");
       if (!staffId) return;
     }
-    if (action === "close" && !confirm(`إغلاق التذكرة #${ticket.id} وأرشفتها؟`)) return;
+    if (action === "close" && !confirm(`إغلاق التذكرة #${ticket.id} وأرشفتها؟`)) return null;
     try {
-      const r = await api(`api/guild/${state.guild.id}/tickets/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
-        body: JSON.stringify({
+      const r = await writeApi(`api/guild/${state.guild.id}/tickets/action`, {
           ticket_id: ticket.id,
           action,
           staff_id: staffId,
           reason: "أُغلقت من لوحة الإدارة",
-        }),
+          ...payload,
       });
       const data = await r.json();
       if (!r.ok) {
         toast(data.fields ? Object.values(data.fields)[0] : "تعذر تنفيذ الإجراء");
-        return;
+        return null;
       }
       pulse();
-      toast(action === "close" ? "تم إغلاق التذكرة وأرشفتها" : "تمت إعادة إسناد التذكرة", "success", 2400);
+      const messages = {
+        close: "تم إغلاق التذكرة وأرشفتها",
+        reassign: "تمت إعادة إسناد التذكرة",
+        reopen: "تمت إعادة فتح التذكرة",
+        note: "تم حفظ الملاحظة الداخلية",
+        status: "تم تحديث حالة التذكرة",
+        priority: "تم تحديث أولوية التذكرة",
+      };
+      toast(messages[action] || "تم تحديث التذكرة", "success", 2400);
       await refreshTickets();
+      return data.ticket || data.result || null;
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم");
+      return null;
+    }
+  }
+  async function openTicketDetail(ticket) {
+    try {
+      const r = await api(`api/guild/${state.guild.id}/tickets/detail/${ticket.id}`);
+      const data = await r.json();
+      if (!r.ok || !data.ticket) return toast("تعذر تحميل تفاصيل التذكرة");
+      const current = data.ticket;
+      const notes = data.notes || [];
+      const closeDrawer = () => $(".ticket-drawer")?.remove();
+      const statusSelect = el(
+        "select",
+        { class: "ticket-detail-select", "aria-label": "حالة التذكرة" },
+        Object.entries(ticketStatusLabels).map(([value, label]) =>
+          el("option", { value, text: label }),
+        ),
+      );
+      statusSelect.value = current.status || "active";
+      statusSelect.disabled = current.status === "closed";
+      statusSelect.onchange = async () => {
+        await ticketAction(current, "status", { status: statusSelect.value });
+        closeDrawer();
+      };
+      const prioritySelect = el(
+        "select",
+        { class: "ticket-detail-select", "aria-label": "أولوية التذكرة" },
+        Object.entries(ticketPriorityLabels).map(([value, label]) =>
+          el("option", { value, text: label }),
+        ),
+      );
+      prioritySelect.value = current.priority || "normal";
+      prioritySelect.disabled = current.status === "closed";
+      prioritySelect.onchange = async () => {
+        await ticketAction(current, "priority", { priority: prioritySelect.value });
+        closeDrawer();
+      };
+      const noteForm = el("form", { class: "ticket-note-form" },
+        el("textarea", {
+          name: "content",
+          class: "studio-textarea",
+          maxlength: "2000",
+          placeholder: "ملاحظة لا تظهر لصاحب التذكرة…",
+          required: true,
+        }),
+        el("button", { class: "btn primary", type: "submit", text: "حفظ الملاحظة" }),
+      );
+      noteForm.onsubmit = async (event) => {
+        event.preventDefault();
+        const content = noteForm.elements.content.value.trim();
+        if (!content) return;
+        await ticketAction(current, "note", { content });
+        closeDrawer();
+        await openTicketDetail(current);
+      };
+      const notesList = el("div", { class: "ticket-notes-list" });
+      if (!notes.length) {
+        notesList.append(el("div", { class: "empty studio-empty", text: "لا توجد ملاحظات داخلية" }));
+      } else {
+        notes.forEach((note) => notesList.append(el("article", { class: "ticket-note" },
+          el("div", { class: "ticket-note-meta", text: `موظف #${note.staff_id} · ${note.created_at || ""}` }),
+          el("p", { text: note.content }),
+        )));
+      }
+      const intake = el("div", { class: "ticket-intake-grid" });
+      Object.entries(current.intake_data || {}).forEach(([key, value]) => intake.append(
+        el("div", { class: "ticket-intake-item" },
+          el("small", { text: key }),
+          el("strong", { text: String(value || "—") }),
+        ),
+      ));
+      if (!intake.children.length) intake.append(el("small", { class: "muted", text: "لا توجد بيانات إضافية" }));
+      const actions = el("div", { class: "ticket-detail-actions" },
+        el("a", {
+          class: "btn ghost",
+          href: `https://discord.com/channels/${state.guild.id}/${current.channel_id}`,
+          target: "_blank",
+          text: "فتح القناة ↗",
+        }),
+      );
+      if (current.status === "closed") {
+        actions.append(el("button", {
+          class: "btn primary",
+          type: "button",
+          text: "إعادة فتح التذكرة",
+          onClick: async () => { await ticketAction(current, "reopen"); closeDrawer(); },
+        }));
+      } else {
+        actions.append(el("button", {
+          class: "btn danger",
+          type: "button",
+          text: "إغلاق وأرشفة",
+          onClick: async () => { await ticketAction(current, "close"); closeDrawer(); },
+        }));
+      }
+      const drawer = el("aside", { class: "ticket-drawer ticket-detail-drawer", role: "dialog", "aria-modal": "true" },
+        el("div", { class: "ticket-drawer-head" },
+          el("div", {},
+            el("span", { class: "eyebrow", text: `${current.category_label} / TICKET #${current.id}` }),
+            el("h3", { text: current.subject }),
+          ),
+          el("button", { class: "icon-action", type: "button", text: "×", "aria-label": "إغلاق", onClick: closeDrawer }),
+        ),
+        el("div", { class: "ticket-detail-body" },
+          el("div", { class: "ticket-detail-summary" },
+            el("span", { class: `priority-tag ${current.priority || "normal"}`, text: ticketPriorityLabels[current.priority] || current.priority || "عادية" }),
+            el("span", { class: "status-tag", text: ticketStatusLabels[current.status] || current.status }),
+            el("span", { class: "ticket-detail-id", text: `العضو #${current.user_id}` }),
+          ),
+          el("p", { class: "ticket-detail-description", text: current.details || "بدون تفاصيل" }),
+          el("div", { class: "ticket-detail-controls" },
+            el("label", {}, "الحالة", statusSelect),
+            el("label", {}, "الأولوية", prioritySelect),
+          ),
+          el("div", { class: "ticket-detail-section" }, el("h4", { text: "بيانات نموذج الفتح" }), intake),
+          el("div", { class: "ticket-detail-section" }, el("h4", { text: "ملاحظة داخلية" }), noteForm),
+          el("div", { class: "ticket-detail-section" }, el("h4", { text: "سجل الملاحظات" }), notesList),
+          actions,
+        ),
+      );
+      document.body.append(drawer);
+      pulse();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر تحميل تفاصيل التذكرة");
     }
   }
   async function openTicketTranscript(ticket) {
@@ -1782,6 +1924,8 @@
     state.ticketCategories.forEach((category, index) => {
       const label = el("input", { class: "studio-input", value: category.label, maxlength: "80" });
       label.oninput = () => { state.ticketCategories[index].label = label.value; };
+      const emoji = el("input", { class: "studio-input ticket-emoji-input", value: category.emoji || "🎫", maxlength: "2", "aria-label": "رمز التصنيف" });
+      emoji.oninput = () => { state.ticketCategories[index].emoji = emoji.value || "🎫"; };
       const roles = el("select", { class: "ticket-role-select", multiple: "multiple", "aria-label": `رتب دعم ${category.label}` });
       (state.commandStudio.roles || []).forEach((role) => {
         const option = el("option", { value: role.id }, role.name);
@@ -1791,10 +1935,44 @@
       roles.onchange = () => {
         state.ticketCategories[index].support_role_ids = [...roles.selectedOptions].map((option) => option.value);
       };
+      const fields = el("div", { class: "ticket-intake-editor" });
+      const renderFields = () => {
+        fields.replaceChildren();
+        const intakeFields = category.intake_fields || [];
+        intakeFields.forEach((field, fieldIndex) => {
+          const key = el("input", { class: "studio-input", value: field.key || `field_${fieldIndex + 1}`, maxlength: "40", placeholder: "المفتاح" });
+          const fieldLabel = el("input", { class: "studio-input", value: field.label || "", maxlength: "45", placeholder: "اسم الحقل" });
+          const placeholder = el("input", { class: "studio-input", value: field.placeholder || "", maxlength: "100", placeholder: "النص الإرشادي" });
+          const required = el("input", { type: "checkbox", checked: field.required === true });
+          key.oninput = () => { field.key = key.value; };
+          fieldLabel.oninput = () => { field.label = fieldLabel.value; };
+          placeholder.oninput = () => { field.placeholder = placeholder.value; };
+          required.onchange = () => { field.required = required.checked; };
+          fields.append(el("div", { class: "ticket-intake-row" },
+            key, fieldLabel, placeholder,
+            el("label", { class: "ticket-required-toggle" }, required, "إلزامي"),
+            el("button", { class: "icon-action danger", type: "button", text: "×", title: "حذف الحقل", onClick: () => {
+              category.intake_fields.splice(fieldIndex, 1);
+              renderFields();
+            } }),
+          ));
+        });
+        if (intakeFields.length < 3) {
+          fields.append(el("button", { class: "btn ghost ticket-add-field", type: "button", text: "＋ إضافة حقل في نموذج الفتح", onClick: () => {
+            category.intake_fields = category.intake_fields || [];
+            category.intake_fields.push({ key: `field_${category.intake_fields.length + 1}`, label: "", placeholder: "", required: false });
+            renderFields();
+          } }));
+        }
+      };
+      category.intake_fields = Array.isArray(category.intake_fields) ? category.intake_fields : [];
+      renderFields();
       wrap.append(el("div", { class: "ticket-category-row" },
-        el("span", { class: "ticket-category-emoji", text: category.emoji }),
+        el("div", { class: "ticket-category-head" }, el("span", { class: "ticket-category-emoji", text: category.emoji }), emoji),
         label,
         roles,
+        el("small", { class: "ticket-field-caption", text: "حقول نموذج الفتح (اختيارية، حتى 3)" }),
+        fields,
       ));
     });
     return wrap;
@@ -1838,17 +2016,35 @@
       ),
     );
     const active = el("div", { class: "ticket-radar-grid" });
-    if (!state.tickets.active.length) active.append(el("div", { class: "empty studio-empty", text: "لا توجد تذاكر نشطة الآن" }));
-    state.tickets.active.forEach((ticket) => {
+    const queue = state.tickets.active.reduce((result, ticket) => {
+      const status = ticket.status || "active";
+      result[status] = (result[status] || 0) + 1;
+      return result;
+    }, {});
+    const queueStats = el("div", { class: "ticket-queue-stats" },
+      [["active", "قيد المعالجة"], ["waiting_staff", "بانتظار الدعم"], ["waiting_user", "بانتظار العميل"]].map(([key, label]) =>
+        el("button", { class: `queue-stat ${state.ticketStatusFilter === key ? "selected" : ""}`, type: "button", onClick: () => {
+          state.ticketStatusFilter = state.ticketStatusFilter === key ? "all" : key;
+          renderPage();
+        } }, el("strong", { text: String(queue[key] || 0) }), el("small", { text: label })),
+      ),
+    );
+    active.append(queueStats);
+    const filteredTickets = state.tickets.active.filter((ticket) =>
+      state.ticketStatusFilter === "all" || (ticket.status || "active") === state.ticketStatusFilter
+    );
+    if (!filteredTickets.length) active.append(el("div", { class: "empty studio-empty", text: "لا توجد تذاكر مطابقة للفترة الحالية" }));
+    filteredTickets.forEach((ticket) => {
       const priority = ticket.priority || "normal";
-      const label = { normal: "Normal", high: "Urgent", management: "Escalated" }[priority] || priority;
+      const label = ticketPriorityLabels[priority] || priority;
       active.append(el("article", { class: `ticket-radar-card ${priority}` },
         el("div", { class: "ticket-radar-top" }, el("span", { class: `priority-tag ${priority}`, text: label }), el("small", { text: `#${ticket.id}` })),
         el("h4", { text: ticket.subject }),
-        el("p", { text: `${ticket.category_label} · ${ticket.claimed_by ? `مستلمة بواسطة ${ticket.claimed_by}` : "بانتظار الاستلام"}` }),
+        el("p", { text: `${ticket.category_label} · ${ticketStatusLabels[ticket.status] || "قيد المعالجة"} · ${ticket.claimed_by ? `مستلمة بواسطة ${ticket.claimed_by}` : "بانتظار الاستلام"}` }),
         el("div", { class: "ticket-radar-actions" },
           el("a", { class: "icon-action", href: `https://discord.com/channels/${state.guild.id}/${ticket.channel_id}`, target: "_blank", text: "↗", title: "فتح القناة" }),
           el("button", { class: "icon-action", type: "button", text: "⇄", title: "إعادة إسناد", onClick: () => ticketAction(ticket, "reassign") }),
+          el("button", { class: "icon-action", type: "button", text: "◉", title: "التفاصيل والملاحظات", onClick: () => openTicketDetail(ticket) }),
           el("button", { class: "icon-action danger", type: "button", text: "⌫", title: "إغلاق قسري", onClick: () => ticketAction(ticket, "close") }),
         ),
       ));
@@ -1864,7 +2060,10 @@
     if (!state.tickets.archive.length) archiveRows.append(el("div", { class: "empty studio-empty", text: "لا توجد سجلات مغلقة" }));
     state.tickets.archive.forEach((ticket) => archiveRows.append(el("div", { class: "ticket-archive-row" },
       el("div", {}, el("strong", { text: `#${ticket.id} · ${ticket.subject}` }), el("small", { text: `${ticket.category_label} · ${ticket.close_reason || "بدون سبب"}` })),
-      el("button", { class: "btn ghost", type: "button", text: "عرض السجل", onClick: () => openTicketTranscript(ticket) }),
+      el("div", { class: "ticket-archive-actions" },
+        el("button", { class: "btn ghost", type: "button", text: "التفاصيل", onClick: () => openTicketDetail(ticket) }),
+        el("button", { class: "btn ghost", type: "button", text: "السجل", onClick: () => openTicketTranscript(ticket) }),
+      ),
     )));
      const cannedForm = el("form", { class: "canned-form" },
       el("input", { name: "title", class: "studio-input", placeholder: "عنوان سريع: سياسة الاسترداد" }),
@@ -1903,7 +2102,7 @@
       ),
       card("Ticket Launcher Studio", launchForm),
       el("section", { class: "ticket-kpi-section" }, el("div", { class: "section-heading" }, el("div", {}, el("div", { class: "eyebrow", text: "STAFF VELOCITY" }), el("h3", { text: "مؤشرات فريق الدعم" })), el("span", { class: "live-dot", text: `${kpis.length} موظفين` })), kpiCards),
-      el("section", { class: "ticket-radar-section" }, el("div", { class: "section-heading" }, el("div", {}, el("div", { class: "eyebrow", text: "ACTIVE RADAR" }), el("h3", { text: "التذاكر النشطة" })), el("span", { class: "live-dot", text: `${state.tickets.active.length} مفتوحة` })), active),
+       el("section", { class: "ticket-radar-section" }, el("div", { class: "section-heading" }, el("div", {}, el("div", { class: "eyebrow", text: "ACTIVE RADAR" }), el("h3", { text: "التذاكر النشطة" })), el("span", { class: "live-dot", text: `${state.tickets.active.length} مفتوحة` })), active),
       card("Searchable Transcript Vault", el("div", { class: "ticket-vault" }, archiveSearch, archiveRows)),
       card("Canned Responses Drawer", el("div", { class: "canned-drawer" }, cannedForm, cannedList)),
     );

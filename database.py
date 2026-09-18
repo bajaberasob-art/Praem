@@ -432,9 +432,36 @@ async def init_db() -> None:
                     rating INTEGER DEFAULT NULL
                 );
             """)
+            async with db.execute("PRAGMA table_info(tickets)") as cur:
+                ticket_columns = {row[1] for row in await cur.fetchall()}
+            ticket_migrations = {
+                "intake_data": "TEXT NOT NULL DEFAULT '{}'",
+                "waiting_since": "DATETIME DEFAULT NULL",
+                "escalated_at": "DATETIME DEFAULT NULL",
+                "last_user_message_at": "DATETIME DEFAULT NULL",
+            }
+            for column, definition in ticket_migrations.items():
+                if column not in ticket_columns:
+                    await db.execute(
+                        f"ALTER TABLE tickets ADD COLUMN {column} {definition}"
+                    )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tickets_guild_status "
                 "ON tickets(guild_id, status);"
+            )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticket_id INTEGER NOT NULL,
+                    guild_id INTEGER NOT NULL,
+                    staff_id INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticket_notes_ticket "
+                "ON ticket_notes(guild_id, ticket_id, created_at DESC);"
             )
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS ticket_transcripts (
@@ -1699,6 +1726,7 @@ async def create_ticket(
     details: str,
     support_role_ids: list[int | str] | None = None,
     senior_role_ids: list[int | str] | None = None,
+    intake_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     support = [str(item) for item in (support_role_ids or [])]
     senior = [str(item) for item in (senior_role_ids or [])]
@@ -1708,7 +1736,8 @@ async def create_ticket(
             INSERT INTO tickets
                 (guild_id, channel_id, user_id, category_key, category_label,
                  subject, details, support_role_ids, senior_role_ids)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                , intake_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             """,
             (
@@ -1716,6 +1745,7 @@ async def create_ticket(
                 str(category_key)[:80], str(category_label)[:120],
                 str(subject)[:200], str(details)[:4000],
                 json.dumps(support), json.dumps(senior),
+                json.dumps(intake_data or {}, ensure_ascii=False),
             ),
         )
         row = await cursor.fetchone()
@@ -1726,6 +1756,13 @@ async def create_ticket(
 def _ticket_row(item: dict[str, Any]) -> dict[str, Any]:
     for key in ("support_role_ids", "senior_role_ids"):
         item[key] = _ticket_json_ids(item.get(key))
+    raw_intake = item.get("intake_data")
+    if isinstance(raw_intake, str):
+        try:
+            raw_intake = json.loads(raw_intake)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raw_intake = {}
+    item["intake_data"] = raw_intake if isinstance(raw_intake, dict) else {}
     for key in ("guild_id", "channel_id", "user_id", "id", "claimed_by", "closed_by"):
         if item.get(key) is not None:
             item[key] = int(item[key])
@@ -1747,8 +1784,11 @@ async def get_active_tickets(guild_id: int) -> list[dict[str, Any]]:
         async with db.execute(
             """
             SELECT * FROM tickets
-            WHERE guild_id = ? AND status = 'active'
-            ORDER BY opened_at DESC, id DESC
+            WHERE guild_id = ? AND status != 'closed'
+            ORDER BY
+                CASE priority WHEN 'management' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
+                CASE status WHEN 'waiting_staff' THEN 0 ELSE 1 END,
+                opened_at ASC, id ASC
             """,
             (int(guild_id),),
         ) as cur:
@@ -1759,8 +1799,8 @@ async def claim_ticket(guild_id: int, ticket_id: int, staff_id: int) -> dict[str
     async with connect(aiosqlite.Row) as db:
         await db.execute(
             """
-            UPDATE tickets SET claimed_by = ?
-            WHERE guild_id = ? AND id = ? AND status = 'active'
+            UPDATE tickets SET claimed_by = ?, status = 'active', waiting_since = NULL
+            WHERE guild_id = ? AND id = ? AND status != 'closed'
             """,
             (int(staff_id), int(guild_id), int(ticket_id)),
         )
@@ -1781,8 +1821,8 @@ async def escalate_ticket(
     async with connect(aiosqlite.Row) as db:
         await db.execute(
             """
-            UPDATE tickets SET priority = ?
-            WHERE guild_id = ? AND id = ? AND status = 'active'
+            UPDATE tickets SET priority = ?, escalated_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ? AND id = ? AND status != 'closed'
             """,
             (str(priority), int(guild_id), int(ticket_id)),
         )
@@ -1799,14 +1839,108 @@ async def record_ticket_response(guild_id: int, ticket_id: int) -> bool:
     async with connect() as db:
         cursor = await db.execute(
             """
-            UPDATE tickets SET first_response_at = CURRENT_TIMESTAMP
-            WHERE guild_id = ? AND id = ? AND status = 'active'
-              AND first_response_at IS NULL
+            UPDATE tickets
+            SET first_response_at = COALESCE(first_response_at, CURRENT_TIMESTAMP),
+                status = 'active', waiting_since = NULL
+            WHERE guild_id = ? AND id = ? AND status != 'closed'
             """,
             (int(guild_id), int(ticket_id)),
         )
         await db.commit()
     return cursor.rowcount > 0
+
+
+async def record_ticket_user_message(guild_id: int, ticket_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            """
+            UPDATE tickets
+            SET status = 'waiting_staff',
+                waiting_since = COALESCE(waiting_since, CURRENT_TIMESTAMP),
+                last_user_message_at = CURRENT_TIMESTAMP
+            WHERE guild_id = ? AND id = ? AND status != 'closed'
+            """,
+            (int(guild_id), int(ticket_id)),
+        )
+        await db.commit()
+    return cursor.rowcount > 0
+
+
+async def set_ticket_status(
+    guild_id: int,
+    ticket_id: int,
+    status: str,
+    *,
+    staff_id: int | None = None,
+) -> dict[str, Any] | None:
+    allowed = {"active", "waiting_user", "waiting_staff"}
+    if status not in allowed:
+        raise ValueError("invalid ticket status")
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            UPDATE tickets
+            SET status = ?,
+                waiting_since = CASE WHEN ? = 'active' THEN NULL ELSE CURRENT_TIMESTAMP END,
+                claimed_by = COALESCE(?, claimed_by)
+            WHERE guild_id = ? AND id = ? AND status != 'closed'
+            """,
+            (
+                status,
+                status,
+                int(staff_id) if staff_id is not None else None,
+                int(guild_id),
+                int(ticket_id),
+            ),
+        )
+        async with db.execute(
+            "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return _ticket_row(dict(row)) if row else None
+
+
+async def add_ticket_note(
+    guild_id: int,
+    ticket_id: int,
+    staff_id: int,
+    content: str,
+) -> dict[str, Any] | None:
+    text = str(content).strip()[:2000]
+    if not text:
+        return None
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO ticket_notes (ticket_id, guild_id, staff_id, content)
+            SELECT ?, ?, ?, ?
+            WHERE EXISTS (
+                SELECT 1 FROM tickets
+                WHERE id = ? AND guild_id = ?
+            )
+            RETURNING *
+            """,
+            (int(ticket_id), int(guild_id), int(staff_id), text, int(ticket_id), int(guild_id)),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+    return dict(row) if row else None
+
+
+async def get_ticket_notes(guild_id: int, ticket_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT * FROM ticket_notes
+            WHERE guild_id = ? AND ticket_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 100
+            """,
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
 
 
 async def close_ticket(
@@ -1821,7 +1955,7 @@ async def close_ticket(
             UPDATE tickets
             SET status = 'closed', closed_at = CURRENT_TIMESTAMP,
                 closed_by = ?, close_reason = ?
-            WHERE guild_id = ? AND id = ? AND status = 'active'
+            WHERE guild_id = ? AND id = ? AND status != 'closed'
             """,
             (int(staff_id), str(reason)[:1000], int(guild_id), int(ticket_id)),
         )

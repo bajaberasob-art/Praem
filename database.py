@@ -1071,6 +1071,20 @@ async def set_tournament_message(tournament_id: int, message_id: int) -> None:
         await db.commit()
 
 
+async def cancel_tournament(tournament_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            """
+            UPDATE tournaments SET status = 'cancelled'
+            WHERE id = ? AND status = 'open'
+            """,
+            (int(tournament_id),),
+        )
+        changed = cur.rowcount > 0
+        await db.commit()
+    return changed
+
+
 async def add_tournament_entry(tournament_id: int, user_id: int) -> tuple[bool, int, int]:
     async with connect(aiosqlite.Row) as db:
         async with db.execute(

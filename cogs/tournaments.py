@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from database import (
     add_tournament_entry,
+    cancel_tournament,
     create_tournament,
     get_open_tournaments,
     get_tournament_entries,
@@ -286,10 +287,14 @@ class Tournaments(commands.Cog):
             text="سيقوم المنظم بإنشاء جدول المواجهات عند اكتمال العدد",
         )
         view = TournamentEntryView(tournament_id, title, max_players)
-        message = await itx.channel.send(
-            embed=embed,
-            view=view,
-        )
+        try:
+            message = await itx.channel.send(
+                embed=embed,
+                view=view,
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            await cancel_tournament(tournament_id)
+            raise
         await set_tournament_message(tournament_id, message.id)
         self.bot.add_view(view, message_id=message.id)
         await itx.response.send_message(

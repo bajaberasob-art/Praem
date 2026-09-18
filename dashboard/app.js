@@ -351,6 +351,51 @@
     $(".menu-toggle")?.setAttribute("aria-expanded", String(state.drawerOpen));
     navigator.vibrate?.(12);
   }
+  function openCommandPalette() {
+    $(".command-palette-back")?.remove();
+    const back = el("div", { class: "command-palette-back", role: "dialog", "aria-modal": "true" });
+    const input = el("input", {
+      class: "command-palette-input",
+      type: "search",
+      placeholder: "ابحث في أقسام مركز القيادة…",
+      "aria-label": "بحث الأقسام",
+    });
+    const list = el("div", { class: "command-palette-list" });
+    const renderMatches = () => {
+      const query = input.value.trim().toLocaleLowerCase();
+      list.replaceChildren(
+        ...Object.entries(viewLabels)
+          .filter(([, meta]) => !query || `${meta.label} ${meta.hint}`.toLocaleLowerCase().includes(query))
+          .map(([view, meta]) => el(
+            "button",
+            {
+              class: "command-palette-item",
+              type: "button",
+              onClick: () => {
+                back.remove();
+                navigateView(view);
+              },
+            },
+            el("span", { class: "nav-icon", text: meta.icon }),
+            el("span", {}, el("strong", { text: meta.label }), el("small", { text: meta.hint })),
+          )),
+      );
+    };
+    input.addEventListener("input", renderMatches);
+    back.append(
+      el(
+        "div",
+        { class: "command-palette", onClick: (event) => event.stopPropagation() },
+        el("div", { class: "command-palette-head" }, el("strong", { text: "التنقل السريع" }), el("kbd", { text: "ESC" })),
+        input,
+        list,
+      ),
+    );
+    back.addEventListener("click", () => back.remove());
+    document.body.append(back);
+    renderMatches();
+    input.focus();
+  }
   function navButton(view) {
     const meta = viewLabels[view];
     return el(

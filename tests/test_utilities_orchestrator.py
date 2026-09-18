@@ -183,7 +183,7 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         embed = message.channel.sent[0][1]["embed"]
         self.assertEqual(embed.title, "تحذير 📖")
         self.assertIn("عيب", embed.fields[0].value)
-        self.assertIn("تحذير", embed.fields[1].value)
+        self.assertIn("عيب @أحمد", embed.fields[1].value)
         self.assertIn("تحذير", embed.fields[2].value)
         self.assertIn("طرد الأعضاء", embed.fields[3].value)
 

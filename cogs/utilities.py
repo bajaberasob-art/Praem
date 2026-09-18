@@ -850,7 +850,7 @@ class Utilities(commands.Cog):
     async def ask(self, itx: discord.Interaction, question: str):
         ai_cog = self.bot.get_cog("AITools")
         if ai_cog is not None:
-            await ai_cog.ask_ai(itx, question)
+            await ai_cog.answer_ai(itx, question)
             return
         await itx.response.send_message(
             "⚠️ محرك الذكاء الاصطناعي غير متاح حالياً. جرّب لاحقاً.",

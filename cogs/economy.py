@@ -6,7 +6,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database import DB_NAME, add_xp, get_or_create_user, update_balance
+from database import (
+    DB_NAME,
+    add_xp,
+    get_economy_leaderboard,
+    get_guild_settings,
+    get_or_create_user,
+    transfer_balance,
+    update_balance,
+)
 
 
 class LiveGiveaway(discord.ui.View):
@@ -125,7 +133,9 @@ class Economy(commands.Cog):
                     "❌ استلمت راتبك اليومي مسبقاً! عد غداً.",
                     ephemeral=True,
                 )
-            reward = random.randint(300, 600)
+            settings = await get_guild_settings(itx.guild.id)
+            base_reward = int(settings["settings"].get("daily_amount", 450))
+            reward = random.randint(max(1, int(base_reward * 0.8)), max(1, int(base_reward * 1.2)))
             await update_balance(
                 itx.user.id,
                 itx.guild.id,
@@ -161,6 +171,50 @@ class Economy(commands.Cog):
         await itx.response.send_message(
             f"💼 أتممت عملاً شاقاً وحصلت على **{earned:,}** عملة نقدية."
         )
+
+    @app_commands.command(name="pay", description="تحويل كاش إلى عضو آخر")
+    async def pay(
+        self,
+        itx: discord.Interaction,
+        target: discord.Member,
+        amount: int,
+    ):
+        if target.bot or target.id == itx.user.id or amount <= 0:
+            return await itx.response.send_message(
+                "❌ اختر عضواً صالحاً وأدخل مبلغاً أكبر من صفر.",
+                ephemeral=True,
+            )
+        if not await transfer_balance(itx.guild.id, itx.user.id, target.id, amount):
+            return await itx.response.send_message(
+                "❌ لا يملك رصيدك النقدي ما يكفي لإتمام التحويل.",
+                ephemeral=True,
+            )
+        await itx.response.send_message(
+            f"💸 تم تحويل **{amount:,}** عملة إلى {target.mention}.",
+        )
+
+    @app_commands.command(name="leaderboard", description="عرض المتصدرين في اقتصاد السيرفر")
+    async def leaderboard(self, itx: discord.Interaction):
+        rows = await get_economy_leaderboard(itx.guild.id, 10)
+        if not rows:
+            return await itx.response.send_message(
+                "لا توجد حسابات اقتصادية بعد.",
+                ephemeral=True,
+            )
+        lines = []
+        for index, row in enumerate(rows, 1):
+            member = itx.guild.get_member(int(row["user_id"]))
+            name = member.display_name if member else f"عضو {row['user_id']}"
+            lines.append(
+                f"**{index}.** {name} — `{int(row['total']):,}` عملة "
+                f"(مستوى {int(row['level'])})"
+            )
+        embed = discord.Embed(
+            title="🏆 لوحة المتصدرين الاقتصادية",
+            description="\n".join(lines),
+            color=0xF1C40F,
+        )
+        await itx.response.send_message(embed=embed)
 
     @app_commands.command(
         name="deposit",

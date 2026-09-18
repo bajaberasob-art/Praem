@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 from urllib.parse import quote
 
 import aiohttp
@@ -8,6 +9,7 @@ from deep_translator import GoogleTranslator
 from discord import app_commands
 from discord.ext import commands
 
+LOGGER = logging.getLogger("AITools")
 
 # خريطة الأعلام واللغات المدعومة
 FLAG_MAP = {
@@ -90,6 +92,10 @@ class AITools(commands.Cog):
         itx: discord.Interaction,
         question: str,
     ):
+        await self.answer_ai(itx, question)
+
+    async def answer_ai(self, itx: discord.Interaction, question: str):
+        question = str(question).strip()[:2000]
         await itx.response.defer()
         encoded_question = quote(question, safe="")
         url = (
@@ -120,9 +126,8 @@ class AITools(commands.Cog):
                         "⚠️ تعذر الاتصال بمحرك الذكاء الاصطناعي حالياً."
                     )
         except Exception as error:
-            await itx.followup.send(
-                f"❌ حدث خطأ في معالجة الطلب: {error}"
-            )
+            LOGGER.exception("[AI] فشل طلب الذكاء الاصطناعي: %s", error)
+            await itx.followup.send("❌ تعذر إكمال الطلب حالياً. حاول لاحقاً.")
 
     @app_commands.command(
         name="imagine",

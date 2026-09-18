@@ -583,17 +583,21 @@ async def api_guild_shortcut_save(req):
         return json_error(400, "validation", fields={"target": "أمر الهدف غير صالح"})
     command_name = target.lstrip("!/").split()[0].lower()
     utilities = _utilities_cog()
+    command_bot = getattr(utilities, "bot", None) or bot_ref
+    prefix_commands = getattr(command_bot, "commands", []) if command_bot else []
+    tree = getattr(command_bot, "tree", None) if command_bot else None
+    slash_commands = tree.walk_commands() if tree and hasattr(tree, "walk_commands") else []
     known = {
         command.qualified_name.lower()
-        for command in (utilities.bot.commands if utilities else [])
-        if not command.hidden
+        for command in prefix_commands
+        if not getattr(command, "hidden", False)
     }
     known.update(
         command.qualified_name.lower()
-        for command in (utilities.bot.tree.walk_commands() if utilities else [])
+        for command in slash_commands
         if not getattr(command, "hidden", False)
     )
-    if command_name not in known:
+    if known and command_name not in known:
         return json_error(400, "validation", fields={"target": "الأمر الهدف غير موجود"})
     try:
         shortcut = await save_shortcut(
@@ -603,7 +607,7 @@ async def api_guild_shortcut_save(req):
             target=target if target.startswith("/") else f"/{command_name}",
         )
         utilities = _utilities_cog()
-        if utilities:
+        if utilities and hasattr(utilities, "sync_auto_responders"):
             await utilities.sync_auto_responders(guild.id)
     except ValueError as error:
         return json_error(400, "validation", fields={"trigger": str(error)})
@@ -620,7 +624,7 @@ async def api_guild_shortcut_delete(req):
     if not await delete_shortcut(guild.id, shortcut_id):
         return json_error(404, "shortcut_not_found")
     utilities = _utilities_cog()
-    if utilities:
+    if utilities and hasattr(utilities, "sync_auto_responders"):
         await utilities.sync_auto_responders(guild.id)
     return web.json_response({"deleted": True, "shortcut_id": shortcut_id})
 

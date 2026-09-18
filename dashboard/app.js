@@ -1089,9 +1089,9 @@
       el("div", { class: "field wide role-matrix-field" },
         el("label", { text: "مصفوفة الأدوار التلقائية" }),
         el("div", { class: "role-matrix" },
-          el("div", { class: "role-matrix-card human" }, el("span", { class: "matrix-icon", text: "◉" }), el("div", { class: "matrix-copy" }, el("strong", { text: "الأعضاء البشر" }), el("small", { text: roleName(state.draft.member_auto_role_id) })), selector("member_auto_role_id", "رتبة الأعضاء", "role")),
-          el("div", { class: "role-matrix-card bot" }, el("span", { class: "matrix-icon", text: "⌘" }), el("div", { class: "matrix-copy" }, el("strong", { text: "البوتات" }), el("small", { text: roleName(state.draft.bot_auto_role_id) })), selector("bot_auto_role_id", "رتبة البوتات", "role")),
-          el("div", { class: "role-matrix-card all" }, el("span", { class: "matrix-icon", text: "✦" }), el("div", { class: "matrix-copy" }, el("strong", { text: "رتبة افتراضية للجميع" }), el("small", { text: roleName(state.draft.auto_role_id) })), selector("auto_role_id", "رتبة عامة", "role")),
+          el("div", { class: "role-matrix-card human" }, el("span", { class: "matrix-icon", text: "◉" }), el("div", { class: "matrix-copy" }, el("strong", { text: "الأعضاء البشر" }), el("small", { "data-role-matrix-key": "member_auto_role_id", text: roleName(state.draft.member_auto_role_id) })), selector("member_auto_role_id", "رتبة الأعضاء", "role")),
+          el("div", { class: "role-matrix-card bot" }, el("span", { class: "matrix-icon", text: "⌘" }), el("div", { class: "matrix-copy" }, el("strong", { text: "البوتات" }), el("small", { "data-role-matrix-key": "bot_auto_role_id", text: roleName(state.draft.bot_auto_role_id) })), selector("bot_auto_role_id", "رتبة البوتات", "role")),
+          el("div", { class: "role-matrix-card all" }, el("span", { class: "matrix-icon", text: "✦" }), el("div", { class: "matrix-copy" }, el("strong", { text: "رتبة افتراضية للجميع" }), el("small", { "data-role-matrix-key": "auto_role_id", text: roleName(state.draft.auto_role_id) })), selector("auto_role_id", "رتبة عامة", "role")),
         ),
       ),
     );
@@ -1230,6 +1230,9 @@
     if (onboardingSave) onboardingSave.disabled = !onboardingDirty() || state.saving || !state.online;
     const onboardingTest = $(".onboarding-test");
     if (onboardingTest) onboardingTest.disabled = !state.online || state.saving;
+    document.querySelectorAll("[data-role-matrix-key]").forEach((node) => {
+      node.textContent = roleName(state.draft[node.dataset.roleMatrixKey]);
+    });
   }
   function renderDock() {
     let d = $(".dock");

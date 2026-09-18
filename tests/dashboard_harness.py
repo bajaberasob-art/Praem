@@ -174,6 +174,24 @@ class FakeBot:
                 "template_data": template_data,
             }
 
+        async def deploy_self_role_panel(
+            self, guild_id, target_channel_id, title, description, color, emoji, roles
+        ):
+            return {
+                "ok": True,
+                "panel": {
+                    "id": 1,
+                    "guild_id": guild_id,
+                    "channel_id": target_channel_id,
+                    "message_id": 800000000000000002,
+                    "title": title,
+                    "description": description,
+                    "color": color,
+                    "emoji": emoji,
+                    "role_specs": roles,
+                },
+            }
+
     def __init__(self):
         self.security = self.SecurityStub()
         self.moderation = self.ModerationStub()

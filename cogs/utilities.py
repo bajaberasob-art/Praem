@@ -116,6 +116,10 @@ class ShortcutInteractionResponse:
 
     async def send_message(self, content=None, **kwargs):
         self._done = True
+        # Discord does not support ephemeral messages in a regular channel.
+        # Shortcut execution is a message-driven adapter, so discard this
+        # interaction-only flag instead of passing it to TextChannel.send().
+        kwargs.pop("ephemeral", None)
         await self.interaction.channel.send(content, **kwargs)
 
 
@@ -124,6 +128,7 @@ class ShortcutFollowup:
         self.interaction = interaction
 
     async def send(self, content=None, **kwargs):
+        kwargs.pop("ephemeral", None)
         return await self.interaction.channel.send(content, **kwargs)
 
 
@@ -773,7 +778,9 @@ class Utilities(commands.Cog):
                 LOGGER.exception(
                     "[SHORTCUT] فشل تشغيل الأمر Slash /%s", command_name
                 )
-                return False
+                if not interaction.response.is_done():
+                    await message.channel.send(f"⚠️ تعذر تنفيذ الاختصار للأمر `/{command_name}`.")
+                return True
         command = self.bot.get_command(command_name)
         if command is None:
             await message.channel.send(f"⚠️ الأمر `{command_name}` غير موجود حالياً.")

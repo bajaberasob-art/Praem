@@ -32,6 +32,16 @@ class Role:
         return self.position >= other.position
 
 
+class Emoji:
+    def __init__(self, id, name, animated=False):
+        self.id, self.name, self.animated = id, name, animated
+        self.available = True
+        self.url = f"https://cdn.discordapp.com/emojis/{id}.{'gif' if animated else 'png'}"
+
+    def __str__(self):
+        return f"<{'a' if self.animated else ''}:{self.name}:{self.id}>"
+
+
 class Chan(discord.TextChannel):
     def __init__(self, id, name, pos, category=None):
         self.id, self.name, self.position, self._cat = id, name, pos, category
@@ -56,6 +66,7 @@ ROLES = [
 class FakeGuild:
     id, name, icon, member_count, owner_id = 100000000000000001, "PRIME TEAM", None, 1284, 99
     roles, text_channels = ROLES, CHANNELS
+    emojis = [Emoji(400000000000000001, "party"), Emoji(400000000000000002, "spark", animated=True)]
     me = SimpleNamespace(top_role=ROLES[3])
 
     admins = {10, 100000000000000010}

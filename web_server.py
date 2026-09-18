@@ -328,16 +328,18 @@ async def guild_meta(guild) -> dict:
     me = guild.me
     top = me.top_role if me else None
     text_channels = list(guild.text_channels)
-    try:
-        fetched_channels = await guild.fetch_channels()
-        fetched_text = [
-            channel for channel in fetched_channels
-            if isinstance(channel, discord.TextChannel)
-        ]
-        if fetched_text:
-            text_channels = fetched_text
-    except (discord.Forbidden, discord.HTTPException):
-        logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
+    fetch_channels = getattr(guild, "fetch_channels", None)
+    if fetch_channels is not None:
+        try:
+            fetched_channels = await fetch_channels()
+            fetched_text = [
+                channel for channel in fetched_channels
+                if isinstance(channel, discord.TextChannel)
+            ]
+            if fetched_text:
+                text_channels = fetched_text
+        except (discord.Forbidden, discord.HTTPException):
+            logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
     channels = [
         {"id": str(c.id), "name": c.name, "category": c.category.name if c.category else None}
         for c in sorted(text_channels, key=lambda c: (c.category.position if c.category else -1, c.position))
@@ -362,12 +364,14 @@ async def resolve_text_channel(guild, channel_id: int):
     channel = guild.get_channel(int(channel_id))
     if isinstance(channel, discord.TextChannel):
         return channel
-    try:
-        for fetched in await guild.fetch_channels():
-            if fetched.id == int(channel_id) and isinstance(fetched, discord.TextChannel):
-                return fetched
-    except (discord.Forbidden, discord.HTTPException):
-        logger.debug("Unable to fetch channel %s in guild %s", channel_id, guild.id, exc_info=True)
+    fetch_channels = getattr(guild, "fetch_channels", None)
+    if fetch_channels is not None:
+        try:
+            for fetched in await fetch_channels():
+                if fetched.id == int(channel_id) and isinstance(fetched, discord.TextChannel):
+                    return fetched
+        except (discord.Forbidden, discord.HTTPException):
+            logger.debug("Unable to fetch channel %s in guild %s", channel_id, guild.id, exc_info=True)
     return None
 
 

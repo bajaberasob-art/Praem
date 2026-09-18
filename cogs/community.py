@@ -807,6 +807,18 @@ class Community(commands.Cog):
                 logger.warning("Could not reopen ticket channel %s", ticket["channel_id"])
         return ticket
 
+    async def _delete_ticket_channel_after_delay(self, channel, ticket_id: int):
+        await asyncio.sleep(10)
+        try:
+            await channel.delete(reason=f"Ticket #{ticket_id} closed; delayed cleanup")
+        except discord.NotFound:
+            return
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Could not delete closed ticket channel %s", getattr(channel, "id", "?"))
+
+    def _schedule_ticket_channel_deletion(self, channel, ticket_id: int):
+        asyncio.create_task(self._delete_ticket_channel_after_delay(channel, ticket_id))
+
     async def force_close_ticket(
         self,
         guild_id: int,
@@ -836,7 +848,10 @@ class Community(commands.Cog):
                 )
             except (discord.Forbidden, discord.HTTPException):
                 logger.warning("Could not archive ticket channel %s", ticket["channel_id"])
-        return await close_ticket(guild_id, ticket_id, staff_id, reason)
+        closed = await close_ticket(guild_id, ticket_id, staff_id, reason)
+        if closed and channel is not None:
+            self._schedule_ticket_channel_deletion(channel, closed["id"])
+        return closed
 
     @staticmethod
     def _is_ticket_staff(member, ticket: dict) -> bool:

@@ -662,6 +662,11 @@ class Community(commands.Cog):
         if not self._is_ticket_staff(itx.user, ticket):
             return await self._ticket_denied(itx)
         text, content_html = await self._build_transcript(itx.channel, ticket)
+        text += f"\n\nClose reason: {reason}"
+        content_html = content_html.replace(
+            "</body></html>",
+            f"<hr><p><strong>سبب الإغلاق:</strong> {html.escape(reason)}</p></body></html>",
+        )
         await save_ticket_transcript(
             ticket["id"], ticket["guild_id"], ticket["channel_id"], text, content_html
         )
@@ -689,10 +694,16 @@ class Community(commands.Cog):
                 await user.send(
                     f"📁 تم إغلاق تذكرتك **#{ticket['id']}**.\n"
                     "نقدّر تقييمك لتجربة الدعم:",
-                    file=discord.File(
-                        io.BytesIO(content_html.encode("utf-8")),
-                        filename=f"ticket-{ticket['id']}.html",
-                    ),
+                    files=[
+                        discord.File(
+                            io.BytesIO(content_html.encode("utf-8")),
+                            filename=f"ticket-{ticket['id']}.html",
+                        ),
+                        discord.File(
+                            io.BytesIO(text.encode("utf-8")),
+                            filename=f"ticket-{ticket['id']}.txt",
+                        ),
+                    ],
                     view=TicketRatingView(
                         ticket["id"], ticket["user_id"], ticket["guild_id"]
                     ),

@@ -49,6 +49,7 @@ class FakeBot:
         self.commands = []
         self.guilds = []
         self.checks = []
+        self.user = SimpleNamespace(id=999)
 
     def add_check(self, check, **kwargs):
         self.checks.append(check)

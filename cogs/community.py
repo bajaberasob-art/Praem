@@ -13,6 +13,7 @@ from discord.ext import commands, tasks
 
 from database import (
     claim_ticket,
+    unclaim_ticket,
     close_ticket,
     create_ticket,
     escalate_ticket,
@@ -200,6 +201,35 @@ class InternalNoteModal(discord.ui.Modal, title="إضافة ملاحظة داخ�
         await cog.add_internal_note_from_interaction(itx, str(self.note))
 
 
+def _member_id_from_text(value: str) -> int | None:
+    match = re.search(r"(?<!\d)(\d{15,25})(?!\d)", str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+class TicketMemberActionModal(discord.ui.Modal):
+    def __init__(self, action: str):
+        titles = {
+            "add": "إضافة عضو إلى التذكرة",
+            "remove": "طرد عضو من التذكرة",
+            "transfer": "تحويل التذكرة",
+        }
+        super().__init__(title=titles[action])
+        self.action = action
+        self.member_id = discord.ui.TextInput(
+            label="معرّف Discord أو منشن العضو",
+            placeholder="مثال: 123456789012345678",
+            max_length=40,
+            required=True,
+        )
+        self.add_item(self.member_id)
+
+    async def on_submit(self, itx: discord.Interaction):
+        cog = itx.client.get_cog("Community")
+        if cog is None:
+            return await itx.response.send_message("نظام التذاكر غير متاح حالياً.", ephemeral=True)
+        await cog.handle_ticket_member_action(itx, self.action, str(self.member_id))
+
+
 class TicketPanelView(discord.ui.View):
     def __init__(self, categories_config):
         super().__init__(timeout=None)
@@ -280,6 +310,50 @@ class TicketControlView(discord.ui.View):
         cog = await self._cog(itx)
         if cog:
             await cog.show_internal_note_modal(itx)
+
+    @discord.ui.button(
+        label="إضافة عضو",
+        style=discord.ButtonStyle.secondary,
+        emoji="➕",
+        custom_id="ticket:add-member",
+    )
+    async def add_member(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.show_ticket_member_modal(itx, "add")
+
+    @discord.ui.button(
+        label="طرد عضو",
+        style=discord.ButtonStyle.secondary,
+        emoji="➖",
+        custom_id="ticket:remove-member",
+    )
+    async def remove_member(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.show_ticket_member_modal(itx, "remove")
+
+    @discord.ui.button(
+        label="ترك التذكرة",
+        style=discord.ButtonStyle.secondary,
+        emoji="🚪",
+        custom_id="ticket:unclaim",
+    )
+    async def unclaim(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.unclaim_ticket_from_interaction(itx)
+
+    @discord.ui.button(
+        label="تحويل التذكرة",
+        style=discord.ButtonStyle.primary,
+        emoji="🔁",
+        custom_id="ticket:transfer",
+    )
+    async def transfer(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.show_ticket_member_modal(itx, "transfer")
 
 
 class TicketRatingView(discord.ui.View):

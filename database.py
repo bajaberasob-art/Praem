@@ -1834,6 +1834,29 @@ async def claim_ticket(guild_id: int, ticket_id: int, staff_id: int) -> dict[str
     return _ticket_row(dict(row)) if row else None
 
 
+async def unclaim_ticket(
+    guild_id: int, ticket_id: int, staff_id: int
+) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            UPDATE tickets
+            SET claimed_by = NULL,
+                status = 'waiting_staff',
+                waiting_since = COALESCE(waiting_since, CURRENT_TIMESTAMP)
+            WHERE guild_id = ? AND id = ? AND claimed_by = ? AND status != 'closed'
+            """,
+            (int(guild_id), int(ticket_id), int(staff_id)),
+        )
+        async with db.execute(
+            "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return _ticket_row(dict(row)) if row else None
+
+
 async def escalate_ticket(
     guild_id: int,
     ticket_id: int,

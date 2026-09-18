@@ -1699,11 +1699,11 @@
     )];
     if (requested.length > 20) {
       toast("يمكن إضافة 20 اختصاراً كحد أقصى للأمر", "warn");
-      return;
+      return false;
     }
     if (requested.some((value) => /\s/.test(value) || value.length > 80)) {
       toast("كل اختصار يجب أن يكون كلمة واحدة وبحد أقصى 80 حرفاً", "warn");
-      return;
+      return false;
     }
     const existing = commandShortcuts(command);
     const existingByTrigger = new Map(existing.map((item) => [String(item.trigger).toLowerCase(), item]));
@@ -1723,7 +1723,7 @@
         const data = await response.json();
         if (!response.ok) {
           toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ الاختصار", "warn");
-          return;
+          return false;
         }
         state.commandStudio.shortcuts.push(data.shortcut);
       }
@@ -1748,8 +1748,10 @@
       } else {
         renderPage();
       }
+      return true;
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");
+      return false;
     }
   }
   function commandChoiceEditor(title, choices, selected, placeholder, icon, formatter) {
@@ -1811,6 +1813,8 @@
     closeCommandDetail();
     state.commandDetail = command;
     const warnings = commandPermissionWarnings(command);
+    const visual = commandVisual(command);
+    let detailEnabled = command.enabled !== false;
     const back = el("div", { class: "modal-back command-detail-back", role: "dialog", "aria-modal": "true" });
     const input = el("input", {
       class: "studio-input command-simulator-input",
@@ -1861,20 +1865,78 @@
       shortcutChips,
       el("button", { class: "btn ghost alias-save-button", type: "button", text: "حفظ الاختصارات", onClick: () => saveCommandShortcuts(command, shortcutInput) }),
     );
+    const rolesEditor = commandChoiceEditor(
+      "الرتب المسموحة",
+      state.commandStudio.roles || [],
+      command.allowed_roles || [],
+      "ابحث عن رتبة...",
+      "♟",
+      (item) => `@${item.name || item.id}`,
+    );
+    const channelsEditor = commandChoiceEditor(
+      "القنوات المسموحة",
+      state.commandStudio.channels || [],
+      command.allowed_channels || [],
+      "ابحث عن قناة...",
+      "#",
+      (item) => `#${item.name || item.id}`,
+    );
+    const statusSwitch = el("button", {
+      class: `studio-switch command-detail-switch${detailEnabled ? " on" : ""}`,
+      type: "button",
+      role: "switch",
+      "aria-checked": String(detailEnabled),
+      "aria-label": "حالة الأمر",
+    }, el("i"));
+    const statusCopy = el("div", { class: "command-detail-status-copy" },
+      el("strong", { text: "تفعيل الأمر" }),
+      el("small", { text: "عند التعطيل، المستخدمون لن يقدروا على استخدام هذا الأمر." }),
+    );
+    statusSwitch.onclick = () => {
+      detailEnabled = !detailEnabled;
+      statusSwitch.classList.toggle("on", detailEnabled);
+      statusSwitch.setAttribute("aria-checked", String(detailEnabled));
+    };
+    const saveDetails = async () => {
+      const policySaved = await saveCommandPolicy(
+        command,
+        detailEnabled,
+        rolesEditor.values(),
+        channelsEditor.values(),
+      );
+      if (!policySaved) return;
+      const aliasesSaved = await saveCommandShortcuts(command, shortcutInput, { deferRender: true });
+      if (aliasesSaved === false) return;
+      pulse();
+      toast("تم حفظ إعدادات الأمر وتطبيقها على السيرفر", "success", 2600);
+      closeCommandDetail();
+      renderPage();
+    };
     const modal = el("aside", { class: "modal command-detail-drawer" },
       el("div", { class: "drawer-head" },
-        el("div", {}, el("span", { class: "eyebrow", text: `${command.cog || "COMMANDS"} / POLICY` }), el("h2", { text: `/${command.command_name}` })),
+        el("div", {}, el("span", { class: "eyebrow", text: `${command.cog || "COMMANDS"} / POLICY` }), el("h2", {}, el("span", { text: visual.name }), el("small", { text: ` (${command.command_name})` }))),
         el("button", { class: "icon-action", type: "button", text: "×", title: "إغلاق", onClick: closeCommandDetail }),
       ),
       el("div", { class: "detail-status-line" },
-        el("span", { class: `status-pill ${command.enabled === false ? "off" : "on"}`, text: command.enabled === false ? "معطّل" : "مفعّل" }),
+        el("span", { class: `status-pill ${detailEnabled ? "on" : "off"}`, text: detailEnabled ? "مفعّل" : "معطّل" }),
         el("span", { class: "detail-meta", text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
       ),
+      el("p", { class: "command-detail-description", text: visual.description }),
       permissionBox,
       shortcutSection,
+      el("section", { class: "command-detail-policy" },
+        el("div", { class: "command-detail-policy-heading" },
+          el("span", { class: "command-policy-icon", text: "◉" }),
+          el("div", {}, el("strong", { text: "حالة الأمر" }), el("small", { text: "هذه القيمة تُحفظ وتُطبق على Discord" })),
+        ),
+        el("div", { class: "command-detail-status-editor" }, statusCopy, statusSwitch),
+      ),
+      rolesEditor.root,
+      channelsEditor.root,
       el("dl", { class: "command-detail-list" },
         el("div", {}, el("dt", { text: "الـ Cog" }), el("dd", { text: command.cog || "Commands" })),
-        el("div", {}, el("dt", { text: "الرتب" }), el("dd", { text: roles.length ? roles.join("، ") : "كل الرتب" })),
+        el("div", {}, el("dt", { text: "الرتب الحالية" }), el("dd", { text: roles.length ? roles.join("، ") : "كل الرتب" })),
+        el("div", {}, el("dt", { text: "القنوات الحالية" }), el("dd", { text: (command.allowed_channels || []).length ? (command.allowed_channels || []).join("، ") : "كل القنوات" })),
         el("div", {}, el("dt", { text: "اختصارات Discord" }), el("dd", { text: command.aliases?.length ? command.aliases.join("، ") : "لا توجد" })),
         el("div", {}, el("dt", { text: "آخر استخدام" }), el("dd", { text: command.last_used_at ? new Date(command.last_used_at).toLocaleString("ar") : "لا توجد بيانات" })),
       ),
@@ -1885,11 +1947,8 @@
         el("small", { class: "hint", text: "محاكاة محلية فقط؛ لا يتم إرسال رسالة إلى Discord." }),
       ),
       el("div", { class: "modal-actions" },
-        el("button", { class: "btn ghost", type: "button", text: "إغلاق", onClick: closeCommandDetail }),
-        el("button", { class: "btn primary", type: "button", text: command.enabled === false ? "تفعيل الأمر" : "تعطيل الأمر", onClick: async () => {
-          await updateCommand(command, command.enabled === false, [...commandRoles(command)]);
-          closeCommandDetail();
-        } }),
+        el("button", { class: "btn ghost", type: "button", text: "إلغاء", onClick: closeCommandDetail }),
+        el("button", { class: "btn primary command-detail-save", type: "button", text: "حفظ التعديلات ✓", onClick: saveDetails }),
       ),
     );
     back.onclick = (event) => { if (event.target === back) closeCommandDetail(); };

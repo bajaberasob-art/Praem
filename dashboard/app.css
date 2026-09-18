@@ -4092,6 +4092,46 @@ textarea {
 .simulator-response {
   color: #9ee7c2;
 }
+.command-aliases {
+  display: grid;
+  gap: 9px;
+  margin: 16px 0 4px;
+  padding: 13px;
+  border: 1px solid #16475d;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #061521, #04080d);
+}
+.command-aliases .hint {
+  margin: 0;
+  color: #8aa4b9;
+  font-size: .7rem;
+  line-height: 1.65;
+}
+.command-alias-input {
+  min-height: 64px;
+  resize: vertical;
+}
+.command-alias-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 22px;
+}
+.command-alias-chip {
+  border: 1px solid #1f7185;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #062f3d;
+  color: #a5f3fc;
+  font: .72rem ui-monospace, monospace;
+}
+.alias-count {
+  color: #67e8f9;
+  font: .68rem ui-monospace, monospace;
+}
+.alias-save-button {
+  justify-self: start;
+}
 
 /* Keep the fixed mobile dock from hiding the final card or drawer actions. */
 .app {
@@ -4108,24 +4148,38 @@ textarea {
     grid-template-columns: 1fr;
   }
   .command-row {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "select name switch"
+      "select roles roles"
+      "select status status";
+    align-items: start;
+    padding: 13px;
+    gap: 9px;
   }
   .command-row-select {
-    grid-row: 1 / span 2;
+    grid-area: select;
+    padding-top: 3px;
   }
   .command-name {
-    grid-column: 2;
+    grid-area: name;
+    align-self: center;
   }
   .command-role-picker {
-    grid-column: 2 / -1;
+    grid-area: roles;
+    padding-top: 3px;
   }
   .command-row-status {
-    grid-column: 2;
+    grid-area: status;
     justify-items: start;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
   .command-row > .studio-switch {
-    grid-column: 3;
-    grid-row: 1;
+    grid-area: switch;
+    justify-self: end;
+    align-self: center;
   }
 }
 @media (max-width: 600px) {

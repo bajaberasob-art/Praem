@@ -373,6 +373,15 @@ async def guild_meta(guild) -> dict:
                 stickers = list(fetched_stickers)
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to refresh stickers for guild %s", guild.id, exc_info=True)
+    emojis = list(getattr(guild, "emojis", ()) or ())
+    fetch_emojis = getattr(guild, "fetch_emojis", None)
+    if fetch_emojis is not None:
+        try:
+            fetched_emojis = await fetch_emojis()
+            if fetched_emojis:
+                emojis = list(fetched_emojis)
+        except (discord.Forbidden, discord.HTTPException):
+            logger.debug("Unable to refresh emojis for guild %s", guild.id, exc_info=True)
     return {
         "guild": {"id": str(guild.id), "name": guild.name, "icon": icon.url if icon else None,
                   "members": guild.member_count},
@@ -382,6 +391,17 @@ async def guild_meta(guild) -> dict:
             {"id": str(sticker.id), "name": sticker.name, "url": str(sticker.url)}
             for sticker in stickers
             if getattr(sticker, "available", True)
+        ],
+        "emojis": [
+            {
+                "id": str(emoji.id),
+                "name": emoji.name,
+                "url": str(emoji.url),
+                "animated": bool(getattr(emoji, "animated", False)),
+                "token": str(emoji),
+            }
+            for emoji in emojis
+            if getattr(emoji, "available", True)
         ],
     }
 

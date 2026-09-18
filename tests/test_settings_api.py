@@ -246,6 +246,31 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((status, data["deleted"]), (200, True))
 
+    async def test_command_shortcuts_support_multiple_aliases(self):
+        for trigger in ("عيب", "تحذير", "انجب"):
+            status, data = await call(
+                ws.api_guild_shortcut_save,
+                request(
+                    "POST",
+                    "/x",
+                    "s10",
+                    {"trigger": trigger, "target_type": "command", "target": "/warn"},
+                    self.headers,
+                ),
+            )
+            self.assertEqual((status, data["shortcut"]["trigger"], data["shortcut"]["target"]), (200, trigger, "/warn"))
+
+        status, data = await call(ws.api_guild_commands, request("GET", "/x", "s10"))
+        self.assertEqual(
+            [item["trigger"] for item in data["shortcuts"]],
+            ["عيب", "تحذير", "انجب"],
+        )
+        shortcut_id = data["shortcuts"][1]["id"]
+        delete_request = request("DELETE", "/x", "s10", headers=self.headers)
+        delete_request.match_info["shortcut_id"] = str(shortcut_id)
+        status, data = await call(ws.api_guild_shortcut_delete, delete_request)
+        self.assertEqual((status, data["deleted"]), (200, True))
+
     async def test_ticket_studio_read_and_write_contracts(self):
         status, data = await call(ws.api_guild_tickets_active, request("GET", "/x", "s10"))
         self.assertEqual((status, data["tickets"][0]["id"]), (200, 42))

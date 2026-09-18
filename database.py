@@ -1735,8 +1735,7 @@ async def create_ticket(
             """
             INSERT INTO tickets
                 (guild_id, channel_id, user_id, category_key, category_label,
-                 subject, details, support_role_ids, senior_role_ids)
-                , intake_data)
+                 subject, details, support_role_ids, senior_role_ids, intake_data)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             """,

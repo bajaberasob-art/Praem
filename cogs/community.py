@@ -16,6 +16,7 @@ from database import (
     close_ticket,
     create_ticket,
     escalate_ticket,
+    add_ticket_note,
     get_active_tickets,
     get_ticket_archive,
     get_staff_kpis,
@@ -28,6 +29,9 @@ from database import (
     delete_canned_response,
     cancel_reminder,
     record_ticket_response,
+    record_ticket_user_message,
+    set_ticket_status,
+    get_ticket_notes,
     save_ticket_panel,
     save_ticket_rating,
     save_ticket_transcript,
@@ -112,8 +116,22 @@ class TicketCategoryModal(discord.ui.Modal):
             max_length=4000,
             required=True,
         )
+        self.extra_inputs = []
+        for index, raw in enumerate(category.get("intake_fields", [])[:3]):
+            if not isinstance(raw, dict):
+                continue
+            label = str(raw.get("label") or f"معلومة إضافية {index + 1}")[:45]
+            field = discord.ui.TextInput(
+                label=label,
+                placeholder=str(raw.get("placeholder") or "")[:100],
+                max_length=500,
+                required=bool(raw.get("required", False)),
+            )
+            self.extra_inputs.append((str(raw.get("key") or f"field_{index + 1}")[:40], field))
         self.add_item(self.subject)
         self.add_item(self.details)
+        for _, field in self.extra_inputs:
+            self.add_item(field)
 
     async def on_submit(self, itx: discord.Interaction):
         cog = itx.client.get_cog("Community")
@@ -126,6 +144,7 @@ class TicketCategoryModal(discord.ui.Modal):
             self.category,
             str(self.subject),
             str(self.details),
+            {key: str(field) for key, field in self.extra_inputs if str(field).strip()},
         )
 
 
@@ -145,6 +164,22 @@ class CloseTicketModal(discord.ui.Modal, title="إغلاق وأرشفة التذ
                 "⚠️ نظام التذاكر غير متاح حالياً.", ephemeral=True
             )
         await cog.close_ticket_from_interaction(itx, str(self.reason))
+
+
+class InternalNoteModal(discord.ui.Modal, title="إضافة ملاحظة داخلية"):
+    note = discord.ui.TextInput(
+        label="الملاحظة",
+        placeholder="لن تظهر هذه الملاحظة لصاحب التذكرة",
+        style=discord.TextStyle.paragraph,
+        max_length=2000,
+        required=True,
+    )
+
+    async def on_submit(self, itx: discord.Interaction):
+        cog = itx.client.get_cog("Community")
+        if cog is None:
+            return await itx.response.send_message("نظام التذاكر غير متاح حالياً.", ephemeral=True)
+        await cog.add_internal_note_from_interaction(itx, str(self.note))
 
 
 class TicketPanelView(discord.ui.View):
@@ -205,6 +240,28 @@ class TicketControlView(discord.ui.View):
         cog = await self._cog(itx)
         if cog:
             await cog.show_close_modal(itx)
+
+    @discord.ui.button(
+        label="بانتظار العميل",
+        style=discord.ButtonStyle.secondary,
+        emoji="⏳",
+        custom_id="ticket:waiting-user",
+    )
+    async def waiting_user(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.set_ticket_status_from_interaction(itx, "waiting_user")
+
+    @discord.ui.button(
+        label="ملاحظة داخلية",
+        style=discord.ButtonStyle.secondary,
+        emoji="📝",
+        custom_id="ticket:internal-note",
+    )
+    async def internal_note(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.show_internal_note_modal(itx)
 
 
 class TicketRatingView(discord.ui.View):
@@ -485,6 +542,9 @@ class Community(commands.Cog):
     async def get_canned_responses(self, guild_id: int) -> list[dict]:
         return await get_canned_responses(guild_id)
 
+    async def get_ticket_notes(self, guild_id: int, ticket_id: int) -> list[dict]:
+        return await get_ticket_notes(guild_id, ticket_id)
+
     async def save_canned_response(
         self,
         guild_id: int,
@@ -500,6 +560,11 @@ class Community(commands.Cog):
 
     async def delete_canned_response(self, guild_id: int, response_id: int) -> bool:
         return await delete_canned_response(guild_id, response_id)
+
+    async def add_internal_note(
+        self, guild_id: int, ticket_id: int, staff_id: int, content: str
+    ) -> dict | None:
+        return await add_ticket_note(guild_id, ticket_id, staff_id, content)
 
     async def reassign_ticket(
         self,
@@ -569,6 +634,7 @@ class Community(commands.Cog):
         category: dict,
         subject: str,
         details: str,
+        intake_data: dict | None = None,
     ) -> dict | None:
         guild = itx.guild
         if guild is None:
@@ -631,6 +697,7 @@ class Community(commands.Cog):
             details,
             category.get("support_role_ids"),
             category.get("senior_role_ids"),
+            intake_data=intake_data,
         )
         embed = self._ticket_embed(ticket)
         message = await channel.send(
@@ -666,6 +733,17 @@ class Community(commands.Cog):
         )
         embed.add_field(name="الموضوع", value=ticket["subject"], inline=False)
         embed.add_field(name="الأولوية", value=priority, inline=True)
+        embed.add_field(
+            name="الحالة",
+            value={
+                "active": "🟢 قيد المعالجة",
+                "waiting_user": "⏳ بانتظار العميل",
+                "waiting_staff": "📥 بانتظار فريق الدعم",
+            }.get(ticket.get("status"), "🟢 قيد المعالجة"),
+            inline=True,
+        )
+        for key, value in list(ticket.get("intake_data", {}).items())[:3]:
+            embed.add_field(name=str(key)[:256], value=str(value)[:1024] or "—", inline=True)
         embed.add_field(
             name="التعليمات",
             value="استلم التذكرة، صعّدها عند الحاجة، ثم أغلقها بعد حل الطلب.",
@@ -727,6 +805,36 @@ class Community(commands.Cog):
         await itx.response.send_message(
             f"🚨 تم تحديث الأولوية إلى: **{priority}**.", ephemeral=True
         )
+
+    async def set_ticket_status_from_interaction(
+        self, itx: discord.Interaction, status: str
+    ):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] == "closed":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        ticket = await set_ticket_status(itx.guild.id, ticket["id"], status, staff_id=itx.user.id)
+        labels = {"active": "قيد المعالجة", "waiting_user": "بانتظار العميل", "waiting_staff": "بانتظار فريق الدعم"}
+        await itx.channel.edit(topic=f"Ticket • {ticket['category_label']} • {labels[status]}")
+        await itx.response.send_message(f"تم تحديث الحالة إلى: **{labels[status]}**.", ephemeral=True)
+
+    async def show_internal_note_modal(self, itx: discord.Interaction):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or ticket["status"] == "closed":
+            return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        await itx.response.send_modal(InternalNoteModal())
+
+    async def add_internal_note_from_interaction(self, itx: discord.Interaction, content: str):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket or not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        note = await self.add_internal_note(itx.guild.id, ticket["id"], itx.user.id, content)
+        if not note:
+            return await itx.response.send_message("تعذر حفظ الملاحظة.", ephemeral=True)
+        await itx.response.send_message("📝 تم حفظ الملاحظة الداخلية.", ephemeral=True)
 
     async def show_close_modal(self, itx: discord.Interaction):
         ticket = await get_ticket_by_channel(itx.channel.id)
@@ -836,12 +944,11 @@ class Community(commands.Cog):
         if message.author.bot or message.guild is None:
             return
         ticket = await get_ticket_by_channel(message.channel.id)
-        if (
-            ticket
-            and ticket["status"] == "active"
-            and message.author.id != ticket["user_id"]
-            and self._is_ticket_staff(message.author, ticket)
-        ):
+        if not ticket or ticket["status"] == "closed":
+            return
+        if message.author.id == ticket["user_id"]:
+            await record_ticket_user_message(ticket["guild_id"], ticket["id"])
+        elif self._is_ticket_staff(message.author, ticket):
             await record_ticket_response(ticket["guild_id"], ticket["id"])
 
     @tasks.loop(minutes=10)

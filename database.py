@@ -213,6 +213,17 @@ async def init_db() -> None:
                 "ON economy_transactions(guild_id, created_at DESC);"
             )
             await db.execute("""
+                CREATE TABLE IF NOT EXISTS tournament_scores (
+                    guild_id INTEGER NOT NULL,
+                    team_name TEXT NOT NULL,
+                    points INTEGER NOT NULL DEFAULT 0,
+                    wins INTEGER NOT NULL DEFAULT 0,
+                    losses INTEGER NOT NULL DEFAULT 0,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, team_name)
+                );
+            """)
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS invite_stats (
                     guild_id INTEGER NOT NULL,
                     inviter_id INTEGER NOT NULL,
@@ -796,6 +807,54 @@ async def get_economy_leaderboard(
             FROM users
             WHERE guild_id = ?
             ORDER BY total DESC, level DESC, xp DESC
+            LIMIT ?
+            """,
+            (int(guild_id), limit),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def record_tournament_score(
+    guild_id: int,
+    winner_team: str,
+    loser_team: str,
+) -> None:
+    async with connect() as db:
+        for team, won in ((winner_team, True), (loser_team, False)):
+            await db.execute(
+                """
+                INSERT INTO tournament_scores
+                    (guild_id, team_name, points, wins, losses)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, team_name) DO UPDATE SET
+                    points = tournament_scores.points + excluded.points,
+                    wins = tournament_scores.wins + excluded.wins,
+                    losses = tournament_scores.losses + excluded.losses,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(guild_id),
+                    str(team)[:100],
+                    3 if won else 0,
+                    1 if won else 0,
+                    0 if won else 1,
+                ),
+            )
+        await db.commit()
+
+
+async def get_tournament_scores(
+    guild_id: int,
+    limit: int = 25,
+) -> list[Dict[str, Any]]:
+    limit = max(1, min(int(limit), 50))
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT team_name, points, wins, losses
+            FROM tournament_scores
+            WHERE guild_id = ?
+            ORDER BY points DESC, wins DESC, team_name ASC
             LIMIT ?
             """,
             (int(guild_id), limit),

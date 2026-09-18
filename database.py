@@ -381,6 +381,22 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_ticket_ratings_staff "
                 "ON ticket_ratings(guild_id, staff_id);"
             )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS canned_responses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'عام',
+                    created_by INTEGER DEFAULT NULL,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (guild_id, title)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_canned_responses_guild "
+                "ON canned_responses(guild_id, updated_at DESC);"
+            )
 
             await db.commit()
             logger.info("[DB] جميع الجداول والفهارس تعمل بكفاءة عالية.")
@@ -1386,6 +1402,52 @@ async def get_ticket_transcripts(
             return [dict(row) for row in await cur.fetchall()]
 
 
+async def get_ticket_archive(
+    guild_id: int,
+    query: str = "",
+) -> list[dict[str, Any]]:
+    value = str(query).strip()
+    pattern = f"%{value}%"
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT t.*, tt.id AS transcript_id, tt.created_at AS transcript_created_at
+            FROM tickets t
+            LEFT JOIN ticket_transcripts tt ON tt.ticket_id = t.id
+            WHERE t.guild_id = ? AND t.status = 'closed'
+              AND (
+                ? = '' OR t.subject LIKE ? OR t.category_label LIKE ?
+                OR t.close_reason LIKE ?
+              )
+            ORDER BY t.closed_at DESC, t.id DESC
+            LIMIT 200
+            """,
+            (int(guild_id), value, pattern, pattern, pattern),
+        ) as cur:
+            return [_ticket_row(dict(row)) for row in await cur.fetchall()]
+
+
+async def get_ticket_transcript(
+    guild_id: int,
+    ticket_id: int,
+) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT tt.*, t.user_id, t.category_label, t.subject, t.closed_by,
+                   t.close_reason
+            FROM ticket_transcripts tt
+            JOIN tickets t ON t.id = tt.ticket_id
+            WHERE tt.guild_id = ? AND tt.ticket_id = ?
+            ORDER BY tt.id DESC
+            LIMIT 1
+            """,
+            (int(guild_id), int(ticket_id)),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def save_ticket_rating(
     ticket_id: int,
     guild_id: int,
@@ -1454,6 +1516,86 @@ async def get_staff_kpis(guild_id: int) -> list[dict[str, Any]]:
             (int(guild_id),),
         ) as cur:
             return [dict(row) for row in await cur.fetchall()]
+
+
+async def get_canned_responses(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, title, content, category, created_by, updated_at
+            FROM canned_responses
+            WHERE guild_id = ?
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def save_canned_response(
+    guild_id: int,
+    title: str,
+    content: str,
+    category: str = "عام",
+    created_by: int | str | None = None,
+    response_id: int | None = None,
+) -> dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        if response_id is not None:
+            cursor = await db.execute(
+                """
+                UPDATE canned_responses
+                SET title = ?, content = ?, category = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ? AND id = ?
+                """,
+                (
+                    str(title)[:120], str(content)[:2000], str(category)[:80],
+                    int(guild_id), int(response_id),
+                ),
+            )
+        else:
+            cursor = await db.execute(
+                """
+                INSERT INTO canned_responses
+                    (guild_id, title, content, category, created_by)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, title) DO UPDATE SET
+                    content = excluded.content,
+                    category = excluded.category,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(guild_id), str(title)[:120], str(content)[:2000],
+                    str(category)[:80],
+                    int(created_by) if created_by is not None else None,
+                ),
+            )
+        if response_id is not None and cursor.rowcount == 0:
+            await db.commit()
+            return {}
+        async with db.execute(
+            """
+            SELECT id, guild_id, title, content, category, created_by, updated_at
+            FROM canned_responses
+            WHERE guild_id = ? AND title = ?
+            """,
+            (int(guild_id), str(title)[:120]),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return dict(row) if row else {}
+
+
+async def delete_canned_response(guild_id: int, response_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM canned_responses WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(response_id)),
+        )
+        deleted = cursor.rowcount > 0
+        await db.commit()
+    return deleted
 
 
 async def get_recent_warnings(guild_id: int, limit: int = 50) -> List[Dict[str, Any]]:

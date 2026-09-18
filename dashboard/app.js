@@ -31,6 +31,9 @@
     revision: null,
     updated: null,
     onboarding: null,
+    commandStudio: { commands: [], roles: [], channels: [] },
+    autoResponses: [],
+    commandSearch: "",
     selfRoleBuilder: null,
     onboardingPreviewTimer: null,
     fields: {},
@@ -1131,6 +1134,361 @@
     );
     return section;
   }
+  function pulse() {
+    navigator.vibrate?.(10);
+  }
+  function commandRoles(command) {
+    return new Set((command.allowed_roles || []).map(String));
+  }
+  function commandRows() {
+    const query = state.commandSearch.trim().toLowerCase();
+    const commands = (state.commandStudio.commands || []).filter((command) =>
+      !query ||
+      command.command_name.toLowerCase().includes(query) ||
+      String(command.cog || "").toLowerCase().includes(query),
+    );
+    const groups = new Map();
+    commands.forEach((command) => {
+      const key = command.cog || "Commands";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(command);
+    });
+    const root = el("div", { id: "command-rows", class: "command-groups" });
+    if (!commands.length) {
+      root.append(el("div", { class: "empty studio-empty", text: "لا توجد أوامر مطابقة للبحث" }));
+      return root;
+    }
+    groups.forEach((items, cog) => {
+      const group = el("section", { class: "command-group" });
+      group.append(el("div", { class: "command-group-title" }, el("span", { text: cog }), el("small", { text: `${items.length} أمر` })));
+      items.forEach((command) => {
+        const roles = commandRoles(command);
+        const roleWrap = el("div", { class: "command-role-tags" });
+        (state.commandStudio.roles || []).forEach((role) => {
+          const active = roles.has(String(role.id));
+          const tag = el("button", {
+            class: `role-tag${active ? " active" : ""}`,
+            type: "button",
+            title: active ? "إزالة الرتبة" : "السماح للرتبة",
+            text: `@${role.name}`,
+          });
+          tag.onclick = () => {
+            pulse();
+            const next = new Set(roles);
+            if (next.has(String(role.id))) next.delete(String(role.id));
+            else next.add(String(role.id));
+            updateCommand(command, command.enabled, [...next]);
+          };
+          roleWrap.append(tag);
+        });
+        const toggleButton = el("button", {
+          class: `studio-switch${command.enabled ? " on" : ""}`,
+          type: "button",
+          role: "switch",
+          "aria-checked": String(!!command.enabled),
+          "aria-label": `تفعيل ${command.command_name}`,
+        }, el("i"));
+        toggleButton.onclick = () => {
+          pulse();
+          updateCommand(command, !command.enabled, [...roles]);
+        };
+        group.append(el("article", { class: "command-row" },
+          el("div", { class: "command-name" },
+            el("strong", { text: `/${command.command_name}` }),
+            el("small", { text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
+          ),
+          el("div", { class: "command-role-picker" },
+            el("span", { class: "command-role-label", text: "الرتب المسموحة — اتركها فارغة للجميع" }),
+            roleWrap,
+          ),
+          toggleButton,
+        ));
+      });
+      root.append(group);
+    });
+    return root;
+  }
+  async function updateCommand(command, enabled, allowedRoles) {
+    try {
+      const r = await api(`api/guild/${state.guild.id}/commands/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
+        body: JSON.stringify({
+          command_name: command.command_name,
+          enabled,
+          allowed_roles: allowedRoles,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast(data.fields ? Object.values(data.fields)[0] : "تعذر تحديث صلاحية الأمر");
+        return;
+      }
+      Object.assign(command, data.command);
+      toast(`✅ تم ${enabled ? "تفعيل" : "تعطيل"} /${command.command_name}`, "success", 2200);
+      renderPage();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بالخادم");
+    }
+  }
+  async function saveCommandPrefix(input, feedback) {
+    const value = input.value.trim();
+    if (!value || value.length > 5 || /\s/.test(value)) {
+      feedback.textContent = "استخدم prefix من 1 إلى 5 أحرف بدون مسافات";
+      feedback.className = "prefix-feedback bad";
+      return;
+    }
+    try {
+      const r = await api(`api/guild/${state.guild.id}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
+        body: JSON.stringify({ revision: state.revision, changes: { prefix: value } }),
+      });
+      const data = await r.json();
+      if (r.ok && data.revision != null) {
+        state.baseline = { ...state.baseline, prefix: data.settings.prefix };
+        state.draft = { ...state.draft, prefix: data.settings.prefix };
+        state.revision = data.revision;
+        feedback.textContent = "تم تطبيق prefix فورياً";
+        feedback.className = "prefix-feedback good";
+        pulse();
+        toast("✅ تم تحديث prefix", "success", 2200);
+        setTimeout(() => renderPage(), 700);
+      } else if (r.status === 409) {
+        feedback.textContent = "توجد نسخة أحدث من الإعدادات، أعد المحاولة";
+        feedback.className = "prefix-feedback bad";
+      } else {
+        feedback.textContent = data.fields?.prefix || "تعذر حفظ prefix";
+        feedback.className = "prefix-feedback bad";
+      }
+    } catch (error) {
+      if (error.message !== "unauth") {
+        feedback.textContent = "تعذر الاتصال بالخادم";
+        feedback.className = "prefix-feedback bad";
+      }
+    }
+  }
+  function insertVariable(textarea, value) {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    textarea.setRangeText(value, start, end, "end");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    pulse();
+  }
+  function setRuleForm(rule = null) {
+    const form = $("#auto-responder-form");
+    if (!form) return;
+    form.dataset.ruleId = rule?.id || "";
+    form.elements.trigger.value = rule?.trigger || "";
+    form.elements.response.value = rule?.response || "";
+    form.elements.cooldown_seconds.value = rule?.cooldown_seconds ?? 5;
+    form.elements.channel_id.value = rule?.channel_id || "";
+    form.querySelectorAll("[data-match-type]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.matchType === (rule?.match_type || "exact"));
+    });
+    const title = $("#auto-form-title");
+    if (title) title.textContent = rule ? "تعديل قاعدة الرد" : "إنشاء رد تلقائي";
+    form.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  async function saveAutoResponder(form) {
+    const selected = form.querySelector(".match-badge.active")?.dataset.matchType || "exact";
+    const body = {
+      trigger: form.elements.trigger.value.trim(),
+      match_type: selected,
+      response: form.elements.response.value,
+      cooldown_seconds: Number(form.elements.cooldown_seconds.value),
+      channel_id: form.elements.channel_id.value || null,
+    };
+    if (!body.trigger || !body.response.trim()) {
+      toast("أدخل المشغل ونص الرد");
+      return;
+    }
+    try {
+      const r = await api(`api/guild/${state.guild.id}/auto-responses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ قاعدة الرد");
+        return;
+      }
+      const index = state.autoResponses.findIndex((item) => String(item.id) === String(data.rule.id));
+      if (index >= 0) state.autoResponses[index] = data.rule;
+      else state.autoResponses.push(data.rule);
+      pulse();
+      toast("✅ تم حفظ قاعدة الرد وتفعيلها", "success", 2500);
+      renderPage();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بالخادم");
+    }
+  }
+  async function deleteAutoResponder(rule) {
+    if (!confirm(`حذف قاعدة «${rule.trigger}»؟`)) return;
+    try {
+      const r = await api(`api/guild/${state.guild.id}/auto-responses/${rule.id}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": state.session.csrf },
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        toast(data.error === "auto_responder_not_found" ? "القاعدة غير موجودة" : "تعذر حذف القاعدة");
+        return;
+      }
+      state.autoResponses = state.autoResponses.filter((item) => String(item.id) !== String(rule.id));
+      pulse();
+      toast("تم حذف قاعدة الرد", "success", 2200);
+      renderPage();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بالخادم");
+    }
+  }
+  function commandsView() {
+    const studio = state.commandStudio || { commands: [], roles: [], channels: [] };
+    const prefixInput = el("input", {
+      class: "prefix-input",
+      value: state.draft?.prefix || "!",
+      maxlength: "5",
+      "aria-label": "بادئة الأوامر",
+    });
+    const prefixFeedback = el("span", { class: "prefix-feedback", text: "يؤثر فوراً على أوامر السيرفر" });
+    const prefixForm = el("form", { class: "prefix-pill" },
+      el("div", { class: "prefix-mark", text: "⌁" }),
+      el("div", { class: "prefix-copy" },
+        el("span", { class: "eyebrow", text: "DYNAMIC PREFIX" }),
+        el("strong", { text: "بادئة الأوامر" }),
+        prefixFeedback,
+      ),
+      prefixInput,
+      el("button", { class: "btn prefix-save", type: "submit", text: "تطبيق" }),
+    );
+    prefixForm.onsubmit = (event) => {
+      event.preventDefault();
+      saveCommandPrefix(prefixInput, prefixFeedback);
+    };
+    const search = el("input", {
+      class: "studio-search",
+      type: "search",
+      placeholder: "ابحث عن أمر أو Cog…",
+      value: state.commandSearch,
+      "aria-label": "بحث في الأوامر",
+    });
+    search.oninput = () => {
+      state.commandSearch = search.value;
+      const rows = $("#command-rows");
+      if (rows) rows.replaceWith(commandRows());
+    };
+    const commandPanel = card("مصفوفة صلاحيات الأوامر",
+      el("div", { class: "command-panel" },
+        el("div", { class: "panel-intro" },
+          el("p", { text: "تحكم في الأوامر حسب الـ Cog واربط كل أمر بالرتب المسموحة. اترك الرتب فارغة للسماح للجميع." }),
+          search,
+        ),
+        commandRows(),
+      ),
+    );
+    const form = el("form", { id: "auto-responder-form", class: "auto-form" },
+      el("div", { class: "auto-form-heading" },
+        el("div", { class: "eyebrow", text: "TRIGGER ENGINE" }),
+        el("h3", { id: "auto-form-title", text: "إنشاء رد تلقائي" }),
+        el("p", { text: "حوّل الكلمات المتكررة إلى ردود ذكية قابلة للتخصيص." }),
+      ),
+      el("label", { text: "المشغل" }),
+      el("input", { name: "trigger", class: "studio-input", maxlength: "500", placeholder: "مثال: مرحباً أو ^help$" }),
+      el("label", { text: "نوع المطابقة" }),
+      el("div", { class: "match-badges" },
+        ["exact", "contains", "regex"].map((type, index) => {
+          const labels = { exact: "مطابقة تامة", contains: "يحتوي على الكلمة", regex: "تعبير نمطي Regex" };
+          const button = el("button", {
+            class: `match-badge${index === 0 ? " active" : ""}`,
+            type: "button",
+            "data-match-type": type,
+            text: labels[type],
+          });
+          button.onclick = () => {
+            form.querySelectorAll("[data-match-type]").forEach((item) => item.classList.remove("active"));
+            button.classList.add("active");
+            pulse();
+          };
+          return button;
+        }),
+      ),
+      el("label", { text: "نص الرد" }),
+      el("textarea", { name: "response", class: "studio-textarea", maxlength: "2000", placeholder: "اكتب الرد هنا…" }),
+      el("div", { class: "variable-strip" },
+        el("span", { text: "إدراج سريع:" }),
+        ["{user}", "{channel}", "{server}", "{random:نعم|لا}"].map((variable) => {
+          const chip = el("button", { class: "variable-chip", type: "button", text: variable });
+          chip.onclick = () => insertVariable(form.elements.response, variable);
+          return chip;
+        }),
+      ),
+      el("div", { class: "auto-form-grid" },
+        el("label", {}, "التبريد",
+          el("input", { name: "cooldown_seconds", type: "range", min: "0", max: "60", step: "1", value: "5" }),
+          el("output", { class: "range-output", text: "5s" }),
+        ),
+        el("label", {}, "نطاق القناة",
+          el("select", { name: "channel_id", class: "studio-input" },
+            el("option", { value: "" }, "كل القنوات"),
+            (studio.channels || []).map((channel) => el("option", { value: channel.id }, `#${channel.name}`)),
+          ),
+        ),
+      ),
+      el("div", { class: "auto-form-actions" },
+        el("button", { class: "btn primary", type: "submit", text: "حفظ القاعدة" }),
+        el("button", { class: "btn ghost", type: "button", text: "مسح", onClick: () => setRuleForm() }),
+      ),
+    );
+    form.elements.cooldown_seconds.oninput = () => {
+      form.querySelector(".range-output").textContent = `${form.elements.cooldown_seconds.value}s`;
+    };
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      saveAutoResponder(form);
+    };
+    const cards = el("div", { class: "trigger-grid" });
+    if (!state.autoResponses.length) {
+      cards.append(el("div", { class: "empty studio-empty", text: "لا توجد ردود تلقائية مفعّلة بعد" }));
+    } else {
+      state.autoResponses.forEach((rule) => {
+        const cardNode = el("article", { class: "trigger-card" },
+          el("div", { class: "trigger-card-top" },
+            el("span", { class: "trigger-type", text: rule.match_type }),
+            el("span", { class: "trigger-count", text: `${rule.execution_count || 0} تنفيذ` }),
+          ),
+          el("h4", { text: rule.trigger }),
+          el("p", { text: rule.response }),
+          el("small", { text: `${rule.channel_id ? "قناة محددة" : "كل القنوات"} · تبريد ${rule.cooldown_seconds}s` }),
+          el("div", { class: "trigger-actions" },
+            el("button", { class: "icon-action", type: "button", title: "نسخ المشغل", text: "⧉", onClick: () => navigator.clipboard?.writeText(rule.trigger).then(() => toast("تم نسخ المشغل", "success", 1600)) }),
+            el("button", { class: "icon-action", type: "button", title: "تعديل", text: "✎", onClick: () => setRuleForm(rule) }),
+            el("button", { class: "icon-action danger", type: "button", title: "حذف", text: "⌫", onClick: () => deleteAutoResponder(rule) }),
+          ),
+        );
+        cards.append(cardNode);
+      });
+    }
+    return el("section", { id: "view-commands", class: "commands-view" },
+      el("div", { class: "studio-hero commands-hero" },
+        el("div", { class: "eyebrow", text: `${state.guild.name} / COMMANDS` }),
+        el("h2", { text: "استوديو الأوامر والاختصارات" }),
+        el("p", { text: "اضبط الوصول، بدّل prefix فورياً، وابنِ ردوداً تلقائية بواجهة AMOLED سريعة وواضحة." }),
+      ),
+      prefixForm,
+      commandPanel,
+      card("Visual Auto-Responder Studio", form),
+      el("section", { class: "active-trigger-section" },
+        el("div", { class: "section-heading" },
+          el("div", {}, el("div", { class: "eyebrow", text: "LIVE REGISTRY" }), el("h3", { text: "Active Triggers" })),
+          el("span", { class: "live-dot", text: `${state.autoResponses.length} مفعّل` }),
+        ),
+        cards,
+      ),
+    );
+  }
   function renderPage() {
     const main = $("#main");
     main.replaceChildren();
@@ -1163,7 +1521,7 @@
         }),
       ),
     );
-    main.append(onboardingView(), securityView());
+    main.append(commandsView(), onboardingView(), securityView());
     const general = el("div", { class: "fields" });
     general.append(
       input("prefix", "بادئة الأوامر", "text", {

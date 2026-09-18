@@ -1,2 +1,3 @@
 - [Dashboard settings & DB conventions](dashboard-settings-design.md) — revision-based conflicts, commit-then-publish cache, live 0x8 re-checks, relative URLs, OAuth-free browser harness.
 - [Engagement onboarding rules](engagement-onboarding.md) — serialize invite comparisons and restore persistent component views after every ready event.
+- [Command orchestrator architecture](command-orchestrator.md) — dynamic prefixes, Slash-aware policy checks, and ready-time trigger hydration.

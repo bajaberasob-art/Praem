@@ -323,13 +323,24 @@ def public_settings(snapshot: dict) -> dict:
     return {"revision": snapshot["revision"], "updated_at": snapshot["updated_at"], "settings": settings}
 
 
-def guild_meta(guild) -> dict:
+async def guild_meta(guild) -> dict:
     icon = getattr(guild, "icon", None)
     me = guild.me
     top = me.top_role if me else None
+    text_channels = list(guild.text_channels)
+    try:
+        fetched_channels = await guild.fetch_channels()
+        fetched_text = [
+            channel for channel in fetched_channels
+            if isinstance(channel, discord.TextChannel)
+        ]
+        if fetched_text:
+            text_channels = fetched_text
+    except (discord.Forbidden, discord.HTTPException):
+        logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
     channels = [
         {"id": str(c.id), "name": c.name, "category": c.category.name if c.category else None}
-        for c in sorted(guild.text_channels, key=lambda c: (c.category.position if c.category else -1, c.position))
+        for c in sorted(text_channels, key=lambda c: (c.category.position if c.category else -1, c.position))
     ]
     roles = []
     for role in sorted(guild.roles, key=lambda r: -r.position):
@@ -347,7 +358,20 @@ def guild_meta(guild) -> dict:
     }
 
 
-def validate_changes(guild, changes: dict) -> tuple[dict, dict]:
+async def resolve_text_channel(guild, channel_id: int):
+    channel = guild.get_channel(int(channel_id))
+    if isinstance(channel, discord.TextChannel):
+        return channel
+    try:
+        for fetched in await guild.fetch_channels():
+            if fetched.id == int(channel_id) and isinstance(fetched, discord.TextChannel):
+                return fetched
+    except (discord.Forbidden, discord.HTTPException):
+        logger.debug("Unable to fetch channel %s in guild %s", channel_id, guild.id, exc_info=True)
+    return None
+
+
+async def validate_changes(guild, changes: dict) -> tuple[dict, dict]:
     """تنقية المدخلات: مفاتيح مسموحة فقط، أنواع/حدود صحيحة، وقنوات/رتب تخص هذا السيرفر."""
     clean, errors = {}, {}
     if not isinstance(changes, dict) or len(changes) > len(SETTINGS_SCHEMA):
@@ -362,8 +386,8 @@ def validate_changes(guild, changes: dict) -> tuple[dict, dict]:
             errors[key] = str(error)
             continue
         if value is not None and key.endswith("_channel_id"):
-            channel = guild.get_channel(value)
-            if not isinstance(channel, discord.TextChannel):
+            channel = await resolve_text_channel(guild, value)
+            if channel is None:
                 errors[key] = "القناة غير موجودة في هذا السيرفر"
                 continue
         if value is not None and key.endswith("_role_id"):
@@ -396,7 +420,7 @@ async def api_health(req):
 @routes.get('/api/guild/{guild_id}/meta')
 async def api_guild_meta(req):
     _, guild = await authorize(req)
-    return web.json_response(guild_meta(guild))
+    return web.json_response(await guild_meta(guild))
 
 
 def _utilities_cog():
@@ -429,11 +453,9 @@ async def api_guild_commands(req):
     if utilities is None:
         return json_error(503, "utilities_unavailable")
     status = await utilities.get_guild_commands_status(guild.id)
-    status["roles"] = guild_meta(guild)["roles"]
-    status["channels"] = [
-        {"id": str(channel.id), "name": channel.name}
-        for channel in guild.text_channels
-    ]
+    meta = await guild_meta(guild)
+    status["roles"] = meta["roles"]
+    status["channels"] = meta["channels"]
     return web.json_response(status)
 
 
@@ -1023,7 +1045,7 @@ async def api_post_onboarding(req):
             "validation",
             fields={str(key): "حقل غير مسموح في استوديو الترحيب" for key in unknown},
         )
-    clean, errors = validate_changes(guild, changes)
+    clean, errors = await validate_changes(guild, changes)
     if errors:
         return json_error(400, "validation", fields=errors)
     try:
@@ -1145,7 +1167,7 @@ async def api_post_settings(req):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict) or not isinstance(body.get("revision"), int) or isinstance(body.get("revision"), bool):
         return json_error(400, "validation", fields={"_": "رقم الإصدار مطلوب"})
-    clean, errors = validate_changes(guild, body.get("changes", {}))
+    clean, errors = await validate_changes(guild, body.get("changes", {}))
     if errors:
         return json_error(400, "validation", fields=errors)
     if not clean:

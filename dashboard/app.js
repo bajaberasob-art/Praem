@@ -462,7 +462,8 @@
     let choices = type === "channel" ? state.meta.channels : state.meta.roles,
       active = 0;
     const value = () => state.draft[key];
-    const nameFor = (id) => choices.find((x) => x.id === id);
+    const nameFor = (id) =>
+      choices.find((x) => String(x.id) === String(id));
     function display() {
       const found = nameFor(value());
       let current;

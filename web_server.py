@@ -890,17 +890,37 @@ async def api_guild_tickets_canned(req):
     title = str(body.get("title", "")).strip()
     content = str(body.get("content", "")).strip()
     category = str(body.get("category", "عام")).strip()
+    shortcut = str(body.get("shortcut") or "").strip() or None
+    sticker_id = body.get("sticker_id")
     response_id = body.get("id")
     if not title or len(title) > 120:
         return json_error(400, "validation", fields={"title": "العنوان يجب أن يكون بين 1 و120 حرفاً"})
     if not content or len(content) > 2000:
         return json_error(400, "validation", fields={"content": "النص يجب أن يكون بين 1 و2000 حرف"})
+    if shortcut and len(shortcut) > 80:
+        return json_error(400, "validation", fields={"shortcut": "الاختصار يجب ألا يتجاوز 80 حرفاً"})
+    if sticker_id in ("", None):
+        sticker_id = None
+    else:
+        try:
+            sticker_id = int(sticker_id)
+        except (TypeError, ValueError):
+            return json_error(400, "validation", fields={"sticker_id": "معرف الملصق غير صالح"})
+        if await resolve_guild_sticker(guild, sticker_id) is None:
+            return json_error(400, "validation", fields={"sticker_id": "ملصق السيرفر غير موجود أو غير متاح"})
     try:
         response_id = int(response_id) if response_id not in (None, "") else None
     except (TypeError, ValueError):
         return json_error(400, "validation", fields={"id": "معرف الرد غير صالح"})
     result = await community.save_canned_response(
-        guild.id, title, content, category, session["id"], response_id
+        guild.id,
+        title,
+        content,
+        category,
+        session["id"],
+        response_id,
+        shortcut,
+        sticker_id,
     )
     if not result:
         return json_error(404, "canned_not_found")

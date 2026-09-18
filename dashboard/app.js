@@ -292,21 +292,33 @@
   }
   function mobileNav() {
     const primary = ["overview", "tickets", "commands"];
-    return el(
-      "nav",
-      { class: "mobile-nav", "aria-label": "التنقل السريع" },
-      ...primary.map((view) => navButton(view)),
-      el(
-        "button",
-        {
-          class: `nav-item ${["onboarding", "security", "settings"].includes(state.activeView) ? "active" : ""}`,
-          type: "button",
-          "data-nav-view": "more",
-          onClick: () => navigateView(state.activeView === "settings" ? "overview" : "settings"),
+    const moreMenu = el(
+      "div",
+      { class: "mobile-more-menu", hidden: true },
+      navButton("onboarding"),
+      navButton("security"),
+      navButton("settings"),
+    );
+    const moreButton = el(
+      "button",
+      {
+        class: `nav-item ${["onboarding", "security", "settings"].includes(state.activeView) ? "active" : ""}`,
+        type: "button",
+        "aria-expanded": "false",
+        onClick: () => {
+          const open = moreMenu.hidden;
+          moreMenu.hidden = !open;
+          moreButton.setAttribute("aria-expanded", String(open));
         },
-        el("span", { class: "nav-icon", text: "•••", "aria-hidden": "true" }),
-        el("span", { class: "nav-copy" }, el("b", { text: "المزيد" }), el("small", { text: "إدارة" })),
-      ),
+      },
+      el("span", { class: "nav-icon", text: "•••", "aria-hidden": "true" }),
+      el("span", { class: "nav-copy" }, el("b", { text: "المزيد" }), el("small", { text: "إدارة" })),
+    );
+    return el(
+      "div",
+      { class: "mobile-nav-wrap" },
+      moreMenu,
+      el("nav", { class: "mobile-nav", "aria-label": "التنقل السريع" }, ...primary.map((view) => navButton(view)), moreButton),
     );
   }
   function updatePing(kind = "online", latency = null) {
@@ -1851,6 +1863,163 @@
       ),
     );
   }
+  function overviewMetric(label, value, hint, tone, view) {
+    return el(
+      "button",
+      {
+        class: `overview-metric metric-${tone}`,
+        type: "button",
+        onClick: () => navigateView(view),
+      },
+      el("span", { class: "metric-label", text: label }),
+      el("strong", { text: String(value) }),
+      el("small", { text: hint }),
+    );
+  }
+  function overviewView() {
+    const activeTickets = state.tickets.active.length;
+    const openIncidents = state.incidents.length;
+    const enabledCommands = state.commandStudio.commands.filter((command) => command.enabled !== false).length;
+    const responders = state.autoResponses.length;
+    const latestIncidents = state.incidents.slice().reverse().slice(0, 3);
+    const quickActions = [
+      ["التذاكر", "راجع التذاكر المفتوحة والأرشيف", "tickets", "▣"],
+      ["الأوامر والأتمتة", "إدارة الأوامر والردود التلقائية", "commands", "⌘"],
+      ["الترحيب والأدوار", "صمّم تجربة دخول الأعضاء", "onboarding", "✦"],
+      ["الحماية", "راجع الأحداث والإجراءات الحساسة", "security", "◈"],
+    ];
+    const recent = el("div", { class: "overview-activity" });
+    if (!latestIncidents.length) {
+      recent.append(el("div", { class: "empty-row", text: "لا توجد أحداث أمنية جديدة" }));
+    } else {
+      latestIncidents.forEach((incident) => {
+        recent.append(
+          el(
+            "div",
+            { class: "activity-row" },
+            el("span", { class: "activity-dot" }),
+            el(
+              "div",
+              {},
+              el("strong", { text: incident.action || incident.type || "حدث أمني" }),
+              el("small", { text: incident.reason || "تم تسجيل الحدث من محرك الحماية" }),
+            ),
+          ),
+        );
+      });
+    }
+    return el(
+      "section",
+      { class: "overview-view" },
+      el(
+        "div",
+        { class: "overview-hero" },
+        el(
+          "div",
+          { class: "overview-hero-copy" },
+          el("div", { class: "eyebrow", text: `${state.guild.name} / CONTROL CENTER` }),
+          el("h1", { text: "كل شيء تحت السيطرة." }),
+          el("p", { text: "نظرة سريعة على صحة البوت، التذاكر، الأوامر، والحماية في سيرفرك." }),
+        ),
+        el(
+          "div",
+          { class: "overview-hero-status" },
+          el("span", { class: `status-pulse ${state.online ? "" : "offline"}` }),
+          el("strong", { text: state.online ? "البوت متصل" : "الاتصال يحتاج مراجعة" }),
+          el("small", { text: `${state.guild.members ?? "—"} عضو` }),
+        ),
+      ),
+      el(
+        "div",
+        { class: "overview-metrics" },
+        overviewMetric("التذاكر المفتوحة", activeTickets, "تحتاج متابعة", "purple", "tickets"),
+        overviewMetric("الحوادث الأمنية", openIncidents, "آخر الأحداث", "red", "security"),
+        overviewMetric("الأوامر المفعلة", enabledCommands, "أمر متاح", "blue", "commands"),
+        overviewMetric("الردود التلقائية", responders, "رد مفعّل", "green", "commands"),
+      ),
+      el(
+        "div",
+        { class: "overview-columns" },
+        el(
+          "section",
+          { class: "overview-panel quick-panel" },
+          el("div", { class: "panel-heading" }, el("div", { class: "eyebrow", text: "QUICK ACTIONS" }), el("h2", { text: "الوصول السريع" })),
+          el(
+            "div",
+            { class: "quick-grid" },
+            quickActions.map(([title, description, view, icon]) =>
+              el(
+                "button",
+                { class: "quick-action", type: "button", onClick: () => navigateView(view) },
+                el("span", { class: "quick-icon", text: icon }),
+                el("span", {}, el("strong", { text: title }), el("small", { text: description })),
+                el("span", { class: "quick-arrow", text: "←" }),
+              ),
+            ),
+          ),
+        ),
+        el(
+          "section",
+          { class: "overview-panel" },
+          el("div", { class: "panel-heading" }, el("div", { class: "eyebrow", text: "SECURITY FEED" }), el("h2", { text: "آخر النشاطات" })),
+          recent,
+          el("button", { class: "text-link", type: "button", text: "فتح سجل الحماية ←", onClick: () => navigateView("security") }),
+        ),
+      ),
+      el(
+        "section",
+        { class: "overview-panel overview-footer-panel" },
+        el("div", { class: "panel-heading" }, el("div", { class: "eyebrow", text: "SYSTEM STATUS" }), el("h2", { text: "حالة الخدمات" })),
+        el(
+          "div",
+          { class: "status-grid" },
+          el("div", { class: "service-status" }, el("span", { class: "status-pulse" }), el("span", {}, el("strong", { text: "Discord Gateway" }), el("small", { text: "متصل ويستقبل الأحداث" }))),
+          el("div", { class: "service-status" }, el("span", { class: "status-pulse" }), el("span", {}, el("strong", { text: "قاعدة البيانات" }), el("small", { text: "الحفظ والمزامنة يعملان" }))),
+          el("div", { class: "service-status" }, el("span", { class: "status-pulse" }), el("span", {}, el("strong", { text: "Live Events" }), el("small", { text: "التحديثات تصل لحظياً" }))),
+        ),
+      ),
+    );
+  }
+  function settingsView() {
+    const general = el("div", { class: "fields" });
+    general.append(
+      input("prefix", "بادئة الأوامر", "text", {
+        minlength: "1",
+        maxlength: "5",
+        required: true,
+      }),
+    );
+    const protect = el("div", { class: "fields" }),
+      switches = el("div", { class: "field wide" });
+    switches.append(
+      toggle("anti_nuke", "حماية من التخريب الجماعي"),
+      toggle("captcha_enabled", "تفعيل كابتشا التحقق"),
+      toggle("anti_invites", "حظر دعوات Discord"),
+      toggle("anti_links", "حظر الروابط المشبوهة"),
+      toggle("anti_spam", "تفعيل رادار السبام"),
+      toggle("anti_mass_mention", "حماية المنشن الجماعي"),
+    );
+    protect.append(
+      switches,
+      input("anti_alt_days", "عمر الحساب الأدنى (أيام)", "number", { min: "0", max: "365" }),
+      selector("captcha_role_id", "رتبة اجتياز الكابتشا", "role"),
+      selector("log_channel_id", "قناة السجل", "channel"),
+    );
+    const econ = el("div", { class: "fields" }),
+      tax = input("economy_tax", "ضريبة الاقتصاد", "number", { min: "0", max: "100", step: "0.5" });
+    tax.classList.add("suffix");
+    tax.append(el("span", { text: "%" }));
+    econ.append(tax, input("daily_amount", "المبلغ اليومي", "number", { min: "0", max: "1000000", step: "1" }));
+    return el(
+      "section",
+      { class: "settings-view" },
+      el("div", { class: "section-intro" }, el("div", { class: "eyebrow", text: `${state.guild.name} / SETTINGS` }), el("h1", { text: "الإعدادات" }), el("p", { text: "الإعدادات المتقدمة للبوت والحماية والاقتصاد." })),
+      card("عام", general),
+      card("الحماية", protect),
+      card("الاقتصاد", econ),
+      el("footer", { class: "footer", text: "الإعدادات تُحفظ في قاعدة بيانات البوت وتُطبّق على الميزات المرتبطة بها" }),
+    );
+  }
   function renderPage() {
     const main = $("#main");
     main.replaceChildren();
@@ -1872,70 +2041,13 @@
       );
       main.append(n);
     }
-    main.append(
-      el(
-        "div",
-        { class: "intro" },
-        el("div", { class: "eyebrow", text: `${state.guild.name} / SETTINGS` }),
-        el("h1", { text: "إعدادات السيرفر" }),
-        el("p", {
-          text: "اضبط سلوك البوت ثم احفظ التغييرات عندما تكون جاهزاً.",
-        }),
-      ),
-    );
-    main.append(ticketsView(), commandsView(), onboardingView(), securityView());
-    const general = el("div", { class: "fields" });
-    general.append(
-      input("prefix", "بادئة الأوامر", "text", {
-        minlength: "1",
-        maxlength: "5",
-        required: true,
-      }),
-    );
-    main.append(card("عام", general));
-    const protect = el("div", { class: "fields" }),
-      switches = el("div", { class: "field wide" });
-    switches.append(
-      toggle("anti_nuke", "حماية من التخريب الجماعي"),
-      toggle("captcha_enabled", "تفعيل كابتشا التحقق"),
-      toggle("anti_invites", "حظر دعوات Discord"),
-      toggle("anti_links", "حظر الروابط المشبوهة"),
-      toggle("anti_spam", "تفعيل رادار السبام"),
-      toggle("anti_mass_mention", "حماية المنشن الجماعي"),
-    );
-    protect.append(
-      switches,
-      input("anti_alt_days", "عمر الحساب الأدنى (أيام)", "number", {
-        min: "0",
-        max: "365",
-      }),
-      selector("captcha_role_id", "رتبة اجتياز الكابتشا", "role"),
-      selector("log_channel_id", "قناة السجل", "channel"),
-    );
-    main.append(card("الحماية", protect));
-    const econ = el("div", { class: "fields" }),
-      tax = input("economy_tax", "ضريبة الاقتصاد", "number", {
-        min: "0",
-        max: "100",
-        step: "0.5",
-      });
-    tax.classList.add("suffix");
-    tax.append(el("span", { text: "%" }));
-    econ.append(
-      tax,
-      input("daily_amount", "المبلغ اليومي", "number", {
-        min: "0",
-        max: "1000000",
-        step: "1",
-      }),
-    );
-    main.append(
-      card("الاقتصاد", econ),
-      el("footer", {
-        class: "footer",
-        text: "الإعدادات تُحفظ في قاعدة بيانات البوت وتُطبّق على الميزات المرتبطة بها",
-      }),
-    );
+    const view = state.activeView;
+    if (view === "overview") main.append(overviewView());
+    else if (view === "tickets") main.append(ticketsView());
+    else if (view === "commands") main.append(commandsView());
+    else if (view === "onboarding") main.append(onboardingView());
+    else if (view === "security") main.append(securityView());
+    else main.append(settingsView());
     renderDock();
     renderDynamic();
   }

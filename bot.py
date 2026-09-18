@@ -11,6 +11,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.errors import LoginFailure
+from interaction_runtime import (
+    install_ui_guards,
+    send_interaction_message,
+    wrap_application_command,
+)
 
 
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -52,7 +57,9 @@ class DiscordBot(commands.Bot):
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
+        intents.members = True
         intents.message_content = True
+        install_ui_guards()
         super().__init__(
             command_prefix=(),
             intents=intents,
@@ -63,6 +70,9 @@ class DiscordBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.load_extension("cogs.moderation")
         logger.info("Loaded moderation cog.")
+        for command in self.tree.walk_commands():
+            if isinstance(command, app_commands.Command):
+                wrap_application_command(command)
 
         if self.sync_guild is not None:
             self.tree.copy_global_to(guild=self.sync_guild)

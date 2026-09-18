@@ -501,11 +501,23 @@ async def init_db() -> None:
                     title TEXT NOT NULL,
                     content TEXT NOT NULL,
                     category TEXT NOT NULL DEFAULT 'عام',
+                    shortcut TEXT DEFAULT NULL,
+                    sticker_id INTEGER DEFAULT NULL,
                     created_by INTEGER DEFAULT NULL,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (guild_id, title)
                 );
             """)
+            async with db.execute("PRAGMA table_info(canned_responses)") as cur:
+                canned_columns = {row[1] for row in await cur.fetchall()}
+            if "shortcut" not in canned_columns:
+                await db.execute(
+                    "ALTER TABLE canned_responses ADD COLUMN shortcut TEXT DEFAULT NULL"
+                )
+            if "sticker_id" not in canned_columns:
+                await db.execute(
+                    "ALTER TABLE canned_responses ADD COLUMN sticker_id INTEGER DEFAULT NULL"
+                )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_canned_responses_guild "
                 "ON canned_responses(guild_id, updated_at DESC);"

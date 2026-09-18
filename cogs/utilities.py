@@ -720,7 +720,7 @@ class Utilities(commands.Cog):
             "ai": {"ask_ai", "imagine", "summarize", "transcript", "backup_structure"},
             "economy": {"profile", "daily", "work", "pay", "leaderboard", "deposit", "withdraw", "rob", "giveaway"},
             "tournament": {"scrim_split", "scrim_teams", "map_randomizer", "tournament_open", "match_record", "standings"},
-            "server": {"ping", "serverinfo", "avatar", "say", "setup_voice", "radio", "stop_radio"},
+            "server": {"ping", "status", "serverinfo", "avatar", "say", "setup_voice", "radio", "stop_radio"},
             "community": {"poll", "remind", "reminders", "reminder_cancel", "setup_counters"},
         }
         selected = category.strip().lower() if category else None

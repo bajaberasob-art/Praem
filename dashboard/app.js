@@ -1645,7 +1645,7 @@
           headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
           body: JSON.stringify({
             trigger,
-            target_type: "command",
+            target_type: "help",
             target: `/${command.command_name}`,
           }),
         });

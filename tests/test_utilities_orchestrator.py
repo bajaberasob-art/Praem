@@ -164,6 +164,29 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(message.channel.sent), 1)
         self.assertIn("Read the rules", message.channel.sent[0][1]["embed"].description)
 
+    async def test_command_help_shortcut_renders_a_smart_embed(self):
+        command = SimpleNamespace(
+            name="warn",
+            description="تحذير عضو",
+            aliases=[],
+            parameters=[
+                SimpleNamespace(name="member", required=True),
+                SimpleNamespace(name="reason", required=True),
+            ],
+        )
+        self.bot.tree.get_command = lambda name: command if name == "warn" else None
+        await self.cog.add_shortcut(700, "عيب", "help", target="/warn")
+        await self.cog.add_shortcut(700, "تحذير", "help", target="/warn")
+
+        message = FakeMessage("عيب")
+        await self.cog.on_message(message)
+        embed = message.channel.sent[0][1]["embed"]
+        self.assertEqual(embed.title, "تحذير 📖")
+        self.assertIn("عيب", embed.fields[0].value)
+        self.assertIn("تحذير", embed.fields[1].value)
+        self.assertIn("تحذير", embed.fields[2].value)
+        self.assertIn("طرد الأعضاء", embed.fields[3].value)
+
 
 if __name__ == "__main__":
     unittest.main()

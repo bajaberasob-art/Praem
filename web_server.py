@@ -579,7 +579,7 @@ async def api_guild_shortcut_save(req):
     target = str(body.get("target") or "").strip()
     if not trigger or len(trigger) > 80 or any(char.isspace() for char in trigger):
         return json_error(400, "validation", fields={"trigger": "الاختصار يجب أن يكون كلمة واحدة من 1 إلى 80 حرفاً"})
-    if target_type != "command" or not target:
+    if target_type not in {"command", "help"} or not target:
         return json_error(400, "validation", fields={"target": "أمر الهدف غير صالح"})
     command_name = target.lstrip("!/").split()[0].lower()
     utilities = _utilities_cog()
@@ -603,7 +603,7 @@ async def api_guild_shortcut_save(req):
         shortcut = await save_shortcut(
             guild.id,
             trigger,
-            "command",
+            target_type,
             target=target if target.startswith("/") else f"/{command_name}",
         )
         utilities = _utilities_cog()

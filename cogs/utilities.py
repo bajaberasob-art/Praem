@@ -661,10 +661,10 @@ class Utilities(commands.Cog):
         command_name = str(target).strip().lstrip("!/").split()[0].lower()
         if not command_name:
             return None
-        return (
-            self.bot.tree.get_command(command_name)
-            or self.bot.get_command(command_name)
-        )
+        tree = getattr(self.bot, "tree", None)
+        slash_command = tree.get_command(command_name) if tree and hasattr(tree, "get_command") else None
+        prefix_command = self.bot.get_command(command_name) if hasattr(self.bot, "get_command") else None
+        return slash_command or prefix_command
 
     @staticmethod
     def _command_argument_text(command) -> str:

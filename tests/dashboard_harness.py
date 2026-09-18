@@ -197,10 +197,71 @@ class FakeBot:
                 "panel": panel,
             }
 
+    class UtilitiesStub:
+        def __init__(self):
+            self.commands = [{
+                "command_name": "ping",
+                "cog": "Utilities",
+                "enabled": True,
+                "allowed_roles": [],
+                "configured": False,
+                "aliases": [],
+            }]
+            self.rules = []
+
+        async def get_guild_commands_status(self, guild_id):
+            snapshot = await database.get_guild_settings(guild_id)
+            controls = await database.get_command_controls(guild_id)
+            commands = []
+            for item in self.commands:
+                command = dict(item)
+                control = controls.get(command["command_name"])
+                if control:
+                    command.update(
+                        enabled=control["enabled"],
+                        allowed_roles=control["allowed_roles"],
+                        configured=True,
+                    )
+                commands.append(command)
+            return {
+                "guild_id": str(guild_id),
+                "prefix": snapshot["settings"].get("prefix", "!"),
+                "commands": commands,
+            }
+
+        async def toggle_command(self, guild_id, command_name, enabled, allowed_roles):
+            result = await database.save_command_control(
+                guild_id, command_name, enabled, allowed_roles
+            )
+            item = next((x for x in self.commands if x["command_name"] == command_name), None)
+            if item is None:
+                item = {
+                    "command_name": command_name,
+                    "cog": "Configured",
+                    "configured": True,
+                    "aliases": [],
+                }
+                self.commands.append(item)
+            item.update(enabled=enabled, allowed_roles=allowed_roles, configured=True)
+            return result
+
+        async def add_auto_responder(self, guild_id, trigger, match_type, response, **kwargs):
+            rule = await database.save_auto_responder(
+                guild_id, trigger, match_type, response, **kwargs
+            )
+            self.rules.append(rule)
+            return rule
+
+        async def delete_auto_responder(self, guild_id, rule_id):
+            deleted = await database.delete_auto_responder(guild_id, rule_id)
+            self.rules[:] = [rule for rule in self.rules if rule["id"] != rule_id]
+            return deleted
+
     def __init__(self):
         self.security = self.SecurityStub()
         self.moderation = self.ModerationStub()
         self.engagement = self.EngagementStub()
+        self.utilities = self.UtilitiesStub()
 
     def get_guild(self, gid):
         return FakeGuild() if gid == FakeGuild.id else None
@@ -212,6 +273,8 @@ class FakeBot:
             return self.moderation
         if name == "Engagement":
             return self.engagement
+        if name == "Utilities":
+            return self.utilities
         return None
 
     def is_ready(self):

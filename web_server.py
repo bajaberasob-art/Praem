@@ -695,6 +695,15 @@ async def api_guild_tickets_action(req):
     return web.json_response({"ok": True, "ticket": result})
 
 
+@routes.get('/api/guild/{guild_id}/tickets/canned')
+async def api_guild_tickets_canned_get(req):
+    _, guild = await authorize(req)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    return web.json_response({"responses": await community.get_canned_responses(guild.id)})
+
+
 @routes.post('/api/guild/{guild_id}/tickets/canned')
 async def api_guild_tickets_canned(req):
     session, guild = await authorize(req, write=True)

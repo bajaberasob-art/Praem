@@ -338,18 +338,20 @@
     );
   }
   function renderShell() {
+    const main = el(
+      "main",
+      { class: "page", id: "main" },
+      el(
+        "div",
+        { class: "loading" },
+        el("div", { class: "skeleton" }),
+        el("p", { text: "جارٍ تحميل إعدادات السيرفر…" }),
+      ),
+    );
     app.replaceChildren(
       header(),
-      el(
-        "main",
-        { class: "page", id: "main" },
-        el(
-          "div",
-          { class: "loading" },
-          el("div", { class: "skeleton" }),
-          el("p", { text: "جارٍ تحميل إعدادات السيرفر…" }),
-        ),
-      ),
+      el("div", { class: "workspace-layout" }, workspaceNav(), main),
+      mobileNav(),
     );
     updatePing(state.online ? "online" : "offline");
   }

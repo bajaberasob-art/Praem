@@ -142,10 +142,7 @@ async def on_app_command_error(
     """Keep command failures user-friendly while retaining the full traceback in logs."""
     logger.exception("Slash command failed.", exc_info=error)
     message = "Something went wrong while running that command."
-    if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True)
-    else:
-        await interaction.response.send_message(message, ephemeral=True)
+    await send_interaction_message(interaction, message, ephemeral=True)
 
 
 def main() -> None:

@@ -683,15 +683,89 @@ class Utilities(commands.Cog):
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_voice(self, itx: discord.Interaction):
-        category = await itx.guild.create_category("🔊 القنوات التفاعلية")
-        await itx.guild.create_voice_channel(
-            name=HUB_NAME,
-            category=category,
-        )
+        category = discord.utils.get(itx.guild.categories, name="🔊 القنوات التفاعلية")
+        if category is None:
+            category = await itx.guild.create_category("🔊 القنوات التفاعلية")
+        hub = discord.utils.get(category.voice_channels, name=HUB_NAME)
+        if hub is None:
+            hub = await itx.guild.create_voice_channel(
+                name=HUB_NAME,
+                category=category,
+            )
         await itx.response.send_message(
-            "✅ تم تجهيز نظام الرومات المؤقتة ولوحة التحكم!",
+            f"✅ نظام الرومات المؤقتة جاهز: {hub.mention}",
             ephemeral=True,
         )
+
+    @app_commands.command(
+        name="help",
+        description="عرض دليل أوامر PRIME حسب الأقسام",
+    )
+    @app_commands.describe(category="القسم المطلوب، اتركه فارغاً لعرض الأقسام")
+    async def help_command(
+        self,
+        itx: discord.Interaction,
+        category: str = None,
+    ):
+        commands_list = [
+            command
+            for command in self.bot.tree.walk_commands()
+            if not getattr(command, "hidden", False)
+            and command.name != "help"
+        ]
+        aliases = {
+            "mod": {"timeout", "untimeout", "warn", "warnings", "clear", "lockdown"},
+            "security": {"setup_captcha"},
+            "tickets": {"setup_tickets", "suggest"},
+            "ai": {"ask_ai", "imagine", "summarize", "transcript", "backup_structure"},
+            "economy": {"profile", "daily", "work", "deposit", "withdraw", "rob", "giveaway"},
+            "tournament": {"scrim_split", "scrim_teams", "map_randomizer", "tournament_open", "match_record"},
+            "server": {"ping", "serverinfo", "avatar", "say", "setup_voice", "radio", "stop_radio"},
+            "community": {"poll", "remind", "reminders", "reminder_cancel", "setup_counters"},
+        }
+        selected = category.strip().lower() if category else None
+        if selected and selected not in aliases:
+            return await itx.response.send_message(
+                "❌ القسم غير معروف. الأقسام المتاحة: "
+                + ", ".join(f"`{key}`" for key in aliases),
+                ephemeral=True,
+            )
+        embed = discord.Embed(
+            title="📚 دليل أوامر PRIME",
+            description=(
+                "استخدم `/help category:<القسم>` للحصول على أوامر قسم محدد.\n"
+                "الأوامر الحساسة تتطلب صلاحيات Discord مناسبة."
+            ),
+            color=0x5865F2,
+        )
+        if selected is None:
+            for key, names in aliases.items():
+                available = [f"`/{name}`" for name in sorted(names) if any(command.name == name for command in commands_list)]
+                if available:
+                    embed.add_field(name=f"• {key}", value=" ".join(available), inline=False)
+        else:
+            allowed = aliases[selected]
+            for command in sorted(commands_list, key=lambda item: item.name):
+                if command.name in allowed:
+                    embed.add_field(
+                        name=f"/{command.name}",
+                        value=command.description or "لا يوجد وصف",
+                        inline=False,
+                    )
+        await itx.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="bot_status",
+        description="عرض صحة البوت والاتصال والخدمات",
+    )
+    async def bot_status(self, itx: discord.Interaction):
+        websocket = round(self.bot.latency * 1000) if self.bot.latency != float("inf") else 0
+        embed = discord.Embed(title="🛰️ حالة PRIME", color=0x2ECC71)
+        embed.add_field(name="Discord Gateway", value=f"🟢 متصل · `{websocket}ms`", inline=True)
+        embed.add_field(name="السيرفرات", value=f"`{len(self.bot.guilds)}`", inline=True)
+        embed.add_field(name="الأعضاء", value=f"`{sum(g.member_count or 0 for g in self.bot.guilds):,}`", inline=True)
+        embed.add_field(name="الأوامر", value=f"`{len(list(self.bot.tree.walk_commands()))}` أمر Slash", inline=True)
+        await itx.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(
         name="ping",
@@ -774,27 +848,14 @@ class Utilities(commands.Cog):
         description="طرح سؤال أو طلب مساعدة ذكية من البوت",
     )
     async def ask(self, itx: discord.Interaction, question: str):
-        # رد ذكي خفيف وسريع
-        await itx.response.defer()
-        await asyncio.sleep(1)
-        embed = discord.Embed(
-            title="💡 الاستجابة الذكية",
-            color=0x3498DB,
+        ai_cog = self.bot.get_cog("AITools")
+        if ai_cog is not None:
+            await ai_cog.ask_ai(itx, question)
+            return
+        await itx.response.send_message(
+            "⚠️ محرك الذكاء الاصطناعي غير متاح حالياً. جرّب لاحقاً.",
+            ephemeral=True,
         )
-        embed.add_field(
-            name="السؤال:",
-            value=question,
-            inline=False,
-        )
-        embed.add_field(
-            name="التحليل:",
-            value=(
-                f"مرحباً {itx.user.mention}! تلقيت طلبك بنجاح. الأنظمة "
-                "المركزية نشطة وجاهزة لتنفيذ كافة مهام السيرفر."
-            ),
-            inline=False,
-        )
-        await itx.followup.send(embed=embed)
 
     @app_commands.command(
         name="serverinfo",

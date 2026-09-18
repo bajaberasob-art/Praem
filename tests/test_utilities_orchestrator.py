@@ -50,6 +50,13 @@ class FakeBot:
         self.guilds = []
         self.checks = []
         self.user = SimpleNamespace(id=999)
+        self.tree = SimpleNamespace(
+            interaction_check=self._tree_check,
+            get_command=lambda name: None,
+        )
+
+    async def _tree_check(self, interaction):
+        return True
 
     def add_check(self, check, **kwargs):
         self.checks.append(check)

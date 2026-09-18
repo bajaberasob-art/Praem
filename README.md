@@ -24,6 +24,31 @@ python main.py
 
 The configured project workflow runs `python main.py` automatically.
 
+## Dashboard access
+
+The Discord bot serves its dashboard on port `8099`, and the API service exposes
+it through the public project domain at `/dashboard/`.
+
+Open:
+
+```text
+https://<REPLIT_DEV_DOMAIN>/dashboard/
+```
+
+The root URL redirects there automatically. Select **تسجيل الدخول عبر ديسكورد**
+and sign in with an account that owns the server or has the Administrator
+permission.
+
+For Discord OAuth login, add this exact callback URL under **OAuth2 → Redirects**:
+
+```text
+https://<REPLIT_DEV_DOMAIN>/dashboard/api/auth/callback
+```
+
+The dashboard uses `CLIENT_ID`, `CLIENT_SECRET`, and `REDIRECT_URI` for OAuth
+login. `CLIENT_SECRET` must be stored as a Replit Secret; never put it in the
+bot invite URL or source code.
+
 ## Discord setup
 
 1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications).

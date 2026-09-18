@@ -1672,6 +1672,16 @@ async def save_shortcut(
     return item
 
 
+async def delete_shortcut(guild_id: int, shortcut_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM guild_shortcuts WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(shortcut_id)),
+        )
+        await db.commit()
+    return cursor.rowcount > 0
+
+
 def _ticket_json_ids(value: Any) -> list[str]:
     if isinstance(value, str):
         try:

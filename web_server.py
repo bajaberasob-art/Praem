@@ -18,8 +18,11 @@ from database import (
     SETTINGS_SCHEMA,
     SettingsConflict,
     get_auto_responders,
+    get_shortcuts,
     get_warning,
     get_guild_settings,
+    delete_shortcut,
+    save_shortcut,
     update_guild_settings,
     validate_setting,
 )
@@ -525,6 +528,7 @@ async def api_guild_commands(req):
     meta = await guild_meta(guild)
     status["roles"] = meta["roles"]
     status["channels"] = meta["channels"]
+    status["shortcuts"] = await get_shortcuts(guild.id)
     return web.json_response(status)
 
 
@@ -557,6 +561,68 @@ async def api_guild_commands_toggle(req):
         roles,
     )
     return web.json_response({"command": result})
+
+
+@routes.post('/api/guild/{guild_id}/shortcuts')
+async def api_guild_shortcut_save(req):
+    _, guild = await authorize(req, write=True)
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        body = await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    trigger = str(body.get("trigger") or "").strip()
+    target_type = str(body.get("target_type") or "command").strip().lower()
+    target = str(body.get("target") or "").strip()
+    if not trigger or len(trigger) > 80 or any(char.isspace() for char in trigger):
+        return json_error(400, "validation", fields={"trigger": "الاختصار يجب أن يكون كلمة واحدة من 1 إلى 80 حرفاً"})
+    if target_type != "command" or not target:
+        return json_error(400, "validation", fields={"target": "أمر الهدف غير صالح"})
+    command_name = target.lstrip("!/").split()[0].lower()
+    utilities = _utilities_cog()
+    known = {
+        command.qualified_name.lower()
+        for command in (utilities.bot.commands if utilities else [])
+        if not command.hidden
+    }
+    known.update(
+        command.qualified_name.lower()
+        for command in (utilities.bot.tree.walk_commands() if utilities else [])
+        if not getattr(command, "hidden", False)
+    )
+    if command_name not in known:
+        return json_error(400, "validation", fields={"target": "الأمر الهدف غير موجود"})
+    try:
+        shortcut = await save_shortcut(
+            guild.id,
+            trigger,
+            "command",
+            target=target if target.startswith("/") else f"/{command_name}",
+        )
+        utilities = _utilities_cog()
+        if utilities:
+            await utilities.sync_auto_responders(guild.id)
+    except ValueError as error:
+        return json_error(400, "validation", fields={"trigger": str(error)})
+    return web.json_response({"shortcut": shortcut})
+
+
+@routes.delete('/api/guild/{guild_id}/shortcuts/{shortcut_id}')
+async def api_guild_shortcut_delete(req):
+    _, guild = await authorize(req, write=True)
+    try:
+        shortcut_id = int(req.match_info["shortcut_id"])
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"shortcut_id": "معرف الاختصار غير صالح"})
+    if not await delete_shortcut(guild.id, shortcut_id):
+        return json_error(404, "shortcut_not_found")
+    utilities = _utilities_cog()
+    if utilities:
+        await utilities.sync_auto_responders(guild.id)
+    return web.json_response({"deleted": True, "shortcut_id": shortcut_id})
 
 
 @routes.get('/api/guild/{guild_id}/auto-responses')

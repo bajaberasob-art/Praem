@@ -42,7 +42,7 @@ permission.
 For Discord OAuth login, add this exact callback URL under **OAuth2 → Redirects**:
 
 ```text
-https://<REPLIT_DEV_DOMAIN>/dashboard/api/auth/callback
+https://<REPLIT_DEV_DOMAIN>/api/dashboard/api/auth/callback
 ```
 
 The dashboard uses `CLIENT_ID`, `CLIENT_SECRET`, and `REDIRECT_URI` for OAuth

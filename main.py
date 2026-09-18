@@ -79,6 +79,15 @@ class EnterpriseBot(commands.Bot):
         self.install_interaction_guards()
         return result
 
+    async def on_error(self, event_method: str, *args, **kwargs) -> None:
+        """Keep listener exceptions from disappearing inside discord.py."""
+        logger.error(
+            "[EVENT] listener failed: %s args=%s",
+            event_method,
+            len(args),
+            exc_info=True,
+        )
+
     def install_interaction_guards(self) -> int:
         wrapped = 0
         for command in self.tree.walk_commands():

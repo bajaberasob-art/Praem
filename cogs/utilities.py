@@ -562,6 +562,20 @@ class Utilities(commands.Cog):
                 await ctx.send(f"⛔ {error.reason}", delete_after=7)
             except (discord.Forbidden, discord.HTTPException):
                 LOGGER.debug("[COMMAND_POLICY] تعذر إرسال رسالة الحظر", exc_info=True)
+            return
+        LOGGER.error(
+            "[COMMAND] فشل أمر Prefix %s في السيرفر %s",
+            getattr(getattr(ctx, "command", None), "qualified_name", "unknown"),
+            getattr(getattr(ctx, "guild", None), "id", None),
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        try:
+            await ctx.send(
+                "⚠️ تعذر تنفيذ الأمر. تم تسجيل الخطأ للمراجعة.",
+                delete_after=7,
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            LOGGER.error("[COMMAND] تعذر إرسال رسالة الخطأ", exc_info=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

@@ -57,7 +57,13 @@ class CommunityTicketTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             {item.custom_id for item in controls.children},
-            {"ticket:claim", "ticket:escalate", "ticket:close"},
+            {
+                "ticket:claim",
+                "ticket:escalate",
+                "ticket:close",
+                "ticket:waiting-user",
+                "ticket:internal-note",
+            },
         )
 
     async def test_deploy_panel_and_staff_kpi_helpers_persist_data(self):

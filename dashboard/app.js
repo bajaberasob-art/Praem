@@ -244,6 +244,10 @@
     if (!viewLabels[view]) return;
     state.activeView = view;
     sessionStorage.setItem("dashboard-view", view);
+    document.querySelectorAll(".mobile-more-menu").forEach((menu) => {
+      menu.hidden = true;
+      menu.parentElement?.querySelector('[aria-expanded="true"]')?.setAttribute("aria-expanded", "false");
+    });
     document.querySelectorAll("[data-nav-view]").forEach((item) => {
       item.classList.toggle("active", item.dataset.navView === view);
       item.setAttribute("aria-current", item.dataset.navView === view ? "page" : "false");

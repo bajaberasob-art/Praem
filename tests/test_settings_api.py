@@ -58,13 +58,25 @@ class TicketCommunityStub:
         self.calls.append(("canned", guild_id))
         return list(self.responses)
 
-    async def save_canned_response(self, guild_id, title, content, category, created_by, response_id=None):
+    async def save_canned_response(
+        self,
+        guild_id,
+        title,
+        content,
+        category,
+        created_by,
+        response_id=None,
+        shortcut=None,
+        sticker_id=None,
+    ):
         item = {
             "id": response_id or 1,
             "guild_id": guild_id,
             "title": title,
             "content": content,
             "category": category,
+            "shortcut": shortcut,
+            "sticker_id": sticker_id,
             "created_by": created_by,
         }
         self.responses = [item]

@@ -283,14 +283,17 @@ class Engagement(commands.Cog):
 
     async def resolve_text_channel(self, guild: discord.Guild, channel_id: int):
         channel = guild.get_channel(int(channel_id))
-        if isinstance(channel, discord.TextChannel):
+        if isinstance(channel, discord.TextChannel) or callable(getattr(channel, "send", None)):
             return channel
         fetch_channels = getattr(guild, "fetch_channels", None)
         if fetch_channels is None:
             return None
         try:
             for fetched in await fetch_channels():
-                if fetched.id == int(channel_id) and isinstance(fetched, discord.TextChannel):
+                if fetched.id == int(channel_id) and (
+                    isinstance(fetched, discord.TextChannel)
+                    or callable(getattr(fetched, "send", None))
+                ):
                     return fetched
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("[ENGAGEMENT_CONFIG] تعذر تحديث قنوات السيرفر %s", guild.id, exc_info=True)

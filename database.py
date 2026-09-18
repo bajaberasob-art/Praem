@@ -6,6 +6,7 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 DB_NAME = "bot_database.db"
 logger = logging.getLogger("DatabaseEngine")
@@ -21,6 +22,14 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     "welcome_channel_id": ("INTEGER", None, "id"),
     "leave_channel_id": ("INTEGER", None, "id"),
     "welcome_message": ("TEXT", "", "str"),
+    "welcome_embed_enabled": ("INTEGER", False, "bool"),
+    "welcome_embed_color": ("TEXT", "#7c3aed", "str"),
+    "welcome_embed_title": ("TEXT", "أهلاً بك في {server} ✨", "str"),
+    "welcome_embed_description": ("TEXT", "", "str"),
+    "welcome_embed_image_url": ("TEXT", "", "str"),
+    "welcome_embed_sticker_id": ("INTEGER", None, "id"),
+    "welcome_embed_footer": ("TEXT", "PRIME | TEAM • تطوير abood2026", "str"),
+    "welcome_embed_show_avatar": ("INTEGER", True, "bool"),
     "auto_role_id": ("INTEGER", None, "id"),
     "log_channel_id": ("INTEGER", None, "id"),
     "captcha_enabled": ("INTEGER", False, "bool"),
@@ -627,8 +636,20 @@ def validate_setting(key: str, value: Any) -> Any:
         value = value.strip()
         if not 1 <= len(value) <= 5 or any(ch.isspace() for ch in value):
             raise ValueError("البادئة يجب أن تكون من 1 إلى 5 أحرف بدون مسافات")
-    elif key in {"welcome_message", "leave_message"} and len(value) > 1000:
+    elif key in {"welcome_message", "leave_message", "welcome_embed_description"} and len(value) > 1000:
         raise ValueError("رسالة الترحيب يجب ألا تتجاوز 1000 حرف")
+    elif key == "welcome_embed_title" and len(value) > 256:
+        raise ValueError("عنوان الـ Embed يجب ألا يتجاوز 256 حرفاً")
+    elif key == "welcome_embed_footer" and len(value) > 2048:
+        raise ValueError("تذييل الـ Embed طويل جداً")
+    elif key == "welcome_embed_color":
+        if not (len(value) == 7 and value.startswith("#") and all(ch in "0123456789abcdefABCDEF" for ch in value[1:])):
+            raise ValueError("لون الـ Embed يجب أن يكون بصيغة #RRGGBB")
+    elif key == "welcome_embed_image_url":
+        if value:
+            parsed = urlparse(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("رابط صورة الـ Embed غير صالح")
     return value
 
 

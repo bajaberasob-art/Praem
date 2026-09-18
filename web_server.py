@@ -364,10 +364,25 @@ async def guild_meta(guild) -> dict:
             "color": f"#{role.color.value:06x}" if role.color.value else None,
             "assignable": bool(top and role < top and not role.managed),
         })
+    stickers = list(getattr(guild, "stickers", ()) or ())
+    fetch_stickers = getattr(guild, "fetch_stickers", None)
+    if fetch_stickers is not None:
+        try:
+            fetched_stickers = await fetch_stickers()
+            if fetched_stickers:
+                stickers = list(fetched_stickers)
+        except (discord.Forbidden, discord.HTTPException):
+            logger.debug("Unable to refresh stickers for guild %s", guild.id, exc_info=True)
     return {
         "guild": {"id": str(guild.id), "name": guild.name, "icon": icon.url if icon else None,
                   "members": guild.member_count},
-        "channels": channels, "roles": roles,
+        "channels": channels,
+        "roles": roles,
+        "stickers": [
+            {"id": str(sticker.id), "name": sticker.name, "url": str(sticker.url)}
+            for sticker in stickers
+            if getattr(sticker, "available", True)
+        ],
     }
 
 
@@ -383,6 +398,21 @@ async def resolve_text_channel(guild, channel_id: int):
                     return fetched
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to fetch channel %s in guild %s", channel_id, guild.id, exc_info=True)
+    return None
+
+
+async def resolve_guild_sticker(guild, sticker_id: int):
+    for sticker in getattr(guild, "stickers", ()) or ():
+        if sticker.id == int(sticker_id):
+            return sticker
+    fetch_stickers = getattr(guild, "fetch_stickers", None)
+    if fetch_stickers is not None:
+        try:
+            for sticker in await fetch_stickers():
+                if sticker.id == int(sticker_id):
+                    return sticker
+        except (discord.Forbidden, discord.HTTPException):
+            logger.debug("Unable to fetch sticker %s in guild %s", sticker_id, guild.id, exc_info=True)
     return None
 
 
@@ -404,6 +434,10 @@ async def validate_changes(guild, changes: dict) -> tuple[dict, dict]:
             channel = await resolve_text_channel(guild, value)
             if channel is None:
                 errors[key] = "القناة غير موجودة في هذا السيرفر"
+                continue
+        if value is not None and key == "welcome_embed_sticker_id":
+            if await resolve_guild_sticker(guild, value) is None:
+                errors[key] = "ملصق السيرفر غير موجود أو غير متاح للبوت"
                 continue
         if value is not None and key.endswith("_role_id"):
             role = guild.get_role(value)
@@ -1007,6 +1041,14 @@ ONBOARDING_KEYS = {
     "welcome_message",
     "leave_message",
     "welcome_dm_enabled",
+    "welcome_embed_enabled",
+    "welcome_embed_color",
+    "welcome_embed_title",
+    "welcome_embed_description",
+    "welcome_embed_image_url",
+    "welcome_embed_sticker_id",
+    "welcome_embed_footer",
+    "welcome_embed_show_avatar",
     "auto_role_id",
     "member_auto_role_id",
     "bot_auto_role_id",

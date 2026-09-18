@@ -1598,7 +1598,7 @@
     });
     return root;
   }
-  async function updateCommand(command, enabled, allowedRoles) {
+  async function updateCommand(command, enabled, allowedRoles, allowedChannels = command.allowed_channels || []) {
     try {
       const r = await api(`api/guild/${state.guild.id}/commands/toggle`, {
         method: "POST",
@@ -1607,6 +1607,7 @@
           command_name: command.command_name,
           enabled,
           allowed_roles: allowedRoles,
+          allowed_channels: allowedChannels,
         }),
       });
       const data = await r.json();
@@ -1619,6 +1620,30 @@
       renderPage();
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم");
+    }
+  }
+  async function saveCommandPolicy(command, enabled, allowedRoles, allowedChannels) {
+    try {
+      const r = await api(`api/guild/${state.guild.id}/commands/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
+        body: JSON.stringify({
+          command_name: command.command_name,
+          enabled,
+          allowed_roles: allowedRoles,
+          allowed_channels: allowedChannels,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.command) {
+        toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ إعدادات الأمر", "warn");
+        return false;
+      }
+      Object.assign(command, data.command);
+      return true;
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");
+      return false;
     }
   }
   async function saveCommandPrefix(input, feedback) {
@@ -1716,6 +1741,7 @@
       toast(`تم حفظ ${requested.length} اختصاراً لـ /${command.command_name}`, "success", 2300);
       state.shortcutCommandId = command.command_name;
       state.shortcutInputText = requested.join("، ");
+      if (options.deferRender) return true;
       if (options.reopen !== false) {
         closeCommandDetail();
         openCommandDetail(command);
@@ -1725,6 +1751,61 @@
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");
     }
+  }
+  function commandChoiceEditor(title, choices, selected, placeholder, icon, formatter) {
+    const picked = new Set((selected || []).map(String));
+    const search = el("input", {
+      class: "studio-input command-policy-search",
+      type: "search",
+      placeholder,
+      "aria-label": title,
+    });
+    const chips = el("div", { class: "command-policy-chips" });
+    const list = el("div", { class: "command-policy-options" });
+    const root = el("section", { class: "command-policy-section" },
+      el("div", { class: "command-policy-heading" },
+        el("span", { class: "command-policy-icon", text: icon }),
+        el("div", {}, el("strong", { text: title }), el("small", { text: "اتركه فارغاً للسماح للجميع" })),
+      ),
+      chips,
+      search,
+      list,
+    );
+    const render = () => {
+      const query = search.value.trim().toLowerCase();
+      chips.replaceChildren(
+        picked.size
+          ? [...picked].map((id) => {
+              const item = choices.find((choice) => String(choice.id) === id);
+              const chip = el("button", { class: "command-policy-chip", type: "button", text: `× ${formatter(item || { id })}` });
+              chip.onclick = () => { picked.delete(id); render(); };
+              return chip;
+            })
+          : el("span", { class: "command-policy-empty", text: "لم يتم تحديد أي عنصر" }),
+      );
+      list.replaceChildren(
+        choices
+          .filter((item) => !query || formatter(item).toLowerCase().includes(query))
+          .slice(0, 80)
+          .map((item) => {
+            const id = String(item.id);
+            const button = el("button", {
+              class: `command-policy-option${picked.has(id) ? " selected" : ""}`,
+              type: "button",
+              text: `${picked.has(id) ? "✓ " : ""}${formatter(item)}`,
+            });
+            button.onclick = () => {
+              if (picked.has(id)) picked.delete(id);
+              else if (picked.size < 25) picked.add(id);
+              render();
+            };
+            return button;
+          }),
+      );
+    };
+    search.oninput = render;
+    render();
+    return { root, values: () => [...picked] };
   }
   function openCommandDetail(command) {
     closeCommandDetail();

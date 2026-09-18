@@ -1248,6 +1248,7 @@ class Community(commands.Cog):
             return await itx.response.send_message("هذه التذكرة مغلقة.", ephemeral=True)
         if not self._is_ticket_staff(itx.user, ticket):
             return await self._ticket_denied(itx)
+        await itx.response.defer(ephemeral=True)
         text, content_html = await self._build_transcript(itx.channel, ticket)
         text += f"\n\nClose reason: {reason}"
         content_html = content_html.replace(
@@ -1258,6 +1259,7 @@ class Community(commands.Cog):
             ticket["id"], ticket["guild_id"], ticket["channel_id"], text, content_html
         )
         ticket = await close_ticket(ticket["guild_id"], ticket["id"], itx.user.id, reason)
+        self._schedule_ticket_channel_deletion(itx.channel, ticket["id"])
         await itx.channel.edit(
             name=f"archived-ticket-{ticket['id']}"[:100],
             topic=f"Archived ticket • closed by {itx.user.display_name}",
@@ -1297,7 +1299,7 @@ class Community(commands.Cog):
                 )
             except (discord.Forbidden, discord.HTTPException):
                 logger.info("Could not DM transcript for ticket %s", ticket["id"])
-        await itx.response.send_message(
+        await itx.followup.send(
             "✅ أُغلقت التذكرة وحُفظ transcript وأُرسل للمستخدم.", ephemeral=True
         )
 

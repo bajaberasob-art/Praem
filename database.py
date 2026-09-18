@@ -198,6 +198,21 @@ async def init_db() -> None:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_xp ON users(guild_id, xp DESC);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_warnings_guild_user ON warnings(guild_id, user_id);")
             await db.execute("""
+                CREATE TABLE IF NOT EXISTS economy_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    from_user_id INTEGER DEFAULT NULL,
+                    to_user_id INTEGER DEFAULT NULL,
+                    amount INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_economy_transactions_guild "
+                "ON economy_transactions(guild_id, created_at DESC);"
+            )
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS invite_stats (
                     guild_id INTEGER NOT NULL,
                     inviter_id INTEGER NOT NULL,
@@ -722,6 +737,70 @@ async def update_balance(
         ) as cur:
             row = await cur.fetchone()
             return row[0] if row else 0
+
+
+async def transfer_balance(
+    guild_id: int,
+    from_user_id: int,
+    to_user_id: int,
+    amount: int,
+) -> bool:
+    """تحويل كاش ذري بين عضوين مع تسجيل العملية."""
+    amount = int(amount)
+    if amount <= 0 or int(from_user_id) == int(to_user_id):
+        return False
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO users (user_id, guild_id) VALUES (?, ?)",
+            (int(from_user_id), int(guild_id)),
+        )
+        await db.execute(
+            "INSERT OR IGNORE INTO users (user_id, guild_id) VALUES (?, ?)",
+            (int(to_user_id), int(guild_id)),
+        )
+        cur = await db.execute(
+            """
+            UPDATE users SET balance = balance - ?
+            WHERE user_id = ? AND guild_id = ? AND balance >= ?
+            """,
+            (amount, int(from_user_id), int(guild_id), amount),
+        )
+        if cur.rowcount != 1:
+            await db.rollback()
+            return False
+        await db.execute(
+            "UPDATE users SET balance = balance + ? WHERE user_id = ? AND guild_id = ?",
+            (amount, int(to_user_id), int(guild_id)),
+        )
+        await db.execute(
+            """
+            INSERT INTO economy_transactions
+                (guild_id, from_user_id, to_user_id, amount, kind)
+            VALUES (?, ?, ?, ?, 'transfer')
+            """,
+            (int(guild_id), int(from_user_id), int(to_user_id), amount),
+        )
+        await db.commit()
+    return True
+
+
+async def get_economy_leaderboard(
+    guild_id: int,
+    limit: int = 10,
+) -> list[Dict[str, Any]]:
+    limit = max(1, min(int(limit), 25))
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT user_id, level, balance, bank, xp, (balance + bank) AS total
+            FROM users
+            WHERE guild_id = ?
+            ORDER BY total DESC, level DESC, xp DESC
+            LIMIT ?
+            """,
+            (int(guild_id), limit),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
 
 
 # -------------------------------------------------------------

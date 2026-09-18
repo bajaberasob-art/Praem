@@ -1443,7 +1443,11 @@
       const r = await api(`api/guild/${state.guild.id}/tickets/transcript/${ticket.id}`);
       if (!r.ok) return toast("السجل غير متاح");
       const source = await r.text();
-      const frame = el("iframe", { class: "ticket-transcript-frame", title: `Transcript #${ticket.id}` });
+       const frame = el("iframe", {
+         class: "ticket-transcript-frame",
+         title: `Transcript #${ticket.id}`,
+         sandbox: "",
+       });
       frame.srcdoc = source;
       const drawer = el("aside", { class: "ticket-drawer", role: "dialog", "aria-modal": "true" },
         el("div", { class: "ticket-drawer-head" },
@@ -1583,18 +1587,35 @@
       el("div", {}, el("strong", { text: `#${ticket.id} · ${ticket.subject}` }), el("small", { text: `${ticket.category_label} · ${ticket.close_reason || "بدون سبب"}` })),
       el("button", { class: "btn ghost", type: "button", text: "عرض السجل", onClick: () => openTicketTranscript(ticket) }),
     )));
-    const cannedForm = el("form", { class: "canned-form" },
+     const cannedForm = el("form", { class: "canned-form" },
       el("input", { name: "title", class: "studio-input", placeholder: "عنوان سريع: سياسة الاسترداد" }),
       el("input", { name: "category", class: "studio-input", placeholder: "التصنيف", value: "عام" }),
       el("textarea", { name: "content", class: "studio-textarea", placeholder: "نص الرد الجاهز…" }),
-      el("button", { class: "btn primary", type: "submit", text: "حفظ الرد الجاهز" }),
+       el("button", { class: "btn primary canned-submit", type: "submit", text: "حفظ الرد الجاهز" }),
     );
     cannedForm.onsubmit = (event) => { event.preventDefault(); saveCannedResponse(cannedForm); };
     const cannedList = el("div", { class: "canned-list" });
-    state.tickets.canned.forEach((item) => cannedList.append(el("div", { class: "canned-row" },
-      el("div", {}, el("strong", { text: item.title }), el("p", { text: item.content })),
-      el("button", { class: "icon-action danger", type: "button", text: "⌫", onClick: () => deleteCannedResponse(item) }),
-    )));
+     state.tickets.canned.forEach((item) => cannedList.append(el("div", { class: "canned-row" },
+       el("div", {}, el("strong", { text: item.title }), el("p", { text: item.content })),
+       el("div", { class: "canned-actions" },
+         el("button", {
+           class: "icon-action",
+           type: "button",
+           text: "✎",
+           title: "تحرير الرد",
+           onClick: () => {
+             cannedForm.dataset.id = item.id;
+             cannedForm.elements.title.value = item.title || "";
+             cannedForm.elements.category.value = item.category || "عام";
+             cannedForm.elements.content.value = item.content || "";
+             cannedForm.querySelector(".canned-submit").textContent = "تحديث الرد";
+             cannedForm.scrollIntoView({ behavior: "smooth", block: "center" });
+             cannedForm.elements.title.focus();
+           },
+         }),
+         el("button", { class: "icon-action danger", type: "button", text: "⌫", title: "حذف الرد", onClick: () => deleteCannedResponse(item) }),
+       ),
+     )));
     return el("section", { id: "view-tickets", class: "tickets-view" },
       el("div", { class: "studio-hero tickets-hero" },
         el("div", { class: "eyebrow", text: `${state.guild.name} / HELP DESK` }),

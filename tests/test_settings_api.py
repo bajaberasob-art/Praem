@@ -258,12 +258,21 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         status, data = await call(ws.api_guild_tickets_canned_get, request("GET", "/x", "s10"))
         self.assertEqual((status, data["responses"]), (200, []))
 
-        body = {"title": "سياسة الاسترداد", "content": "سنراجع طلبك.", "category": "billing"}
+        body = {
+            "title": "سياسة الاسترداد",
+            "content": "سنراجع طلبك.",
+            "category": "billing",
+            "shortcut": "refund",
+            "sticker_id": None,
+        }
         status, data = await call(
             ws.api_guild_tickets_canned,
             request("POST", "/x", "s10", body, self.headers),
         )
-        self.assertEqual((status, data["response"]["title"]), (200, "سياسة الاسترداد"))
+        self.assertEqual(
+            (status, data["response"]["title"], data["response"]["shortcut"], data["response"]["sticker_id"]),
+            (200, "سياسة الاسترداد", "refund", None),
+        )
 
         status, data = await call(
             ws.api_guild_tickets_action,

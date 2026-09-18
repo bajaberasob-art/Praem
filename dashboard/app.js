@@ -3075,6 +3075,114 @@
       el("small", { text: hint }),
     );
   }
+  function chartCard(title, subtitle, canvasId, tone = "blue") {
+    const canvas = el("canvas", {
+      class: `metric-chart chart-${tone}`,
+      id: canvasId,
+      width: "640",
+      height: "220",
+      role: "img",
+      "aria-label": title,
+    });
+    return el(
+      "section",
+      { class: "overview-panel chart-card" },
+      el("div", { class: "panel-heading" }, el("div", { class: "eyebrow", text: "LIVE TELEMETRY" }), el("h2", { text: title }), el("small", { text: subtitle })),
+      canvas,
+    );
+  }
+  function drawLine(canvas, values, color) {
+    if (!canvas || !values.length) return;
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth || 640;
+    const height = 220;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(ratio, ratio);
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const span = Math.max(max - min, 1);
+    ctx.clearRect(0, 0, width, height);
+    ctx.strokeStyle = "#162338";
+    ctx.lineWidth = 1;
+    for (let row = 1; row < 4; row += 1) {
+      const y = (height * row) / 4;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    const points = values.map((value, index) => [
+      values.length === 1 ? width / 2 : (index / (values.length - 1)) * width,
+      height - 18 - ((value - min) / span) * (height - 32),
+    ]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    points.forEach(([x, y], index) => index ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.stroke();
+    ctx.fillStyle = color;
+    points.slice(-1).forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+  function drawDashboardCharts() {
+    const series = state.stats?.series || [];
+    drawLine(
+      $("#latency-chart"),
+      series.map((point) => Number(point.latency_ms)).filter(Number.isFinite),
+      "#38bdf8",
+    );
+    drawLine(
+      $("#members-chart"),
+      series.map((point) => Number(point.members)).filter(Number.isFinite),
+      "#34d399",
+    );
+  }
+  function operationsView(view) {
+    const counts = state.stats?.counts || {};
+    const labels = {
+      moderation: ["المراقبة", "أحدث الإنذارات وإجراءات الإدارة", counts.infractions || 0, "infractions"],
+      economy: ["الاقتصاد", "الحسابات المسجلة في الخزينة", counts.economy_accounts || 0, "economy"],
+      community: ["المجتمع", "التذاكر المفتوحة والأرشيف", counts.tickets_active || 0, "tickets"],
+      ai: ["الذكاء الاصطناعي", "أدوات الذكاء متاحة من أوامر Discord", counts.commands_enabled || 0, "commands"],
+      system: ["النظام", "حالة الاتصالات والقياسات الحية", state.online ? "ONLINE" : "OFFLINE", "overview"],
+    };
+    const [title, description, value, target] = labels[view];
+    const actions = (state.actions || []).slice(0, 8);
+    const actionList = actions.length
+      ? actions.map((action) => el(
+          "div",
+          { class: "activity-row" },
+          el("span", { class: "activity-dot" }),
+          el("div", {}, el("strong", { text: action.action || "إجراء" }), el("small", { text: action.reason || "تم تسجيل الإجراء" })),
+        ))
+      : [el("div", { class: "empty-row", text: "لا توجد إجراءات مسجلة لهذا السيرفر" })];
+    return el(
+      "section",
+      { class: "operations-view" },
+      el("div", { class: "section-intro" }, el("div", { class: "eyebrow", text: `${state.guild.name} / ${title.toUpperCase()}` }), el("h1", { text: title }), el("p", { text: description })),
+      el(
+        "div",
+        { class: "overview-metrics" },
+        overviewMetric("القيمة الحالية", value, "من الحالة الحية", "blue", target),
+        overviewMetric("التذاكر المفتوحة", counts.tickets_active || 0, "Help Desk", "purple", "tickets"),
+        overviewMetric("الحوادث والمخالفات", counts.infractions || 0, "سجل الإجراءات", "red", "security"),
+        overviewMetric("الأتمتة النشطة", counts.auto_responses || 0, "ردود تلقائية", "green", "commands"),
+      ),
+      el(
+        "section",
+        { class: "overview-panel" },
+        el("div", { class: "panel-heading" }, el("div", { class: "eyebrow", text: "ACTION STREAM" }), el("h2", { text: "آخر الإجراءات" })),
+        el("div", { class: "overview-activity" }, ...actionList),
+      ),
+    );
+  }
   function overviewView() {
     const activeTickets = state.tickets.active.length;
     const openIncidents = state.incidents.length;
@@ -3177,6 +3285,12 @@
           el("div", { class: "service-status" }, el("span", { class: "status-pulse" }), el("span", {}, el("strong", { text: "Live Events" }), el("small", { text: "التحديثات تصل لحظياً" }))),
         ),
       ),
+      el(
+        "div",
+        { class: "overview-columns chart-grid" },
+        chartCard("زمن استجابة Discord", "قياس gateway بالميلي ثانية", "latency-chart", "blue"),
+        chartCard("منحنى الأعضاء", "عدد أعضاء السيرفر في القياسات الحية", "members-chart", "green"),
+      ),
     );
   }
   function settingsView() {
@@ -3246,9 +3360,11 @@
     else if (view === "commands") main.append(commandsView());
     else if (view === "onboarding") main.append(onboardingView());
     else if (view === "security") main.append(securityView());
+    else if (["moderation", "economy", "community", "ai", "system"].includes(view)) main.append(operationsView(view));
     else main.append(settingsView());
     renderDock();
     renderDynamic();
+    drawDashboardCharts();
   }
   function renderDynamic() {
     Object.keys(state.fields).forEach((k) => {

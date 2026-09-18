@@ -1889,6 +1889,8 @@
       title: form.elements.title.value.trim(),
       content: form.elements.content.value.trim(),
       category: form.elements.category.value.trim() || "عام",
+      shortcut: form.elements.shortcut.value.trim() || null,
+      sticker_id: form.elements.sticker_id.value || null,
     };
     if (!body.title || !body.content) return toast("أدخل عنوان ونص الرد الجاهز");
     try {

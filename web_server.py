@@ -380,6 +380,10 @@ def _utilities_cog():
     return bot_ref.get_cog("Utilities") if bot_ref else None
 
 
+def _community_cog():
+    return bot_ref.get_cog("Community") if bot_ref else None
+
+
 def _command_roles(guild, role_ids):
     if not isinstance(role_ids, list) or len(role_ids) > 25:
         return None, "اختر من 0 إلى 25 رتبة"
@@ -529,6 +533,168 @@ async def api_guild_auto_responses_delete(req):
     if not deleted:
         return json_error(404, "auto_responder_not_found")
     return web.json_response({"deleted": True, "rule_id": rule_id})
+
+
+def _ticket_role_ids(guild, categories):
+    if not isinstance(categories, list) or not categories or len(categories) > 25:
+        return None, "أضف من 1 إلى 25 تصنيفاً"
+    clean = []
+    for index, raw in enumerate(categories):
+        if not isinstance(raw, dict):
+            return None, f"التصنيف رقم {index + 1} غير صالح"
+        label = str(raw.get("label") or raw.get("name") or "").strip()
+        if not label or len(label) > 80:
+            return None, f"اسم التصنيف رقم {index + 1} غير صالح"
+        role_ids = raw.get("support_role_ids", [])
+        senior_ids = raw.get("senior_role_ids", [])
+        if not isinstance(role_ids, list) or not isinstance(senior_ids, list):
+            return None, f"رتب التصنيف رقم {index + 1} غير صالحة"
+        for role_id in [*role_ids, *senior_ids]:
+            try:
+                role = guild.get_role(int(role_id))
+            except (TypeError, ValueError):
+                role = None
+            if role is None or role.is_default():
+                return None, f"توجد رتبة غير موجودة في التصنيف رقم {index + 1}"
+        category_id = raw.get("category_id")
+        if category_id not in (None, ""):
+            try:
+                parent = guild.get_channel(int(category_id))
+            except (TypeError, ValueError):
+                parent = None
+            if not isinstance(parent, discord.CategoryChannel):
+                return None, f"الفئة الأب للتصنيف رقم {index + 1} غير موجودة"
+        clean.append(raw)
+    return clean, None
+
+
+@routes.post('/api/guild/{guild_id}/tickets/deploy')
+async def api_guild_tickets_deploy(req):
+    session, guild = await authorize(req, write=True)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        body = await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    channel_id = body.get("target_channel_id")
+    if isinstance(channel_id, bool) or not str(channel_id).isdigit():
+        return json_error(400, "validation", fields={"target_channel_id": "معرف القناة غير صالح"})
+    channel = guild.get_channel(int(channel_id))
+    if not isinstance(channel, discord.TextChannel):
+        return json_error(400, "validation", fields={"target_channel_id": "القناة النصية غير موجودة"})
+    categories, category_error = _ticket_role_ids(guild, body.get("categories"))
+    if category_error:
+        return json_error(400, "validation", fields={"categories": category_error})
+    try:
+        result = await community.deploy_ticket_panel(channel.id, categories)
+    except (ValueError, discord.Forbidden, discord.HTTPException) as error:
+        logger.warning("Ticket panel deployment failed: %s", error)
+        return json_error(400, "ticket_panel_deploy_failed")
+    logger.info("Ticket panel deployed in guild %s by user %s", guild.id, session["id"])
+    return web.json_response({"ok": True, "panel": result})
+
+
+@routes.get('/api/guild/{guild_id}/tickets/active')
+async def api_guild_tickets_active(req):
+    _, guild = await authorize(req)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    return web.json_response({"tickets": await community.get_active_tickets(guild.id)})
+
+
+@routes.get('/api/guild/{guild_id}/tickets/archive')
+async def api_guild_tickets_archive(req):
+    _, guild = await authorize(req)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    query = req.query.get("q", req.query.get("query", ""))
+    return web.json_response({
+        "tickets": await community.get_ticket_archive(guild.id, query[:120]),
+        "query": query[:120],
+    })
+
+
+@routes.get('/api/guild/{guild_id}/tickets/transcript/{ticket_id}')
+async def api_guild_ticket_transcript(req):
+    _, guild = await authorize(req)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    try:
+        ticket_id = int(req.match_info["ticket_id"])
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"ticket_id": "معرف التذكرة غير صالح"})
+    transcript = await community.get_ticket_transcript(guild.id, ticket_id)
+    if not transcript:
+        return json_error(404, "transcript_not_found")
+    return web.Response(
+        text=transcript["content_html"],
+        content_type="text/html",
+        charset="utf-8",
+        headers={
+            "Content-Disposition": f'inline; filename="ticket-{ticket_id}.html"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@routes.get('/api/guild/{guild_id}/tickets/kpis')
+async def api_guild_tickets_kpis(req):
+    _, guild = await authorize(req)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    return web.json_response({"kpis": await community.get_staff_kpis(guild.id)})
+
+
+@routes.post('/api/guild/{guild_id}/tickets/canned')
+async def api_guild_tickets_canned(req):
+    session, guild = await authorize(req, write=True)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        body = await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    if body.get("action") == "delete":
+        try:
+            response_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return json_error(400, "validation", fields={"id": "معرف الرد غير صالح"})
+        if not await community.delete_canned_response(guild.id, response_id):
+            return json_error(404, "canned_not_found")
+        return web.json_response({"deleted": True, "id": response_id})
+    title = str(body.get("title", "")).strip()
+    content = str(body.get("content", "")).strip()
+    category = str(body.get("category", "عام")).strip()
+    response_id = body.get("id")
+    if not title or len(title) > 120:
+        return json_error(400, "validation", fields={"title": "العنوان يجب أن يكون بين 1 و120 حرفاً"})
+    if not content or len(content) > 2000:
+        return json_error(400, "validation", fields={"content": "النص يجب أن يكون بين 1 و2000 حرف"})
+    try:
+        response_id = int(response_id) if response_id not in (None, "") else None
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"id": "معرف الرد غير صالح"})
+    result = await community.save_canned_response(
+        guild.id, title, content, category, session["id"], response_id
+    )
+    if not result:
+        return json_error(404, "canned_not_found")
+    return web.json_response({"response": result})
 
 
 @routes.get('/api/guild/{guild_id}/security/incidents')

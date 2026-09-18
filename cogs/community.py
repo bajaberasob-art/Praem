@@ -16,10 +16,15 @@ from database import (
     create_ticket,
     escalate_ticket,
     get_active_tickets,
+    get_ticket_archive,
     get_staff_kpis,
     get_ticket_by_channel,
     get_ticket_panels,
     get_ticket_transcripts,
+    get_ticket_transcript,
+    get_canned_responses,
+    save_canned_response,
+    delete_canned_response,
     record_ticket_response,
     save_ticket_panel,
     save_ticket_rating,
@@ -452,8 +457,41 @@ class Community(commands.Cog):
     ) -> list[dict]:
         return await get_ticket_transcripts(guild_id, query)
 
+    async def get_ticket_archive(
+        self,
+        guild_id: int,
+        query: str = "",
+    ) -> list[dict]:
+        return await get_ticket_archive(guild_id, query)
+
+    async def get_ticket_transcript(
+        self,
+        guild_id: int,
+        ticket_id: int,
+    ) -> dict | None:
+        return await get_ticket_transcript(guild_id, ticket_id)
+
     async def get_staff_kpis(self, guild_id: int) -> list[dict]:
         return await get_staff_kpis(guild_id)
+
+    async def get_canned_responses(self, guild_id: int) -> list[dict]:
+        return await get_canned_responses(guild_id)
+
+    async def save_canned_response(
+        self,
+        guild_id: int,
+        title: str,
+        content: str,
+        category: str = "عام",
+        created_by: int | str | None = None,
+        response_id: int | None = None,
+    ) -> dict:
+        return await save_canned_response(
+            guild_id, title, content, category, created_by, response_id
+        )
+
+    async def delete_canned_response(self, guild_id: int, response_id: int) -> bool:
+        return await delete_canned_response(guild_id, response_id)
 
     @staticmethod
     def _is_ticket_staff(member, ticket: dict) -> bool:

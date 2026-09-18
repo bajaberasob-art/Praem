@@ -3795,6 +3795,96 @@ textarea {
   cursor: pointer;
   font-size: .65rem;
 }
+.command-shortcut-link {
+  border: 1px solid #1b5e70;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #062b38;
+  color: #9eeaf5;
+  cursor: pointer;
+  font-size: .62rem;
+}
+.command-shortcut-link:hover {
+  border-color: #67e8f9;
+  background: #0b4554;
+}
+.command-alias-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  min-height: 20px;
+}
+.command-alias-preview code {
+  border: 1px solid #19485c;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #071b27;
+  color: #8dddec;
+  font: .62rem ui-monospace, monospace;
+}
+.command-alias-preview span {
+  color: #60758c;
+  font-size: .64rem;
+}
+.command-shortcut-workbench {
+  display: grid;
+  gap: 13px;
+  padding: 17px;
+  border: 1px solid #196078;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 4% 0, #22d3ee18, transparent 32%),
+    linear-gradient(145deg, #061923, #03070c 72%);
+  box-shadow: inset 0 1px #ffffff09, 0 0 25px #0e749033;
+}
+.command-shortcut-workbench-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.command-shortcut-workbench-head h3 {
+  margin: 4px 0;
+  color: #dcfbff;
+  font-size: 1.05rem;
+}
+.command-shortcut-workbench-head p {
+  max-width: 650px;
+  margin: 0;
+  color: #8da9bb;
+  font-size: .73rem;
+  line-height: 1.7;
+}
+.command-shortcut-count {
+  flex: none;
+  border: 1px solid #22758a;
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: #a5f3fc;
+  background: #063344;
+  font: .7rem ui-monospace, monospace;
+}
+.command-shortcut-editor {
+  display: grid;
+  grid-template-columns: minmax(150px, .8fr) minmax(0, 1.8fr) auto;
+  align-items: stretch;
+  gap: 9px;
+}
+.command-shortcut-command,
+.command-shortcut-input {
+  min-height: 48px;
+}
+.command-shortcut-input {
+  resize: vertical;
+}
+.command-shortcut-save {
+  min-width: 142px;
+}
+.command-shortcut-hint {
+  color: #7192a6;
+  font-size: .68rem;
+}
 .policy-panel-body {
   display: grid;
   gap: 10px;
@@ -4213,6 +4303,22 @@ textarea {
   .command-detail-drawer {
     width: 100%;
     padding: 18px;
+  }
+  .command-shortcut-workbench {
+    padding: 13px;
+  }
+  .command-shortcut-workbench-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .command-shortcut-editor {
+    grid-template-columns: 1fr;
+  }
+  .command-shortcut-save {
+    width: 100%;
+  }
+  .command-row-status {
+    flex-wrap: wrap;
   }
   .canned-form {
     padding-bottom: 24px;

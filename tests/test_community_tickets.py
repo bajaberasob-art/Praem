@@ -63,6 +63,10 @@ class CommunityTicketTests(unittest.IsolatedAsyncioTestCase):
                 "ticket:close",
                 "ticket:waiting-user",
                 "ticket:internal-note",
+                "ticket:add-member",
+                "ticket:remove-member",
+                "ticket:unclaim",
+                "ticket:transfer",
             },
         )
 
@@ -80,6 +84,9 @@ class CommunityTicketTests(unittest.IsolatedAsyncioTestCase):
         ticket = await database.create_ticket(
             700, 301, 55, "questions", "استفسارات", "Help", "Need help", ["9"]
         )
+        await database.claim_ticket(700, ticket["id"], 99)
+        released = await database.unclaim_ticket(700, ticket["id"], 99)
+        self.assertEqual((released["claimed_by"], released["status"]), (None, "waiting_staff"))
         await database.claim_ticket(700, ticket["id"], 99)
         await database.record_ticket_response(700, ticket["id"])
         await database.close_ticket(700, ticket["id"], 99, "Solved")

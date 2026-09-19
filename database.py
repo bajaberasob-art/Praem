@@ -707,6 +707,7 @@ async def init_db() -> None:
                     game_type TEXT,
                     team_size INTEGER,
                     max_slots INTEGER,
+                    message_id INTEGER DEFAULT 0,
                     is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -723,6 +724,12 @@ async def init_db() -> None:
                     UNIQUE(scrim_id, slot_number)
                 );
             """)
+            async with db.execute("PRAGMA table_info(scrim_configs)") as cur:
+                scrim_config_columns = {row[1] for row in await cur.fetchall()}
+            if "message_id" not in scrim_config_columns:
+                await db.execute(
+                    "ALTER TABLE scrim_configs ADD COLUMN message_id INTEGER DEFAULT 0"
+                )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_scrim_configs_guild_active "
                 "ON scrim_configs(guild_id, is_active);"

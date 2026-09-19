@@ -493,7 +493,7 @@ class Analytics(commands.Cog):
             color=color or COLORS["log_ticket"][0],
         )
 
-    @commands.Cog.listener()
+    @commands.Cog.listener("on_guild_update")
     async def on_guild_update_audit(self, before: discord.Guild, after: discord.Guild):
         changes = []
         for label, old, new in (
@@ -517,7 +517,7 @@ class Analytics(commands.Cog):
                 ],
             )
 
-    @commands.Cog.listener()
+    @commands.Cog.listener("on_member_join")
     async def on_member_join_audit(self, member: discord.Member):
         await self._log(
             member.guild,
@@ -529,7 +529,7 @@ class Analytics(commands.Cog):
             fields=[("👤 العضو", f"{member.mention} (`{member.id}`)", True)],
         )
 
-    @commands.Cog.listener()
+    @commands.Cog.listener("on_member_remove")
     async def on_member_remove_audit(self, member: discord.Member):
         await self._log(
             member.guild,
@@ -541,7 +541,7 @@ class Analytics(commands.Cog):
             fields=[("👤 العضو", f"{member.mention} (`{member.id}`)", True)],
         )
 
-    @commands.Cog.listener()
+    @commands.Cog.listener("on_raw_reaction_add")
     async def on_raw_reaction_add_audit(self, payload: discord.RawReactionActionEvent):
         if not payload.guild_id or payload.user_id == getattr(self.bot.user, "id", None):
             return

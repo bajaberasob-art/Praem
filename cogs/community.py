@@ -968,6 +968,19 @@ class Community(commands.Cog):
         await itx.response.send_message(
             f"✅ تم فتح تذكرتك: {channel.mention}", ephemeral=True
         )
+        analytics = self.bot.get_cog("Analytics")
+        if analytics:
+            await analytics.log_ticket_event(
+                guild,
+                "🎫 فتح تذكرة",
+                f"تم فتح تذكرة جديدة في {channel.mention}.",
+                actor=itx.user,
+                fields=[
+                    ("🎫 التذكرة", f"#{ticket['id']}", True),
+                    ("📂 التصنيف", category["label"], True),
+                    ("📝 الموضوع", subject, False),
+                ],
+            )
         return ticket
 
     @staticmethod
@@ -1321,6 +1334,19 @@ class Community(commands.Cog):
         await itx.followup.send(
             "✅ أُغلقت التذكرة وحُفظ transcript وأُرسل للمستخدم.", ephemeral=True
         )
+        analytics = self.bot.get_cog("Analytics")
+        if analytics:
+            await analytics.log_ticket_event(
+                itx.guild,
+                "🔒 إغلاق تذكرة",
+                f"تم إغلاق التذكرة رقم `#{ticket['id']}` وأرشفتها.",
+                actor=itx.user,
+                fields=[
+                    ("🎫 التذكرة", f"#{ticket['id']}", True),
+                    ("🧾 المنفذ", f"{itx.user.mention} (`{itx.user.id}`)", True),
+                    ("📌 السبب", reason, False),
+                ],
+            )
 
     async def _build_transcript(self, channel, ticket):
         lines = [

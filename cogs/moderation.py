@@ -225,6 +225,20 @@ class Moderation(commands.Cog):
         if warning_count is not None:
             embed.add_field(name="إجمالي الإنذارات", value=str(warning_count), inline=True)
         await self.send_log(guild, embed)
+        analytics = self.bot.get_cog("Analytics")
+        if analytics:
+            await analytics.log_automod(
+                guild,
+                embed.title or "🛡️ إجراء Auto-Mod",
+                embed.description or "تم تسجيل إجراء من نظام Auto-Mod.",
+                actor=member,
+                fields=[
+                    ("📌 السبب", reason, False),
+                    ("👤 العضو", f"{member.mention} (`{member.id}`)", True),
+                    ("📍 القناة", f"{msg.channel.mention} (`{msg.channel.id}`)", True),
+                ],
+                color=embed.color.value if embed.color else None,
+            )
         logger.info(
             "[AUTOMOD] guild=%s user=%s reason=%s timeout=%s",
             guild.id,

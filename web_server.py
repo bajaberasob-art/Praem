@@ -1802,32 +1802,333 @@ async def index(req):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>بوابة الإدارة والتحكم السحابية | تسجيل الدخول</title>
             <style>
-                * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
-                body { background: #000000; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 1rem; }
-                .auth-card { background: #0a0e17; border: 1px solid #1e293b; border-radius: 18px; padding: 2.2rem; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
-                .badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(59,130,246,0.1); color: #60a5fa; padding: 5px 14px; border-radius: 30px; font-size: 0.8rem; font-weight: bold; border: 1px solid rgba(59,130,246,0.2); }
-                h2 { margin: 1.2rem 0 0.5rem; font-size: 1.5rem; }
-                p { color: #94a3b8; font-size: 0.9rem; line-height: 1.6; margin-bottom: 1.8rem; }
-                .btn-login { background: #5865F2; color: #fff; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0.9rem 1.4rem; border-radius: 12px; font-weight: bold; font-size: 1rem; transition: 0.2s; box-shadow: 0 4px 15px rgba(88,101,242,0.3); }
-                .btn-login:hover { background: #4752c4; }
-                .features { display: flex; justify-content: space-around; margin-top: 1.8rem; padding-top: 1.5rem; border-top: 1px solid #1e293b; color: #64748b; font-size: 0.78rem; }
+                :root {
+                    color-scheme: dark;
+                    --ink: #f8fbff;
+                    --muted: #91a0b8;
+                    --line: rgba(148, 163, 184, .16);
+                    --panel: rgba(11, 18, 32, .82);
+                    --blue: #6c7cff;
+                    --cyan: #41d9ff;
+                    --green: #45d39a;
+                }
+                * { box-sizing: border-box; }
+                html, body { min-height: 100%; }
+                body {
+                    background:
+                        radial-gradient(circle at 12% 12%, rgba(71, 87, 255, .18), transparent 28rem),
+                        radial-gradient(circle at 88% 82%, rgba(0, 198, 255, .1), transparent 24rem),
+                        #050810;
+                    color: var(--ink);
+                    display: grid;
+                    place-items: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    padding: 28px;
+                    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+                    overflow-x: hidden;
+                }
+                body::before {
+                    content: "";
+                    position: fixed;
+                    inset: 0;
+                    pointer-events: none;
+                    opacity: .32;
+                    background-image:
+                        linear-gradient(rgba(148, 163, 184, .045) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(148, 163, 184, .045) 1px, transparent 1px);
+                    background-size: 42px 42px;
+                    mask-image: linear-gradient(to bottom, black, transparent 82%);
+                }
+                .auth-shell {
+                    position: relative;
+                    display: grid;
+                    grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr);
+                    width: min(1080px, 100%);
+                    min-height: 650px;
+                    overflow: hidden;
+                    border: 1px solid rgba(148, 163, 184, .2);
+                    border-radius: 30px;
+                    background: linear-gradient(135deg, rgba(17, 27, 48, .84), rgba(5, 9, 18, .96));
+                    box-shadow: 0 35px 100px rgba(0, 0, 0, .55), 0 0 0 1px rgba(108, 124, 255, .06);
+                    isolation: isolate;
+                }
+                .auth-shell::after {
+                    content: "";
+                    position: absolute;
+                    width: 420px;
+                    height: 420px;
+                    left: -170px;
+                    bottom: -230px;
+                    border-radius: 50%;
+                    background: rgba(65, 217, 255, .1);
+                    filter: blur(30px);
+                    pointer-events: none;
+                    z-index: -1;
+                }
+                .brand-panel {
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                    padding: clamp(34px, 6vw, 76px);
+                    border-left: 1px solid var(--line);
+                    background:
+                        linear-gradient(145deg, rgba(66, 82, 255, .14), transparent 48%),
+                        radial-gradient(circle at 30% 22%, rgba(65, 217, 255, .12), transparent 22rem);
+                }
+                .brand-panel::before {
+                    content: "✦";
+                    position: absolute;
+                    top: 42px;
+                    left: 56px;
+                    color: rgba(108, 124, 255, .34);
+                    font-size: 150px;
+                    line-height: 1;
+                    transform: rotate(15deg);
+                }
+                .brand-mark {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 12px;
+                    width: fit-content;
+                    font-weight: 800;
+                    letter-spacing: .02em;
+                }
+                .mark-icon {
+                    display: grid;
+                    place-items: center;
+                    width: 44px;
+                    height: 44px;
+                    border: 1px solid rgba(125, 211, 252, .34);
+                    border-radius: 14px;
+                    color: #dff8ff;
+                    background: linear-gradient(145deg, #5367ff, #1c2a6b);
+                    box-shadow: 0 10px 28px rgba(71, 87, 255, .3);
+                }
+                .mark-icon svg { width: 24px; height: 24px; }
+                .brand-mark small {
+                    display: block;
+                    margin-top: 3px;
+                    color: var(--muted);
+                    font-size: 11px;
+                    font-weight: 500;
+                    letter-spacing: .08em;
+                }
+                .brand-copy { position: relative; max-width: 470px; margin: auto 0; }
+                .eyebrow {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    color: #9edfff;
+                    font-size: 12px;
+                    font-weight: 800;
+                    letter-spacing: .11em;
+                }
+                .eyebrow::before {
+                    content: "";
+                    width: 25px;
+                    height: 1px;
+                    background: var(--cyan);
+                    box-shadow: 0 0 14px var(--cyan);
+                }
+                .brand-copy h1 {
+                    margin: 20px 0 16px;
+                    max-width: 470px;
+                    font-size: clamp(2.2rem, 5vw, 4.7rem);
+                    line-height: 1.08;
+                    letter-spacing: -.045em;
+                }
+                .brand-copy h1 span {
+                    color: #91a0ff;
+                    text-shadow: 0 0 30px rgba(108, 124, 255, .3);
+                }
+                .brand-copy p {
+                    max-width: 430px;
+                    margin: 0;
+                    color: var(--muted);
+                    font-size: 16px;
+                    line-height: 1.9;
+                }
+                .brand-footer {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                    color: #a8b5ca;
+                    font-size: 12px;
+                }
+                .brand-footer span {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 7px;
+                    padding: 9px 12px;
+                    border: 1px solid var(--line);
+                    border-radius: 999px;
+                    background: rgba(255, 255, 255, .035);
+                }
+                .brand-footer i { color: var(--green); font-style: normal; }
+                .auth-card {
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    padding: clamp(30px, 5vw, 64px);
+                    background: rgba(6, 11, 22, .7);
+                }
+                .auth-card-head { margin-bottom: 32px; }
+                .auth-card-head .badge {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 8px 12px;
+                    border: 1px solid rgba(108, 124, 255, .3);
+                    border-radius: 999px;
+                    color: #b8c0ff;
+                    background: rgba(108, 124, 255, .1);
+                    font-size: 12px;
+                    font-weight: 800;
+                }
+                .auth-card h2 {
+                    margin: 22px 0 10px;
+                    font-size: clamp(1.8rem, 3vw, 2.4rem);
+                    letter-spacing: -.04em;
+                }
+                .auth-card-intro {
+                    margin: 0;
+                    color: var(--muted);
+                    font-size: 14px;
+                    line-height: 1.85;
+                }
+                .btn-login {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 12px;
+                    min-height: 58px;
+                    padding: 0 20px;
+                    border: 1px solid rgba(196, 200, 255, .25);
+                    border-radius: 15px;
+                    color: #fff;
+                    background: linear-gradient(135deg, #6878ff, #4b5be0);
+                    box-shadow: 0 14px 28px rgba(80, 92, 236, .26), inset 0 1px rgba(255, 255, 255, .22);
+                    font-size: 16px;
+                    font-weight: 800;
+                    text-decoration: none;
+                    transition: transform .2s ease, box-shadow .2s ease, filter .2s ease;
+                }
+                .btn-login:hover {
+                    filter: brightness(1.08);
+                    transform: translateY(-2px);
+                    box-shadow: 0 18px 34px rgba(80, 92, 236, .38), inset 0 1px rgba(255, 255, 255, .28);
+                }
+                .btn-login:active { transform: translateY(0); }
+                .btn-login svg { flex: none; width: 23px; height: 23px; }
+                .login-note {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 10px;
+                    margin: 17px 0 0;
+                    color: #7888a4;
+                    font-size: 12px;
+                    line-height: 1.7;
+                }
+                .login-note strong { color: #a7b8d2; }
+                .login-note svg { flex: none; margin-top: 2px; color: var(--green); }
+                .trust-grid {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 8px;
+                    margin-top: 36px;
+                    padding-top: 24px;
+                    border-top: 1px solid var(--line);
+                }
+                .trust-item {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 7px;
+                    min-width: 0;
+                    color: #8594ad;
+                    font-size: 11px;
+                    line-height: 1.5;
+                }
+                .trust-icon { color: #99a5ff; font-size: 17px; }
+                .trust-item strong { color: #c9d3e6; font-size: 12px; }
+                .auth-footer {
+                    margin-top: 34px;
+                    color: #596a84;
+                    font-size: 11px;
+                    text-align: center;
+                }
+                @media (max-width: 820px) {
+                    body { padding: 14px; }
+                    .auth-shell { display: block; min-height: auto; border-radius: 23px; }
+                    .brand-panel {
+                        min-height: 410px;
+                        padding: 30px 25px;
+                        border-left: 0;
+                        border-bottom: 1px solid var(--line);
+                    }
+                    .brand-panel::before { top: 15px; left: 24px; font-size: 100px; }
+                    .brand-copy { margin: 54px 0 34px; }
+                    .brand-copy h1 { margin-top: 14px; font-size: clamp(2.2rem, 11vw, 3.4rem); }
+                    .brand-copy p { font-size: 14px; line-height: 1.75; }
+                    .auth-card { padding: 34px 25px 30px; }
+                }
+                @media (max-width: 430px) {
+                    .brand-footer { gap: 7px; }
+                    .brand-footer span { padding: 7px 9px; font-size: 10px; }
+                    .trust-grid { gap: 6px; }
+                    .trust-item { font-size: 10px; }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+                }
             </style>
         </head>
         <body>
-            <div class="auth-card">
-                <span class="badge">⚡ نظام التوثيق السحابي الموحد</span>
-                <h2>لوحة القيادة المركزية</h2>
-                <p>الدخول مخصص لإدارة السيرفرات الرسمية. يتم فحص الهوية والتحقق من صلاحية الإدارة (Administrator) تلقائياً عبر ديسكورد.</p>
-                <a href="login" class="btn-login">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.893.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
-                    تسجيل الدخول عبر ديسكورد
-                </a>
-                <div class="features">
-                    <span>🔒 تشفير فوري</span>
-                    <span>⚡ بدون كلمات مرور</span>
-                    <span>🛡️ فحص الرتب التلقائي</span>
-                </div>
-            </div>
+            <main class="auth-shell">
+                <section class="brand-panel" aria-label="نبذة عن لوحة التحكم">
+                    <div class="brand-mark">
+                        <span class="mark-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                                <path d="M12 3 19 6v5.4c0 4.3-2.9 7.9-7 9.6-4.1-1.7-7-5.3-7-9.6V6l7-3Z"/>
+                                <path d="m8.8 12 2.1 2.1 4.5-4.6"/>
+                            </svg>
+                        </span>
+                        <span>PRIME CONTROL<small>SMART SERVER OPERATIONS</small></span>
+                    </div>
+                    <div class="brand-copy">
+                        <span class="eyebrow">مساحة الإدارة الذكية</span>
+                        <h1>سيطرة أوضح.<br><span>سيرفر أقوى.</span></h1>
+                        <p>أدر مجتمعك من لوحة واحدة، راقب التفاصيل المهمة، وطبّق إعداداتك بثقة من دون خطوات معقدة.</p>
+                    </div>
+                    <div class="brand-footer" aria-label="مزايا المنصة">
+                        <span><i>●</i> حماية مستمرة</span>
+                        <span><i>●</i> تحكم مباشر</span>
+                        <span><i>●</i> تجربة عربية أولاً</span>
+                    </div>
+                </section>
+                <section class="auth-card" aria-labelledby="login-title">
+                    <div class="auth-card-head">
+                        <span class="badge"><span aria-hidden="true">✦</span> دخول موثّق وآمن</span>
+                        <h2 id="login-title">مرحباً بعودتك</h2>
+                        <p class="auth-card-intro">سجّل الدخول بحساب Discord لإدارة السيرفرات التي تملكها أو تملك فيها صلاحية الإدارة.</p>
+                    </div>
+                    <a href="login" class="btn-login" aria-label="تسجيل الدخول باستخدام Discord">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 0 1.873.893.077.077 0 0 1-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+                        تسجيل الدخول عبر Discord
+                    </a>
+                    <p class="login-note">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 19 6v5.4c0 4.3-2.9 7.9-7 9.6-4.1-1.7-7-5.3-7-9.6V6l7-3Z"/><path d="m8.8 12 2.1 2.1 4.5-4.6"/></svg>
+                        <span><strong>لا نطلب كلمة مرور.</strong><br>سيتم التحقق من هويتك وصلاحياتك تلقائياً عبر Discord.</span>
+                    </p>
+                    <div class="trust-grid">
+                        <div class="trust-item"><span class="trust-icon">⌁</span><strong>دخول سريع</strong><span>بدون نماذج طويلة</span></div>
+                        <div class="trust-item"><span class="trust-icon">◈</span><strong>صلاحية دقيقة</strong><span>للمديرين فقط</span></div>
+                        <div class="trust-item"><span class="trust-icon">✓</span><strong>بيانات محمية</strong><span>تحقق موثوق</span></div>
+                    </div>
+                    <div class="auth-footer">باستمرارك، أنت تستخدم بوابة الإدارة الرسمية للسيرفر.</div>
+                </section>
+            </main>
         </body>
         </html>
         """

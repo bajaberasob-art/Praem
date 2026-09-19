@@ -189,7 +189,14 @@ class ScrimBoardView(discord.ui.View):
         scrim = next((item for item in scrims if int(item["id"]) == self.scrim_id), None)
         if not scrim:
             return
-        await interaction.message.edit(embed=await _scrim_embed(scrim), view=self)
+        message = interaction.message
+        if message is None and interaction.channel is not None:
+            try:
+                message = await interaction.channel.fetch_message(int(scrim["message_id"]))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                message = None
+        if message is not None:
+            await message.edit(embed=await _scrim_embed(scrim), view=self)
 
 
 class Gaming(commands.Cog):

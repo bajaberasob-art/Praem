@@ -15,3 +15,4 @@
 - [DOM list rendering](dom-list-rendering.md) — pass mapped node arrays to replaceChildren with spread; a nested array becomes `[object HTMLButtonElement]`.
 - [Gaming operations architecture](gaming-operations.md) — persistent scrim reservations and Discord boards stay additive to tournament state.
 - [Audit log routing](audit-log-routing.md) — six-category routes publish to memory only after SQLite commit; embed builders must omit absent avatar URLs.
+- [Production hardening](production-hardening.md) — proxy-relative PWA assets, public health probes, additive SQLite WAL tuning, and layered API limits must stay compatible.

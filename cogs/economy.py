@@ -481,6 +481,44 @@ class Economy(commands.Cog):
         await send(embed=embed)
         await self._leaderboard_changed(guild.id)
 
+    async def dashboard_adjust(
+        self,
+        guild: discord.Guild,
+        actor: discord.Member,
+        target: discord.Member,
+        wallet_delta: int = 0,
+        level_delta: int = 0,
+    ) -> dict:
+        """Apply a dashboard economy action using the same guarded mutation path."""
+        before = await get_or_create_user(target.id, guild.id)
+        updated = before
+        if wallet_delta:
+            updated = await adjust_user_balance(
+                guild.id, target.id, int(wallet_delta), 0
+            )
+            if updated is None:
+                raise ValueError("لا يمكن أن يصبح الرصيد سالباً")
+        if level_delta:
+            updated = await adjust_user_level(
+                guild.id, target.id, int(level_delta)
+            )
+            if updated is None:
+                raise ValueError("تعذر تعديل المستوى")
+            await self._apply_level_rewards(
+                target, int(before["level"]), int(updated["level"])
+            )
+        await add_economy_audit(
+            guild.id,
+            target.id,
+            actor.id,
+            "dashboard_adjust",
+            wallet_delta=int(wallet_delta),
+            level_delta=int(level_delta),
+            details=f"target={target.id}",
+        )
+        await self._leaderboard_changed(guild.id)
+        return {"before": before, "user": updated}
+
     @app_commands.command(name="give_points", description="إضافة نقاط إلى محفظة عضو")
     async def give_points(
         self,

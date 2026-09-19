@@ -1640,10 +1640,8 @@ async def api_guild_tickets_deploy(req):
     community = _community_cog()
     if community is None:
         return json_error(503, "community_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        body = await req.json()
+        body = await read_json_body(req)
     except (json.JSONDecodeError, ValueError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -1747,7 +1745,7 @@ async def api_guild_tickets_action(req):
     if community is None:
         return json_error(503, "community_unavailable")
     try:
-        body = await req.json()
+        body = await read_json_body(req)
     except (json.JSONDecodeError, ValueError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -1819,10 +1817,8 @@ async def api_guild_tickets_canned(req):
     community = _community_cog()
     if community is None:
         return json_error(503, "community_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        body = await req.json()
+        body = await read_json_body(req)
     except (json.JSONDecodeError, ValueError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -2181,13 +2177,8 @@ async def api_deploy_self_roles(req):
     engagement = bot_ref.get_cog("Engagement") if bot_ref else None
     if engagement is None:
         return json_error(503, "engagement_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        raw_body = await req.content.read(MAX_BODY + 1)
-        if len(raw_body) > MAX_BODY:
-            return json_error(413, "too_large")
-        body = json.loads(raw_body.decode("utf-8") or "{}")
+        body = await read_json_body(req)
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):

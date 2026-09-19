@@ -22,6 +22,9 @@ from database import (
     get_warning,
     get_recent_warnings,
     get_dashboard_stats,
+    get_economy_leaderboard,
+    get_level_leaderboard,
+    get_role_multipliers,
     get_scrims,
     get_guild_settings,
     delete_shortcut,
@@ -679,6 +682,129 @@ def _utilities_cog():
 
 def _community_cog():
     return bot_ref.get_cog("Community") if bot_ref else None
+
+
+def _economy_cog():
+    return bot_ref.get_cog("Economy") if bot_ref else None
+
+
+def _public_economy_user(row: dict) -> dict:
+    return {
+        "user_id": str(row["user_id"]),
+        "level": int(row["level"]),
+        "balance": int(row["balance"]),
+        "bank": int(row["bank"]),
+        "xp": int(row["xp"]),
+        "total": int(row["total"]) if "total" in row else int(row["balance"]) + int(row["bank"]),
+    }
+
+
+@routes.get('/api/guild/{guild_id}/economy')
+async def api_guild_economy(req):
+    _, guild = await authorize(req)
+    snapshot = await get_guild_settings(guild.id)
+    return web.json_response({
+        "settings": public_settings(snapshot),
+        "wealth": [_public_economy_user(row) for row in await get_economy_leaderboard(guild.id, 10)],
+        "levels": [_public_economy_user(row) for row in await get_level_leaderboard(guild.id, 10)],
+        "multipliers": await get_role_multipliers(guild.id),
+    })
+
+
+@routes.post('/api/guild/{guild_id}/economy/config')
+async def api_guild_economy_config(req):
+    session, guild = await authorize(req, write=True)
+    body = await read_json_body(req)
+    changes = {}
+    if "leaderboard_channel_id" in body:
+        try:
+            channel_id = int(body["leaderboard_channel_id"] or 0)
+        except (TypeError, ValueError):
+            return json_error(400, "validation", fields={"leaderboard_channel_id": "القناة غير صالحة"})
+        if channel_id:
+            channel = guild.get_channel(channel_id)
+            if channel is None or not isinstance(channel, discord.TextChannel):
+                return json_error(400, "validation", fields={"leaderboard_channel_id": "اختر قناة نصية صالحة"})
+        changes["leaderboard_channel_id"] = channel_id
+        changes["leaderboard_message_id"] = 0
+    try:
+        if "daily_base_amount" in body:
+            amount = int(body["daily_base_amount"])
+            if not 0 <= amount <= 1_000_000:
+                raise ValueError
+            changes["daily_base_amount"] = amount
+        if "level_multiplier_pct" in body:
+            pct = int(body["level_multiplier_pct"])
+            if not 0 <= pct <= 500:
+                raise ValueError
+            changes["level_multiplier_pct"] = pct
+        if "role_multipliers" in body:
+            raw = body["role_multipliers"]
+            if not isinstance(raw, dict) or len(raw) > 100:
+                raise ValueError
+            clean = {}
+            for role_id, multiplier in raw.items():
+                role = guild.get_role(int(role_id)) if str(role_id).isdigit() else None
+                value = float(multiplier)
+                if role is None or not 0 < value <= 10:
+                    raise ValueError
+                clean[str(role.id)] = round(value, 3)
+            changes["role_multipliers"] = clean
+        if "economy_support_role_ids" in body:
+            raw = body["economy_support_role_ids"]
+            if not isinstance(raw, list) or len(raw) > 25:
+                raise ValueError
+            clean = []
+            for role_id in raw:
+                role = guild.get_role(int(role_id)) if str(role_id).isdigit() else None
+                if role is None or role.is_default():
+                    raise ValueError
+                clean.append(str(role.id))
+            changes["economy_support_role_ids"] = list(dict.fromkeys(clean))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"economy": "إعدادات الاقتصاد غير صالحة"})
+    if not changes:
+        return json_error(400, "validation", fields={"economy": "لا توجد تغييرات"})
+    snapshot = await update_guild_settings(guild.id, **changes)
+    result = public_settings(snapshot)
+    broadcast(guild.id, {"type": "settings", "by": str(session["id"]), **result})
+    economy = _economy_cog()
+    if economy and changes.get("leaderboard_channel_id"):
+        await economy.refresh_leaderboard(guild.id)
+    return web.json_response({"ok": True, **result})
+
+
+@routes.post('/api/guild/{guild_id}/economy/adjust')
+async def api_guild_economy_adjust(req):
+    session, guild = await authorize(req, write=True)
+    economy = _economy_cog()
+    if economy is None:
+        return json_error(503, "economy_unavailable")
+    body = await read_json_body(req)
+    try:
+        user_id = int(body.get("user_id"))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"user_id": "معرف العضو غير صالح"})
+    try:
+        wallet_delta = int(body.get("wallet_delta", 0))
+        level_delta = int(body.get("level_delta", 0))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"adjustment": "التعديل غير صالح"})
+    if abs(wallet_delta) > 1_000_000_000 or abs(level_delta) > 100:
+        return json_error(400, "validation", fields={"adjustment": "التعديل أكبر من الحد المسموح"})
+    actor = guild.get_member(int(session["id"]))
+    target = guild.get_member(user_id)
+    if actor is None or target is None:
+        return json_error(404, "member_not_found")
+    if not await economy._is_economy_support(actor):
+        return json_error(403, "forbidden")
+    try:
+        result = await economy.dashboard_adjust(
+            guild, actor, target, wallet_delta, level_delta
+        )
+    except ValueError as error:
+        return json_error(400, "validation", fields={"adjustment": str(error)})
+    return web.json_response({"ok": True, "user": result["user"]})
 
 
 def _gaming_cog():

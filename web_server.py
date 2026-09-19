@@ -1922,7 +1922,58 @@ async def index(req):
                     font-weight: 500;
                     letter-spacing: .08em;
                 }
-                .brand-copy { position: relative; max-width: 470px; margin: auto 0; }
+                .hero-art {
+                    position: relative;
+                    display: grid;
+                    place-items: center;
+                    width: min(100%, 430px);
+                    height: 260px;
+                    margin: 20px auto 6px;
+                }
+                .hero-art::before {
+                    content: "";
+                    position: absolute;
+                    width: 230px;
+                    height: 54px;
+                    bottom: 24px;
+                    border-radius: 50%;
+                    background: rgba(63, 111, 255, .27);
+                    filter: blur(22px);
+                }
+                .hero-art img {
+                    position: relative;
+                    z-index: 1;
+                    display: block;
+                    width: min(100%, 350px);
+                    height: 100%;
+                    object-fit: contain;
+                    filter: drop-shadow(0 18px 24px rgba(45, 84, 255, .28));
+                }
+                .smart-tag {
+                    position: absolute;
+                    z-index: 2;
+                    top: 32px;
+                    right: 18px;
+                    padding: 7px 10px;
+                    border: 1px solid rgba(125, 211, 252, .28);
+                    border-radius: 6px;
+                    color: #a9eaff;
+                    background: rgba(23, 43, 89, .72);
+                    box-shadow: 0 10px 24px rgba(0, 0, 0, .18);
+                    font-size: 11px;
+                    font-weight: 700;
+                }
+                .smart-tag::after {
+                    content: "";
+                    position: absolute;
+                    top: 50%;
+                    right: 100%;
+                    width: 26px;
+                    height: 1px;
+                    background: #57d8ff;
+                    box-shadow: 0 0 10px #57d8ff;
+                }
+                .brand-copy { position: relative; max-width: 470px; margin: 0 auto; }
                 .eyebrow {
                     display: inline-flex;
                     align-items: center;
@@ -1940,9 +1991,9 @@ async def index(req):
                     box-shadow: 0 0 14px var(--cyan);
                 }
                 .brand-copy h1 {
-                    margin: 20px 0 16px;
+                    margin: 12px 0 13px;
                     max-width: 470px;
-                    font-size: clamp(2.2rem, 5vw, 4.7rem);
+                    font-size: clamp(2rem, 4.7vw, 4rem);
                     line-height: 1.08;
                     letter-spacing: -.045em;
                 }
@@ -1954,26 +2005,41 @@ async def index(req):
                     max-width: 430px;
                     margin: 0;
                     color: var(--muted);
-                    font-size: 16px;
-                    line-height: 1.9;
+                    font-size: 14px;
+                    line-height: 1.8;
                 }
                 .brand-footer {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 10px;
-                    color: #a8b5ca;
-                    font-size: 12px;
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 8px;
+                    margin-top: 22px;
                 }
                 .brand-footer span {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 7px;
-                    padding: 9px 12px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 5px;
+                    min-height: 72px;
+                    padding: 10px;
                     border: 1px solid var(--line);
-                    border-radius: 999px;
-                    background: rgba(255, 255, 255, .035);
+                    border-radius: 12px;
+                    color: #a8b5ca;
+                    background: linear-gradient(145deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .025));
+                    box-shadow: inset 0 1px rgba(255, 255, 255, .08);
+                    font-size: 11px;
+                    line-height: 1.35;
                 }
-                .brand-footer i { color: var(--green); font-style: normal; }
+                .brand-footer i {
+                    display: grid;
+                    place-items: center;
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 8px;
+                    color: #b8c0ff;
+                    background: rgba(108, 124, 255, .14);
+                    font-size: 14px;
+                    font-style: normal;
+                }
                 .auth-card {
                     display: flex;
                     flex-direction: column;
@@ -2069,20 +2135,24 @@ async def index(req):
                     body { padding: 14px; }
                     .auth-shell { display: block; min-height: auto; border-radius: 23px; }
                     .brand-panel {
-                        min-height: 410px;
+                        min-height: 0;
                         padding: 30px 25px;
                         border-left: 0;
                         border-bottom: 1px solid var(--line);
                     }
                     .brand-panel::before { top: 15px; left: 24px; font-size: 100px; }
-                    .brand-copy { margin: 54px 0 34px; }
+                    .hero-art { height: 245px; margin-top: 16px; }
+                    .hero-art img { width: min(100%, 330px); }
+                    .smart-tag { top: 24px; right: 3px; }
+                    .brand-copy { margin: 8px 0 0; }
                     .brand-copy h1 { margin-top: 14px; font-size: clamp(2.2rem, 11vw, 3.4rem); }
                     .brand-copy p { font-size: 14px; line-height: 1.75; }
+                    .brand-footer { margin-top: 20px; }
                     .auth-card { padding: 34px 25px 30px; }
                 }
                 @media (max-width: 430px) {
                     .brand-footer { gap: 7px; }
-                    .brand-footer span { padding: 7px 9px; font-size: 10px; }
+                    .brand-footer span { min-height: 68px; padding: 8px; font-size: 10px; }
                     .trust-grid { gap: 6px; }
                     .trust-item { font-size: 10px; }
                 }

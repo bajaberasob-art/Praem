@@ -769,6 +769,11 @@ async def api_guild_commands_toggle(req):
     channels, channel_error = _command_channels(guild, body.get("allowed_channels", []))
     if channel_error:
         return json_error(400, "validation", fields={"allowed_channels": channel_error})
+    aliases = None
+    if "aliases" in body:
+        aliases, alias_error = _command_aliases(body.get("aliases"))
+        if alias_error:
+            return json_error(400, "validation", fields={"aliases": alias_error})
     toggle_args = (
         guild.id,
         command_name,
@@ -776,8 +781,8 @@ async def api_guild_commands_toggle(req):
         roles,
         channels,
     )
-    if "aliases" in body:
-        result = await utilities.toggle_command(*toggle_args, body.get("aliases"))
+    if aliases is not None:
+        result = await utilities.toggle_command(*toggle_args, aliases)
     else:
         result = await utilities.toggle_command(*toggle_args)
     return web.json_response({"command": result})

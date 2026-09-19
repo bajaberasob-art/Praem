@@ -431,7 +431,7 @@ async def guild_meta(guild) -> dict:
             {
                 "id": str(member.id),
                 "name": member.display_name,
-                "avatar": str(getattr(member.display_avatar, "url", "")),
+                "avatar": str(getattr(getattr(member, "display_avatar", None), "url", "")),
             }
             for member in getattr(guild, "members", ())
             if not getattr(member, "bot", False)

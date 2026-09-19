@@ -1707,9 +1707,6 @@ textarea {
   overflow: hidden;
   transition: .16s ease;
 }
-.emoji-picker-chip {
-  border-color: #1e293b;
-}
 .emoji-picker-chip img {
   width: 24px;
   height: 24px;
@@ -3082,6 +3079,17 @@ textarea {
   .auto-form-grid,
   .trigger-grid {
     grid-template-columns: 1fr;
+  }
+  .reaction-picker-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .reaction-preview-pill {
+    max-width: 100%;
+    justify-content: center;
+  }
+  .emoji-picker-toggle {
+    width: 100%;
   }
 }
 

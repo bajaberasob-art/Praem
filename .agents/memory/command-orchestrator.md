@@ -9,11 +9,11 @@ Dynamic prefixes must resolve through the shared guild-settings cache, while com
 
 **How to apply:** Keep the policy cache lazy and refreshable per guild; preserve the original tree check when registering the orchestrator and restore it when unloading the cog.
 
-Dashboard aliases for commands with typed or required arguments need explicit message adapters; a generic Slash callback bridge cannot reliably construct members, durations, or reasons from plain message text.
+Policy aliases use one metadata-driven message adapter for registered Slash and prefix commands; it resolves typed entities, durations, quantities, booleans, and trailing text before invoking the real command.
 
-**Why:** Discord resolves typed Slash arguments before invoking callbacks, while an alias arrives as untyped message content.
+**Why:** Discord resolves typed Slash arguments before invoking callbacks, while an alias arrives as untyped message content; maintaining per-command action branches caused typed aliases to bypass the real handler.
 
-**How to apply:** Add a focused adapter for each supported required-argument moderation command, validate its target and arguments, then send the shared success confirmation only after the underlying action succeeds.
+**How to apply:** Resolve commands from the live registry, populate the interaction namespace, run the normal policy and app-command checks, invoke the callback, and classify callback-reported errors before sending the shared confirmation.
 
 Auto-responder registries are process-local views of durable SQLite rows and must be rehydrated on every ready event; cooldown state is intentionally ephemeral.
 

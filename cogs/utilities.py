@@ -681,7 +681,7 @@ class Utilities(commands.Cog):
         if not self._consume_bucket(message, responder):
             return
         rendered = self.render_response(responder.get("response", ""), message)
-        reaction = self._parse_reaction(responder.get("reaction_emoji", ""))
+        reaction = self._resolve_reaction(responder.get("reaction_emoji", ""))
         if not rendered.strip() and reaction is None:
             return
         executed = False
@@ -798,6 +798,12 @@ class Utilities(commands.Cog):
         if raw.startswith("<") and raw.endswith(">"):
             return None
         return raw
+
+    def _resolve_reaction(self, value: Any):
+        parsed = self._parse_reaction(value)
+        if isinstance(parsed, discord.PartialEmoji) and parsed.id:
+            return self.bot.get_emoji(parsed.id) or parsed
+        return parsed
 
     def _consume_bucket(
         self,

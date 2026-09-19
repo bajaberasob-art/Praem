@@ -397,8 +397,16 @@ async def guild_meta(guild) -> dict:
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
     channels = [
-        {"id": str(c.id), "name": c.name, "category": c.category.name if c.category else None}
-        for c in sorted(text_channels, key=lambda c: (c.category.position if c.category else -1, c.position))
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "type": str(c.type),
+            "category": c.category.name if c.category else None,
+        }
+        for c in sorted(
+            text_channels,
+            key=lambda c: (c.category.position if c.category else -1, c.position),
+        )
     ]
     roles = []
     for role in reversed(guild.roles):

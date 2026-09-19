@@ -130,7 +130,10 @@ async def callback(req):
         return web.Response(text="إعدادات تسجيل الدخول غير مكتملة.", status=503)
     try:
         session = getattr(bot_ref, "session", None)
-        if session is None or session.closed:
+        owns_session = session is None
+        if owns_session:
+            session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
+        if getattr(session, "closed", False):
             return web.Response(text="خدمة الاتصال غير جاهزة.", status=503)
         data = {
             "client_id": C_ID, "client_secret": C_SEC,
@@ -179,6 +182,10 @@ async def callback(req):
             if next_after == after:
                 raise ValueError("Invalid pagination")
             after = next_after
+        if owns_session:
+            close = getattr(session, "close", None)
+            if close:
+                await close()
 
         guilds = []
         for guild in guild_data:

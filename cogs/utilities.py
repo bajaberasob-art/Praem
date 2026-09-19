@@ -3,8 +3,11 @@ import logging
 import os
 import random
 import re
+import shlex
 import time
 from dataclasses import dataclass
+from datetime import timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import discord
@@ -129,6 +132,7 @@ class ShortcutInteractionResponse:
 
     async def send_message(self, content=None, **kwargs):
         self._done = True
+        self.interaction._record_response(content, kwargs)
         # Discord does not support ephemeral messages in a regular channel.
         # Shortcut execution is a message-driven adapter, so discard this
         # interaction-only flag instead of passing it to TextChannel.send().
@@ -141,12 +145,13 @@ class ShortcutFollowup:
         self.interaction = interaction
 
     async def send(self, content=None, **kwargs):
+        self.interaction._record_response(content, kwargs)
         kwargs.pop("ephemeral", None)
         return await self.interaction.channel.send(content, **kwargs)
 
 
 class ShortcutInteraction:
-    """Small interaction adapter for no-argument slash command shortcuts."""
+    """Interaction adapter used when a command is triggered by message text."""
 
     def __init__(self, message: discord.Message, command=None):
         self.message = message
@@ -156,8 +161,45 @@ class ShortcutInteraction:
         self.channel_id = message.channel.id
         self.command = command
         self.client = message._state._get_client() if getattr(message, "_state", None) else None
+        self.namespace = SimpleNamespace()
+        self.permissions = getattr(
+            message.author,
+            "guild_permissions",
+            getattr(message.channel, "permissions_for", lambda _member: None)(message.author)
+            if getattr(message.channel, "permissions_for", None)
+            else discord.Permissions.none(),
+        )
+        self._shortcut_adapter = True
+        self.response_error = False
+        self.response_messages: list[tuple[Any, dict[str, Any]]] = []
         self.response = ShortcutInteractionResponse(self)
         self.followup = ShortcutFollowup(self)
+
+    def _record_response(self, content: Any, kwargs: dict[str, Any]) -> None:
+        self.response_messages.append((content, dict(kwargs)))
+        embed = kwargs.get("embed")
+        values = [str(content or "")]
+        if embed is not None:
+            values.extend(
+                str(getattr(embed, attribute, "") or "")
+                for attribute in ("title", "description")
+            )
+        text = " ".join(values)
+        failure_markers = (
+            "❌",
+            "⛔",
+            "⚠️ الاستخدام",
+            "غير مسموح",
+            "معطل",
+            "تعذر",
+            "فشل",
+            "لا يمكن",
+            "لا تملك",
+            "ليس لديك",
+            "لم أجد",
+        )
+        if any(marker in text for marker in failure_markers):
+            self.response_error = True
 
 
 class VoiceControl(discord.ui.View):

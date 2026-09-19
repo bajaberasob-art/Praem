@@ -74,6 +74,15 @@ CACHE_MAX = 1024
 _settings_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict()
 _stats_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict()
 COMMAND_CACHE: Dict[int, Dict[str, Dict[str, Any]]] = {}
+LOG_ROUTING_CACHE: Dict[int, Dict[str, int]] = {}
+LOG_ROUTING_KEYS = (
+    "log_messages",
+    "log_roles",
+    "log_channels",
+    "log_moderation",
+    "log_warnings",
+    "log_voice",
+)
 _guild_locks: Dict[int, asyncio.Lock] = {}
 _db_semaphore: Optional[asyncio.Semaphore] = None
 
@@ -301,6 +310,17 @@ async def init_db() -> None:
             """)
             # ترحيل تدريجي غير مدمّر لبقية الأعمدة (prefix, anti_nuke, captcha, ...)
             await _migrate_guild_settings(db)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS logging_channels (
+                    guild_id INTEGER PRIMARY KEY,
+                    log_messages INTEGER DEFAULT 0,
+                    log_roles INTEGER DEFAULT 0,
+                    log_channels INTEGER DEFAULT 0,
+                    log_moderation INTEGER DEFAULT 0,
+                    log_warnings INTEGER DEFAULT 0,
+                    log_voice INTEGER DEFAULT 0
+                );
+            """)
 
             # فهارس لتسريع استعلامات الرتب ولوحة الشرف (Leaderboard)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_xp ON users(guild_id, xp DESC);")
@@ -809,11 +829,80 @@ async def init_db() -> None:
     _settings_cache.clear()
     _stats_cache.clear()
     COMMAND_CACHE.clear()
+    LOG_ROUTING_CACHE.clear()
 
 
 # -------------------------------------------------------------
 # إعدادات السيرفر (Guild Settings API) مع كاش LRU/TTL
 # -------------------------------------------------------------
+def _empty_log_routing() -> Dict[str, int]:
+    return {key: 0 for key in LOG_ROUTING_KEYS}
+
+
+def get_cached_logging_channels(guild_id: int) -> Dict[str, int]:
+    """Return the last committed routing snapshot without touching SQLite."""
+    snapshot = LOG_ROUTING_CACHE.get(int(guild_id))
+    return dict(snapshot) if snapshot is not None else _empty_log_routing()
+
+
+async def get_logging_channels(guild_id: int) -> Dict[str, int]:
+    """Read a guild's six log destinations and warm the process cache."""
+    guild_id = int(guild_id)
+    cached = LOG_ROUTING_CACHE.get(guild_id)
+    if cached is not None:
+        return dict(cached)
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT log_messages, log_roles, log_channels, log_moderation, "
+            "log_warnings, log_voice FROM logging_channels WHERE guild_id = ?",
+            (guild_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    snapshot = _empty_log_routing()
+    if row:
+        snapshot.update({
+            key: int(row[key] or 0)
+            for key in LOG_ROUTING_KEYS
+        })
+    LOG_ROUTING_CACHE[guild_id] = snapshot
+    return dict(snapshot)
+
+
+async def set_logging_channels(
+    guild_id: int,
+    channels_dict: Dict[str, Any],
+) -> Dict[str, int]:
+    """Atomically upsert routing and publish it only after commit."""
+    guild_id = int(guild_id)
+    snapshot = _empty_log_routing()
+    for key in LOG_ROUTING_KEYS:
+        value = channels_dict.get(key, 0)
+        try:
+            snapshot[key] = max(0, int(value or 0))
+        except (TypeError, ValueError):
+            raise ValueError(f"invalid logging channel for {key}") from None
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO logging_channels
+                (guild_id, log_messages, log_roles, log_channels,
+                 log_moderation, log_warnings, log_voice)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                log_messages = excluded.log_messages,
+                log_roles = excluded.log_roles,
+                log_channels = excluded.log_channels,
+                log_moderation = excluded.log_moderation,
+                log_warnings = excluded.log_warnings,
+                log_voice = excluded.log_voice
+            """,
+            (guild_id, *(snapshot[key] for key in LOG_ROUTING_KEYS)),
+        )
+        await db.commit()
+    LOG_ROUTING_CACHE[guild_id] = snapshot
+    return dict(snapshot)
+
+
 def _row_to_settings(guild_id: int, row: Optional[Any]) -> Dict[str, Any]:
     data = dict(row) if row is not None else {}
     settings: Dict[str, Any] = {}

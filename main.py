@@ -131,6 +131,7 @@ class EnterpriseBot(commands.Bot):
             # Load protection before the remaining feature cogs so the security
             # listeners are registered as soon as the bot connects.
             "cogs.security",
+            "cogs.analytics",
             "cogs.moderation",
             "cogs.engagement",
             "cogs.economy",

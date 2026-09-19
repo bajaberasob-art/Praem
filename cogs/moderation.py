@@ -328,8 +328,9 @@ class Moderation(commands.Cog):
                 ephemeral=True,
             )
         try:
+            expires_at = discord.utils.utcnow() + datetime.timedelta(minutes=minutes)
             await member.timeout(
-                discord.utils.utcnow() + datetime.timedelta(minutes=minutes),
+                expires_at,
                 reason=reason,
             )
             emb = discord.Embed(
@@ -339,6 +340,12 @@ class Moderation(commands.Cog):
             )
             await itx.response.send_message(embed=emb)
             await self.send_log(itx.guild, emb)
+            analytics = self.bot.get_cog("Analytics")
+            if analytics:
+                await analytics.log_timeout(
+                    itx.guild, member, itx.user, minutes, reason,
+                    expires_at.strftime("%Y-%m-%d %H:%M UTC"),
+                )
         except (discord.Forbidden, discord.HTTPException):
             await itx.response.send_message(
                 "❌ فشل الكتم؛ تأكد من صلاحية ورتبة البوت.",
@@ -385,6 +392,9 @@ class Moderation(commands.Cog):
         )
         await itx.response.send_message(embed=emb)
         await self.send_log(itx.guild, emb)
+        analytics = self.bot.get_cog("Analytics")
+        if analytics:
+            await analytics.log_warning(itx.guild, member, itx.user, reason, cnt)
         if cnt >= 3:
             try:
                 await member.timeout(

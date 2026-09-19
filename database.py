@@ -1729,8 +1729,8 @@ async def save_auto_responder(
             """
             INSERT INTO guild_auto_responders
                 (guild_id, trigger, match_type, response, enabled,
-                 cooldown_seconds, bucket_capacity, channel_id, updated_at)
-                 , target_type, target_id, reaction_emoji)
+                 cooldown_seconds, bucket_capacity, channel_id,
+                 target_type, target_id, reaction_emoji, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
             ON CONFLICT(guild_id, trigger, match_type) DO UPDATE SET
                 response = excluded.response,

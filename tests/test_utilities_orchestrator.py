@@ -257,7 +257,6 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
             mention="<@42>",
             bot=False,
         )
-        self.bot.tree.get_command = lambda name: command if name == "demo" else None
         checks = []
 
         async def callback(interaction, member, minutes, reason="غير محدد"):
@@ -282,13 +281,6 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         )
         self.bot.tree.get_command = lambda name: command if name == "demo" else None
         self.bot.tree.walk_commands = lambda: [command]
-        self.bot.tree.get_command = lambda name: command if name == "demo" else None
-        self.bot.tree.get_command("demo")
-        self.bot.tree.get_command = lambda name: command if name == "demo" else None
-
-        self.bot.tree.get_command = lambda name: command if name == "demo" else None
-        self.bot.tree.walk_commands = lambda: [command]
-        self.bot.tree.get_command = lambda name: command if name == "demo" else None
         await self.cog.toggle_command(700, "demo", True, aliases=["run"])
         message = FakeMessage("run 42 2h policy reason")
         message.guild.get_member = lambda member_id: target if member_id == 42 else None
@@ -307,13 +299,16 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         async def callback(interaction):
             await interaction.response.send_message("❌ تعذر تنفيذ العملية")
 
+        async def check_can_run(interaction):
+            return True
+
         command = SimpleNamespace(
             name="demo",
             qualified_name="demo",
             callback=callback,
             binding=None,
             parameters=[],
-            _check_can_run=lambda interaction: True,
+            _check_can_run=check_can_run,
         )
         self.bot.tree.get_command = lambda name: command if name == "demo" else None
         await self.cog.toggle_command(700, "demo", True, aliases=["run"])

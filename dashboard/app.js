@@ -2980,6 +2980,58 @@
     commandPanel.id = "command-panel";
     const responderRoles = state.autoResponderMeta?.roles || studio.roles || [];
     const responderEmojis = state.autoResponderMeta?.emojis || [];
+    const responderMembers = state.autoResponderMeta?.members || state.meta?.members || [];
+    const targetUserId = el("input", { name: "target_user_id", type: "hidden" });
+    const memberSearch = el("input", {
+      class: "studio-input member-picker-search",
+      type: "search",
+      placeholder: "ابحث باسم العضو…",
+      autocomplete: "off",
+      "aria-label": "البحث عن عضو",
+    });
+    const memberOptions = el("div", { class: "member-picker-options" });
+    const memberPicker = el(
+      "div",
+      { class: "member-picker" },
+      memberSearch,
+      memberOptions,
+      targetUserId,
+    );
+    const renderMemberOptions = (query = "") => {
+      const normalized = query.trim().toLocaleLowerCase();
+      const filtered = responderMembers
+        .filter((member) => !normalized || String(member.name || "").toLocaleLowerCase().includes(normalized))
+        .slice(0, 100);
+      memberOptions.replaceChildren(
+        filtered.length
+          ? filtered.map((member) => el(
+              "button",
+              {
+                type: "button",
+                class: `member-picker-option${String(targetUserId.value) === String(member.id) ? " active" : ""}`,
+                "data-member-id": member.id,
+                onClick: () => {
+                  targetUserId.value = String(member.id);
+                  memberSearch.value = member.name;
+                  memberOptions.querySelectorAll("[data-member-id]").forEach((item) => item.classList.remove("active"));
+                  memberOptions.querySelector(`[data-member-id="${member.id}"]`)?.classList.add("active");
+                  pulse();
+                },
+              },
+              el("img", { src: member.avatar || "", alt: "", loading: "lazy" }),
+              el("span", { text: member.name }),
+            ))
+          : [el("small", { class: "hint", text: "لا يوجد عضو مطابق" })],
+      );
+    };
+    memberSearch.oninput = () => renderMemberOptions(memberSearch.value);
+    const setAutoMember = (memberId = "") => {
+      targetUserId.value = String(memberId || "");
+      const selected = responderMembers.find((member) => String(member.id) === String(memberId));
+      memberSearch.value = selected?.name || "";
+      renderMemberOptions(memberSearch.value);
+    };
+    renderMemberOptions();
     const targetScope = el(
       "div",
       { class: "auto-target-panel" },
@@ -3005,51 +3057,111 @@
       el(
         "label",
         { class: "auto-user-target", hidden: true },
-        "معرف العضو",
-        el("input", {
-          name: "target_user_id",
-          class: "studio-input",
-          inputmode: "numeric",
-          placeholder: "مثال: 123456789012345678",
-        }),
+        "العضو المستهدف",
+        memberPicker,
       ),
     );
-    const reactionInput = el("input", {
-      name: "reaction_emoji",
-      class: "studio-input",
+    const reactionInput = el("input", { name: "reaction_emoji", type: "hidden" });
+    const reactionManualInput = el("input", {
+      class: "studio-input reaction-manual-input",
       maxlength: "100",
-      placeholder: "اكتب إيموجي عادي مثل 👍 أو اختر من إيموجيات السيرفر",
+      placeholder: "أو اكتب إيموجي Unicode مثل 👍",
     });
+    const reactionPreview = el("span", { class: "reaction-preview-empty", text: "لم يتم الاختيار" });
+    const emojiGrid = el("div", { class: "emoji-picker-grid" });
+    const emojiSearch = el("input", {
+      class: "studio-input emoji-picker-search",
+      type: "search",
+      placeholder: "ابحث باسم الإيموجي…",
+      autocomplete: "off",
+      "aria-label": "البحث عن إيموجي",
+    });
+    const emojiPopover = el(
+      "div",
+      { class: "emoji-picker-popover", hidden: true },
+      emojiSearch,
+      emojiGrid,
+    );
+    const emojiToggle = el("button", {
+      class: "emoji-picker-toggle",
+      type: "button",
+      "aria-expanded": "false",
+      text: "😀 اختيار إيموجي التفاعل (انقر لفتح القائمة) ▼",
+      onClick: () => {
+        const open = emojiPopover.hasAttribute("hidden");
+        emojiPopover.toggleAttribute("hidden", !open);
+        emojiToggle.setAttribute("aria-expanded", String(open));
+        if (open) emojiSearch.focus();
+      },
+    });
+    const reactionPreviewPill = el("div", { class: "reaction-preview-pill", hidden: true }, reactionPreview);
+    const setAutoReaction = (value = "", emoji = null) => {
+      const normalized = String(value || "").trim();
+      reactionInput.value = normalized;
+      reactionManualInput.value = normalized.startsWith("<") ? "" : normalized;
+      reactionPreviewPill.toggleAttribute("hidden", !normalized);
+      reactionPreview.replaceChildren();
+      if (!normalized) {
+        reactionPreview.textContent = "لم يتم الاختيار";
+      } else if (emoji?.url) {
+        reactionPreview.append(
+          el("img", { src: emoji.url, alt: emoji.name || "" }),
+          el("span", { text: emoji.name || normalized }),
+        );
+      } else {
+        reactionPreview.textContent = normalized;
+      }
+      if (normalized) {
+        const clear = el("button", {
+          class: "reaction-preview-clear",
+          type: "button",
+          title: "مسح الإيموجي",
+          text: "✕",
+          onClick: (event) => {
+            event.stopPropagation();
+            setAutoReaction("");
+          },
+        });
+        reactionPreviewPill.append(clear);
+      }
+      emojiGrid.querySelectorAll("[data-reaction-chip]").forEach((chip) => {
+        chip.classList.toggle("active", chip.dataset.reactionChip === normalized);
+      });
+    };
+    const renderEmojiGrid = (query = "") => {
+      const normalized = query.trim().toLocaleLowerCase();
+      const filtered = responderEmojis.filter((emoji) => !normalized || String(emoji.name || "").toLocaleLowerCase().includes(normalized));
+      emojiGrid.replaceChildren(
+        filtered.length
+          ? filtered.map((emoji) => {
+              const token = emoji.token || `<${emoji.animated ? "a" : ""}:${emoji.name}:${emoji.id}>`;
+              return el("button", {
+                class: "emoji-picker-chip",
+                type: "button",
+                "data-reaction-chip": token,
+                title: emoji.name,
+                onClick: () => {
+                  setAutoReaction(token, emoji);
+                  emojiPopover.setAttribute("hidden", "");
+                  emojiToggle.setAttribute("aria-expanded", "false");
+                  if (navigator.vibrate) navigator.vibrate(10);
+                },
+              }, el("img", { src: emoji.url, alt: emoji.name }), el("span", { text: emoji.name }));
+            })
+          : [el("small", { class: "hint", text: "لا يوجد إيموجي مطابق" })],
+      );
+    };
+    emojiSearch.oninput = () => renderEmojiGrid(emojiSearch.value);
+    reactionManualInput.oninput = () => setAutoReaction(reactionManualInput.value);
+    renderEmojiGrid();
     const reactionPicker = el(
       "div",
       { class: "auto-reaction-panel" },
       el("label", { text: "إيموجي التفاعل (Reaction Emoji)" }),
+      el("div", { class: "reaction-picker-toolbar" }, emojiToggle, reactionPreviewPill),
+      emojiPopover,
+      reactionManualInput,
       reactionInput,
-      el(
-        "div",
-        { class: "emoji-picker-chips", "aria-label": "إيموجيات السيرفر" },
-        responderEmojis.length
-          ? responderEmojis.map((emoji) => {
-              const token = emoji.token || `<${emoji.animated ? "a" : ""}:${emoji.name}:${emoji.id}>`;
-              return el(
-                "button",
-                {
-                  class: "emoji-picker-chip",
-                  type: "button",
-                  "data-reaction-chip": token,
-                  title: emoji.name,
-                  onClick: (event) => {
-                    reactionInput.value = token;
-                    reactionPicker.querySelectorAll("[data-reaction-chip]").forEach((item) => item.classList.remove("active"));
-                    event.currentTarget.classList.add("active");
-                  },
-                },
-                el("img", { src: emoji.url, alt: emoji.name }),
-                el("span", { text: emoji.name }),
-              );
-            })
-          : [el("small", { class: "hint", text: "لا توجد إيموجيات مخصصة متاحة" })],
-      ),
     );
     const form = el("form", { id: "auto-responder-form", class: "auto-form" },
       el("div", { class: "auto-form-heading" },

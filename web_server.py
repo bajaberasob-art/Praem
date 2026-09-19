@@ -9,6 +9,7 @@ import struct
 import time
 from collections import deque
 from html import escape
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 import zlib
@@ -416,6 +417,7 @@ def _png_chunk(kind: bytes, payload: bytes) -> bytes:
     )
 
 
+@lru_cache(maxsize=2)
 def pwa_png(size: int) -> bytes:
     """Generate a small maskable AMOLED icon without adding binary assets."""
     rows = bytearray()

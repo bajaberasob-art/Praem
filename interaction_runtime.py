@@ -143,6 +143,8 @@ async def _run_callback(
         return await callback(*args, **kwargs)
 
     try:
+        # Discord only accepts send_modal as the initial interaction response.
+        # Do not acknowledge modal-opening callbacks with defer first.
         if _callback_opens_modal(callback):
             return await callback(*args, **kwargs)
         deferred = await defer_if_needed(interaction)
@@ -182,11 +184,17 @@ async def guarded_view_task(
     item: discord.ui.Item[Any],
     interaction: discord.Interaction,
 ) -> None:
-    """Replacement for discord.py's View scheduler with early ACK + proxy."""
+    """Replacement for discord.py's View scheduler with safe ACK + proxy."""
     try:
         item._refresh_state(interaction, interaction.data)  # type: ignore[attr-defined]
-        await defer_if_needed(interaction)
-        proxy = interaction if _callback_opens_modal(item.callback) else InteractionProxy(interaction, deferred=True)
+        # A modal must be the first response to a component interaction.
+        # This check must happen before defer_if_needed; otherwise callbacks
+        # that eventually open a modal fail with InteractionResponded.
+        if _callback_opens_modal(item.callback):
+            proxy = interaction
+        else:
+            deferred = await defer_if_needed(interaction)
+            proxy = InteractionProxy(interaction, deferred=deferred)
         allow = await item._run_checks(proxy) and await view.interaction_check(proxy)
         if not allow:
             return

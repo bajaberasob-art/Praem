@@ -2173,37 +2173,41 @@ async def index(req):
                         </span>
                         <span>PRIME CONTROL<small>SMART SERVER OPERATIONS</small></span>
                     </div>
+                    <div class="hero-art" aria-hidden="true">
+                        <span class="smart-tag">مساحة إدارتك الذكية</span>
+                        <img src="static/login-hero.png" alt="">
+                    </div>
                     <div class="brand-copy">
                         <span class="eyebrow">مساحة الإدارة الذكية</span>
-                        <h1>سيطرة أوضح.<br><span>سيرفر أقوى.</span></h1>
-                        <p>أدر مجتمعك من لوحة واحدة، راقب التفاصيل المهمة، وطبّق إعداداتك بثقة من دون خطوات معقدة.</p>
+                        <h1>تبغى سيرفرك يكون توب؟<br><span>أدّره براوق.</span></h1>
+                        <p>رتّب كل شيء من لوحة واحدة، راقب أدق التفاصيل، واضبط إعداداتك بضغطة زر وبدون أي تعقيد.</p>
                     </div>
                     <div class="brand-footer" aria-label="مزايا المنصة">
-                        <span><i>●</i> حماية مستمرة</span>
-                        <span><i>●</i> تحكم مباشر</span>
-                        <span><i>●</i> تجربة عربية أولاً</span>
+                        <span><i>◌</i><b>لِقّة واجهتنا.</b><small>تجربة واضحة وسلسة</small></span>
+                        <span><i>⌁</i><b>ضبط على الطاير</b><small>تحكم فوري بإعداداتك</small></span>
+                        <span><i>◈</i><b>حماية 24/7</b><small>بياناتك في أمان</small></span>
                     </div>
                 </section>
                 <section class="auth-card" aria-labelledby="login-title">
                     <div class="auth-card-head">
                         <span class="badge"><span aria-hidden="true">✦</span> دخول موثّق وآمن</span>
-                        <h2 id="login-title">مرحباً بعودتك</h2>
-                        <p class="auth-card-intro">سجّل الدخول بحساب Discord لإدارة السيرفرات التي تملكها أو تملك فيها صلاحية الإدارة.</p>
+                        <h2 id="login-title">رجعت لنا؟ حياك.</h2>
+                        <p class="auth-card-intro">ادخل بحساب Discord حق سيرفرك عشان تبدأ التدبير.</p>
                     </div>
                     <a href="login" class="btn-login" aria-label="تسجيل الدخول باستخدام Discord">
                         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 0 1.873.893.077.077 0 0 1-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
-                        تسجيل الدخول عبر Discord
+                        دخول لـ Discord
                     </a>
                     <p class="login-note">
                         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 19 6v5.4c0 4.3-2.9 7.9-7 9.6-4.1-1.7-7-5.3-7-9.6V6l7-3Z"/><path d="m8.8 12 2.1 2.1 4.5-4.6"/></svg>
-                        <span><strong>لا نطلب كلمة مرور.</strong><br>سيتم التحقق من هويتك وصلاحياتك تلقائياً عبر Discord.</span>
+                        <span><strong>ما نحتاج باسوردك..</strong><br>كل شي آمن ويتم التحقق عبر Discord.</span>
                     </p>
                     <div class="trust-grid">
-                        <div class="trust-item"><span class="trust-icon">⌁</span><strong>دخول سريع</strong><span>بدون نماذج طويلة</span></div>
-                        <div class="trust-item"><span class="trust-icon">◈</span><strong>صلاحية دقيقة</strong><span>للمديرين فقط</span></div>
-                        <div class="trust-item"><span class="trust-icon">✓</span><strong>بيانات محمية</strong><span>تحقق موثوق</span></div>
+                        <div class="trust-item"><span class="trust-icon">◷</span><strong>دخول سريع.</strong><span>بياناتك في الحفظ والصون.</span></div>
+                        <div class="trust-item"><span class="trust-icon">⌘</span><strong>صلاحية دقيقة.</strong><span>صلاحيات دقيقة.</span></div>
+                        <div class="trust-item"><span class="trust-icon">▣</span><strong>بيانات محمية.</strong><span>بياناتك في الحفظ والصون.</span></div>
                     </div>
-                    <div class="auth-footer">باستمرارك، أنت تستخدم بوابة الإدارة الرسمية للسيرفر.</div>
+                    <div class="auth-footer">بوابتك الرسمية لإدارة السيرفر — بأمان.</div>
                 </section>
             </main>
         </body>

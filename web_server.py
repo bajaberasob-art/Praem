@@ -396,18 +396,23 @@ async def guild_meta(guild) -> dict:
                 text_channels = fetched_text
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
-    channels = [
-        {
-            "id": str(c.id),
-            "name": c.name,
-            "type": str(c.type),
-            "category": c.category.name if c.category else None,
-        }
-        for c in sorted(
-            text_channels,
-            key=lambda c: (c.category.position if c.category else -1, c.position),
-        )
-    ]
+    channels = []
+    for channel in sorted(
+        text_channels,
+        key=lambda c: (c.category.position if c.category else -1, c.position),
+    ):
+        try:
+            channel_type = str(channel.type)
+        except (AttributeError, TypeError):
+            # Lightweight test doubles may inherit TextChannel without its
+            # internal _type field; real Discord channels always expose type.
+            channel_type = "text"
+        channels.append({
+            "id": str(channel.id),
+            "name": channel.name,
+            "type": channel_type,
+            "category": channel.category.name if channel.category else None,
+        })
     roles = []
     for role in reversed(guild.roles):
         if role.is_default():

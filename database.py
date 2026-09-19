@@ -406,6 +406,9 @@ async def init_db() -> None:
                     cooldown_seconds REAL NOT NULL DEFAULT 5,
                     bucket_capacity INTEGER NOT NULL DEFAULT 1,
                     channel_id INTEGER DEFAULT NULL,
+                    target_type TEXT NOT NULL DEFAULT 'everyone',
+                    target_id INTEGER NOT NULL DEFAULT 0,
+                    reaction_emoji TEXT NOT NULL DEFAULT '',
                     execution_count INTEGER NOT NULL DEFAULT 0,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (guild_id, trigger, match_type)
@@ -420,6 +423,21 @@ async def init_db() -> None:
             if "execution_count" not in responder_columns:
                 await db.execute(
                     "ALTER TABLE guild_auto_responders ADD COLUMN execution_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "target_type" not in responder_columns:
+                await db.execute(
+                    "ALTER TABLE guild_auto_responders "
+                    "ADD COLUMN target_type TEXT NOT NULL DEFAULT 'everyone'"
+                )
+            if "target_id" not in responder_columns:
+                await db.execute(
+                    "ALTER TABLE guild_auto_responders "
+                    "ADD COLUMN target_id INTEGER NOT NULL DEFAULT 0"
+                )
+            if "reaction_emoji" not in responder_columns:
+                await db.execute(
+                    "ALTER TABLE guild_auto_responders "
+                    "ADD COLUMN reaction_emoji TEXT NOT NULL DEFAULT ''"
                 )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_auto_responders_guild "
@@ -1655,6 +1673,7 @@ async def get_auto_responders(guild_id: int) -> list[dict[str, Any]]:
             """
             SELECT id, guild_id, trigger, match_type, response, enabled,
                    cooldown_seconds, bucket_capacity, channel_id,
+                   target_type, target_id, reaction_emoji,
                    execution_count, updated_at
             FROM guild_auto_responders
             WHERE guild_id = ? AND enabled = 1
@@ -1671,6 +1690,13 @@ async def get_auto_responders(guild_id: int) -> list[dict[str, Any]]:
                 item["channel_id"] = (
                     str(item["channel_id"]) if item["channel_id"] is not None else None
                 )
+                item["target_type"] = (
+                    item.get("target_type")
+                    if item.get("target_type") in {"everyone", "role", "user"}
+                    else "everyone"
+                )
+                item["target_id"] = max(0, int(item.get("target_id") or 0))
+                item["reaction_emoji"] = str(item.get("reaction_emoji") or "")[:100]
                 item["execution_count"] = max(0, int(item["execution_count"] or 0))
                 rows.append(item)
             return rows
@@ -1686,24 +1712,40 @@ async def save_auto_responder(
     cooldown_seconds: float = 5.0,
     bucket_capacity: int = 1,
     channel_id: int | str | None = None,
+    target_type: str = "everyone",
+    target_id: int | str | None = 0,
+    reaction_emoji: str = "",
 ) -> dict[str, Any]:
+    target_type = str(target_type).strip().lower()
+    if target_type not in {"everyone", "role", "user"}:
+        raise ValueError("target_type must be one of everyone, role, user")
+    try:
+        target_id = max(0, int(target_id or 0))
+    except (TypeError, ValueError) as error:
+        raise ValueError("target_id must be a numeric Discord ID") from error
+    reaction_emoji = str(reaction_emoji or "").strip()[:100]
     async with connect(aiosqlite.Row) as db:
         cursor = await db.execute(
             """
             INSERT INTO guild_auto_responders
                 (guild_id, trigger, match_type, response, enabled,
                  cooldown_seconds, bucket_capacity, channel_id, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 , target_type, target_id, reaction_emoji)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
             ON CONFLICT(guild_id, trigger, match_type) DO UPDATE SET
                 response = excluded.response,
                 enabled = excluded.enabled,
                 cooldown_seconds = excluded.cooldown_seconds,
                 bucket_capacity = excluded.bucket_capacity,
                 channel_id = excluded.channel_id,
+                target_type = excluded.target_type,
+                target_id = excluded.target_id,
+                reaction_emoji = excluded.reaction_emoji,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id, guild_id, trigger, match_type, response, enabled,
                       cooldown_seconds, bucket_capacity, channel_id,
-                      execution_count, updated_at
+                       target_type, target_id, reaction_emoji,
+                       execution_count, updated_at
             """,
             (
                 int(guild_id),
@@ -1714,6 +1756,9 @@ async def save_auto_responder(
                 max(0.0, float(cooldown_seconds)),
                 max(1, int(bucket_capacity)),
                 int(channel_id) if channel_id is not None else None,
+                target_type,
+                target_id,
+                reaction_emoji,
             ),
         )
         row = await cursor.fetchone()

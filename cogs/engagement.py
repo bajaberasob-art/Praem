@@ -9,7 +9,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from database import (
+    add_panel_button,
+    create_self_role_panel,
+    delete_panel,
+    get_guild_panels,
     get_guild_settings,
+    get_panel_with_buttons,
+    get_user_level,
     get_role_panels,
     get_rules_panels,
     record_invite_use,
@@ -18,6 +24,7 @@ from database import (
     save_rules_panel,
     get_self_role_panels,
     save_self_role_panel,
+    update_panel_message_id,
 )
 
 
@@ -184,6 +191,73 @@ class RoleSelector(discord.ui.Select):
             "\n".join(result) if result else "لم يتم تغيير أي رتبة.",
             ephemeral=True,
         )
+
+
+class LevelGatedRoleButton(discord.ui.Button):
+    """A stable, restart-safe role toggle with a per-panel level gate."""
+
+    def __init__(self, panel: dict[str, Any], button: dict[str, Any], row: int):
+        emoji = str(button.get("emoji") or "").strip() or None
+        super().__init__(
+            label=str(button.get("label") or "رتبة")[:80],
+            style=discord.ButtonStyle.secondary,
+            emoji=emoji,
+            row=row,
+            custom_id=f"level-role:{int(panel['id'])}:{int(button['id'])}",
+        )
+        self.panel_id = int(panel["id"])
+        self.role_id = int(button["role_id"])
+        self.panel_min_level = max(0, int(panel.get("min_level") or 0))
+        self.button_min_level = max(0, int(button.get("custom_min_level") or 0))
+
+    async def callback(self, itx: discord.Interaction):
+        if itx.guild is None or not isinstance(itx.user, discord.Member):
+            return await itx.response.send_message(
+                "🔒 هذا الخيار متاح داخل السيرفر فقط.",
+                ephemeral=True,
+            )
+        required_level = max(self.panel_min_level, self.button_min_level)
+        member_level = await get_user_level(itx.user.id, itx.guild.id)
+        if member_level < required_level:
+            embed = discord.Embed(
+                description=(
+                    f"🔒 هذا الخيار مقفل! يتطلب الوصول إلى لفل {required_level} "
+                    f"(مستواك الحالي: {member_level}). استمر في التفاعل لرفع مستواك!"
+                ),
+                color=0xF59E0B,
+            )
+            return await itx.response.send_message(embed=embed, ephemeral=True)
+
+        role = itx.guild.get_role(self.role_id)
+        me = itx.guild.me
+        if role is None or role.managed or me is None or me.top_role.position <= role.position:
+            return await itx.response.send_message(
+                "⚠️ رتبة البوت أدنى من هذه الرتبة، يرجى إبلاغ الإدارة.",
+                ephemeral=True,
+            )
+        try:
+            if role in itx.user.roles:
+                await itx.user.remove_roles(role, reason="Level-gated self-role toggle")
+                message = f"➖ تم إزالة رتبة **{role.name}** من حسابك."
+            else:
+                await itx.user.add_roles(role, reason="Level-gated self-role toggle")
+                message = f"✅ تم منحك رتبة **{role.name}** بنجاح!"
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "[LEVEL_ROLE] تعذر تبديل الرتبة %s للعضو %s",
+                self.role_id,
+                itx.user.id,
+                exc_info=True,
+            )
+            message = "⚠️ تعذر تحديث رتبتك. تحقق من صلاحيات البوت."
+        await itx.response.send_message(message, ephemeral=True)
+
+
+class LevelGatedRoleView(discord.ui.View):
+    def __init__(self, panel: dict[str, Any]):
+        super().__init__(timeout=None)
+        for index, button in enumerate((panel.get("buttons") or [])[:25]):
+            self.add_item(LevelGatedRoleButton(panel, button, index // 5))
 
 
 class RulesAgreementView(discord.ui.View):

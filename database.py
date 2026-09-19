@@ -1107,6 +1107,17 @@ async def get_or_create_user(user_id: int, guild_id: int) -> Dict[str, Any]:
             return dict(row)
 
 
+async def get_user_level(user_id: int, guild_id: int) -> int:
+    """Read the current economy level without creating an account."""
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT level FROM users WHERE user_id = ? AND guild_id = ?",
+            (int(user_id), int(guild_id)),
+        ) as cur:
+            row = await cur.fetchone()
+    return max(0, int(row["level"])) if row else 0
+
+
 async def add_xp(user_id: int, guild_id: int, amount: int = 15) -> Tuple[bool, int]:
     """إضافة خبرة وفحص الترقية داخل معاملة قفل واحدة."""
     amount = max(0, int(amount))

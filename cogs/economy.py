@@ -1,4 +1,5 @@
 import datetime
+import asyncio
 import logging
 import random
 
@@ -263,6 +264,7 @@ class Economy(commands.Cog):
             msg.guild.id,
             random.randint(15, 25),
         )
+        await self._leaderboard_changed(msg.guild.id)
         if leveled_up:
             await msg.channel.send(
                 f"🎊 مبارك {msg.author.mention}! ارتقيت إلى المستوى "
@@ -315,24 +317,165 @@ class Economy(commands.Cog):
     async def daily(self, itx: discord.Interaction):
         today = discord.utils.utcnow().strftime("%Y-%m-%d")
         settings = await get_guild_settings(itx.guild.id)
-        base_reward = int(settings["settings"].get("daily_amount", 450))
-        reward = random.randint(
-            max(1, int(base_reward * 0.8)),
-            max(1, int(base_reward * 1.2)),
+        config = settings["settings"]
+        base_reward = int(config.get("daily_base_amount", 200))
+        role_multipliers = await get_role_multipliers(itx.guild.id)
+        role_multiplier = max(
+            [
+                float(role_multipliers.get(str(role.id), 1.0))
+                for role in itx.user.roles
+                if str(role.id) in role_multipliers
+            ]
+            or [1.0]
         )
-        if not await claim_daily_reward(
+        result = await claim_scaled_daily_reward(
             itx.user.id,
             itx.guild.id,
             today,
-            reward,
-        ):
+            base_reward,
+            int(config.get("level_multiplier_pct", 10)),
+            role_multiplier,
+        )
+        if result is None:
             return await itx.response.send_message(
                 "❌ استلمت راتبك اليومي مسبقاً! عد غداً.",
                 ephemeral=True,
             )
-        await itx.response.send_message(
-            f"💰 استلمت راتبك اليومي بقيمة **{reward:,}** عملة!"
+        embed = discord.Embed(
+            title="💰 المكافأة اليومية",
+            description=f"تم إيداع **{result['reward']:,}** عملة في محفظتك.",
+            color=0x2ECC71,
         )
+        embed.add_field(name="المبلغ الأساسي", value=f"`{result['base_amount']:,}`", inline=True)
+        embed.add_field(name="مكافأة المستوى", value=f"`×{result['level_bonus']}`", inline=True)
+        embed.add_field(name="مضاعف الرتبة", value=f"`×{result['role_multiplier']}`", inline=True)
+        embed.add_field(name="المستوى الحالي", value=f"`{result['level']}`", inline=True)
+        embed.add_field(name="الإجمالي المستلم", value=f"`{result['reward']:,}`", inline=True)
+        await itx.response.send_message(embed=embed)
+        await self._leaderboard_changed(itx.guild.id)
+
+    @commands.command(name="راتب", aliases=["يومي"])
+    async def daily_text(self, ctx: commands.Context):
+        if not ctx.guild:
+            return
+        today = discord.utils.utcnow().strftime("%Y-%m-%d")
+        config = (await get_guild_settings(ctx.guild.id))["settings"]
+        role_multipliers = await get_role_multipliers(ctx.guild.id)
+        role_multiplier = max(
+            [
+                float(role_multipliers.get(str(role.id), 1.0))
+                for role in ctx.author.roles
+                if str(role.id) in role_multipliers
+            ]
+            or [1.0]
+        )
+        result = await claim_scaled_daily_reward(
+            ctx.author.id,
+            ctx.guild.id,
+            today,
+            int(config.get("daily_base_amount", 200)),
+            int(config.get("level_multiplier_pct", 10)),
+            role_multiplier,
+        )
+        if result is None:
+            return await ctx.send("❌ استلمت راتبك اليومي مسبقاً! عد غداً.")
+        embed = discord.Embed(
+            title="💰 المكافأة اليومية",
+            description=f"تم إيداع **{result['reward']:,}** عملة في محفظتك.",
+            color=0x2ECC71,
+        )
+        embed.add_field(name="المبلغ الأساسي", value=f"`{result['base_amount']:,}`", inline=True)
+        embed.add_field(name="مكافأة المستوى", value=f"`×{result['level_bonus']}`", inline=True)
+        embed.add_field(name="مضاعف الرتبة", value=f"`×{result['role_multiplier']}`", inline=True)
+        embed.add_field(name="الإجمالي المستلم", value=f"`{result['reward']:,}`", inline=True)
+        await ctx.send(embed=embed)
+        await self._leaderboard_changed(ctx.guild.id)
+
+    @app_commands.command(
+        name="set_leaderboard_channel",
+        description="تثبيت لوحة المتصدرين الحية في قناة",
+    )
+    async def set_leaderboard_channel(
+        self,
+        itx: discord.Interaction,
+        channel: discord.TextChannel,
+    ):
+        if not await self._admin_check(itx):
+            return
+        await set_leaderboard_embed_target(itx.guild.id, channel.id, 0)
+        await self.refresh_leaderboard(itx.guild.id)
+        await itx.response.send_message(
+            f"📌 تم تثبيت لوحة المتصدرين الحية في {channel.mention}.",
+            ephemeral=True,
+        )
+
+    async def _admin_balance_action(
+        self,
+        guild: discord.Guild,
+        actor: discord.Member,
+        target: discord.Member,
+        amount: int,
+        give: bool,
+        send,
+    ):
+        if amount <= 0:
+            return await send("❌ يجب أن يكون المبلغ أكبر من صفر.")
+        delta = amount if give else -amount
+        updated = await adjust_user_balance(guild.id, target.id, delta, 0)
+        if updated is None:
+            return await send("❌ لا يمكن خصم مبلغ يؤدي إلى رصيد سالب.")
+        await add_economy_audit(
+            guild.id,
+            target.id,
+            actor.id,
+            "give_points" if give else "take_points",
+            wallet_delta=delta,
+            details=f"target={target.id}",
+        )
+        embed = discord.Embed(
+            title="✅ تم تحديث الرصيد",
+            description=f"{'إضافة' if give else 'خصم'} **{amount:,}** عملة لـ {target.mention}.",
+            color=0x2ECC71 if give else 0xF97316,
+        )
+        embed.add_field(name="الرصيد الجديد", value=f"`{int(updated['balance']):,}`", inline=True)
+        embed.set_footer(text=f"بواسطة {actor.display_name}")
+        await send(embed=embed)
+        await self._leaderboard_changed(guild.id)
+
+    async def _admin_level_action(
+        self,
+        guild: discord.Guild,
+        actor: discord.Member,
+        target: discord.Member,
+        levels: int,
+        increase: bool,
+        send,
+    ):
+        if levels <= 0:
+            return await send("❌ يجب أن يكون عدد المستويات أكبر من صفر.")
+        before = await get_or_create_user(target.id, guild.id)
+        delta = levels if increase else -levels
+        updated = await adjust_user_level(guild.id, target.id, delta)
+        if updated is None:
+            return await send("❌ تعذر تعديل مستوى العضو.")
+        await self._apply_level_rewards(target, int(before["level"]), int(updated["level"]))
+        await add_economy_audit(
+            guild.id,
+            target.id,
+            actor.id,
+            "give_level" if increase else "take_level",
+            level_delta=delta,
+            details=f"target={target.id}",
+        )
+        embed = discord.Embed(
+            title="✅ تم تحديث المستوى",
+            description=f"{target.mention} أصبح في المستوى **{updated['level']}**.",
+            color=0x8B5CF6,
+        )
+        embed.add_field(name="التغيير", value=f"`{delta:+d}` مستوى", inline=True)
+        embed.set_footer(text=f"بواسطة {actor.display_name}")
+        await send(embed=embed)
+        await self._leaderboard_changed(guild.id)
 
     @app_commands.command(name="work", description="العمل وكسب المال")
     async def work(self, itx: discord.Interaction):

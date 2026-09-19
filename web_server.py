@@ -840,7 +840,7 @@ async def api_guild_auto_responses_save(req):
         return json_error(400, "validation", fields={"target_id": "لا تستخدم معرفاً مع نطاق الجميع"})
     if reaction_emoji.startswith("<") and reaction_emoji.endswith(">"):
         parsed_emoji = parse_custom_emoji(reaction_emoji)
-        if not parsed_emoji.id or guild.get_emoji(parsed_emoji.id) is None:
+        if not parsed_emoji or not parsed_emoji.id or guild.get_emoji(parsed_emoji.id) is None:
             return json_error(400, "validation", fields={"reaction_emoji": "الإيموجي المخصص غير موجود في هذا السيرفر"})
         reaction_emoji = str(parsed_emoji)
     if not response.strip() and not reaction_emoji:

@@ -14,3 +14,9 @@ Dashboard onboarding settings and self-role panel deployment share the guild set
 **Why:** The deployment response is the only reliable way to show the operator the newly created Discord message before the next read, while revisioned settings prevent stale dashboard sessions from overwriting onboarding changes.
 
 **How to apply:** Send onboarding mutations with the current revision, rebase on conflicts, and refresh or patch the self-role panel collection after every successful deployment.
+
+Self-role panel upgrades must retain the legacy `role_specs` representation while storing newer per-button data separately; restore old panels with their existing view and new panels with stable custom IDs.
+
+**Why:** deployed panels already exist in the live database and Discord messages, so replacing their schema or custom IDs would silently break existing interactions.
+
+**How to apply:** add columns/tables through migration, fall back to legacy specs during reads, and only register the level-gated view for panels with persisted button rows.

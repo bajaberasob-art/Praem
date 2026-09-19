@@ -43,6 +43,13 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     "leave_message": ("TEXT", "", "str"),
     "economy_tax": ("REAL", 0.0, "float"),
     "daily_amount": ("INTEGER", 450, "int"),
+    # Economy expansion settings (kept additive to the legacy daily_amount).
+    "leaderboard_channel_id": ("INTEGER", 0, "id"),
+    "leaderboard_message_id": ("INTEGER", 0, "id"),
+    "daily_base_amount": ("INTEGER", 200, "int"),
+    "level_multiplier_pct": ("INTEGER", 10, "int"),
+    "role_multipliers": ("TEXT", {}, "json_map"),
+    "economy_support_role_ids": ("TEXT", [], "json_list"),
     # أعمدة قديمة يتم الإبقاء عليها للتوافق
     "anti_spam_enabled": ("INTEGER", True, "bool"),
     "anti_link_enabled": ("INTEGER", True, "bool"),
@@ -772,6 +779,20 @@ def _row_to_settings(guild_id: int, row: Optional[Any]) -> Dict[str, Any]:
             if not isinstance(value, list):
                 value = []
             value = [str(item) for item in value if isinstance(item, str)]
+        elif kind == "json_map":
+            try:
+                value = json.loads(value) if isinstance(value, str) else value
+            except (TypeError, ValueError):
+                value = {}
+            if not isinstance(value, dict):
+                value = {}
+            value = {
+                str(key): float(multiplier)
+                for key, multiplier in value.items()
+                if str(key).isdigit()
+                and isinstance(multiplier, (int, float))
+                and 0.0 < float(multiplier) <= 10.0
+            }
         elif kind in ("int", "id"):
             value = int(value)
         settings[key] = value
@@ -870,6 +891,21 @@ def validate_setting(key: str, value: Any) -> Any:
             if item and len(item) <= 80:
                 words.append(item)
         return list(dict.fromkeys(words))
+    if kind == "json_map":
+        if not isinstance(value, dict):
+            raise ValueError("يجب أن تكون مضاعفات الرتب في صيغة JSON")
+        result = {}
+        for role_id, multiplier in list(value.items())[:100]:
+            if not str(role_id).isdigit():
+                raise ValueError("معرّف الرتبة غير صالح")
+            try:
+                multiplier = float(multiplier)
+            except (TypeError, ValueError):
+                raise ValueError("قيمة المضاعف غير صالحة")
+            if not 0.0 < multiplier <= 10.0:
+                raise ValueError("المضاعف يجب أن يكون أكبر من صفر وحتى 10")
+            result[str(role_id)] = round(multiplier, 3)
+        return result
     # str
     if not isinstance(value, str):
         raise ValueError("يجب أن تكون القيمة نصاً")

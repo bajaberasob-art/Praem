@@ -130,10 +130,13 @@ def _callback_opens_modal(callback: Callable[..., Any]) -> bool:
         candidates.append(nested_callback)
     if any(getattr(candidate, _OPENS_MODAL, False) for candidate in candidates):
         return True
-    try:
-        source = "\n".join(inspect.getsource(candidate) for candidate in candidates)
-    except (OSError, TypeError):
-        source = ""
+    sources: list[str] = []
+    for candidate in candidates:
+        try:
+            sources.append(inspect.getsource(candidate))
+        except (OSError, TypeError):
+            continue
+    source = "\n".join(sources)
     return ".send_modal(" in source
 
 

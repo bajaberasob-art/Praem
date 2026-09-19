@@ -10,3 +10,4 @@
 - [Interaction runtime](interaction-runtime.md) — central ACK/proxy/error guards protect all Slash commands and UI callbacks while preserving existing response code.
 - [Economy atomicity](economy-atomicity.md) — account creation, XP, daily claims, and wallet moves must complete as single SQLite transactions.
 - [Live dashboard control plane](dashboard-control-plane.md) — stats and action feeds must reuse the bot session and remain additive over live SQLite data.
+- [SQLite table rebuilds](database-migrations.md) — drop dependent views during uniqueness-constraint table swaps, then recreate them after renaming.

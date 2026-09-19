@@ -41,7 +41,8 @@ def _safe(value: Any, limit: int = 1024) -> str:
 
 
 def _code(value: Any) -> str:
-    return f"```{_safe(value, 850).replace('```', \"'''\" )}```"
+    cleaned = _safe(value, 850).replace("```", "'''")
+    return f"```{cleaned}```"
 
 
 def create_elite_log_embed(

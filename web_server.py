@@ -75,7 +75,10 @@ _DANGEROUS_TAG_RE = re.compile(
     r"<\s*/?\s*(script|style|iframe|object|embed|svg|math|form)\b[^>]*>",
     re.IGNORECASE,
 )
-_HTML_TAG_RE = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
+_HTML_TAG_RE = re.compile(
+    r"<\s*/?\s*(img|video|audio|source|link|meta|base)\b[^>]*>",
+    re.IGNORECASE,
+)
 _EVENT_HANDLER_RE = re.compile(r"\bon[a-z]+\s*=", re.IGNORECASE)
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _DISCORD_TOKEN_RE = re.compile(r"<(?:a?):[A-Za-z0-9_~]+:\d+>|<@!?\d+>|<#\d+>|<@&\d+>")

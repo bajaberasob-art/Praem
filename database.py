@@ -885,6 +885,8 @@ def validate_setting(key: str, value: Any) -> Any:
         if value in (None, ""):
             return None
         text = str(value)
+        if key in {"leaderboard_channel_id", "leaderboard_message_id"} and text == "0":
+            return 0
         if not text.isdigit() or not 15 <= len(text) <= 22:
             raise ValueError("معرّف ديسكورد غير صالح")
         return int(text)

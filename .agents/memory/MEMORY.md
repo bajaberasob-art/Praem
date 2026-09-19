@@ -11,3 +11,4 @@
 - [Economy atomicity](economy-atomicity.md) — account creation, XP, daily claims, and wallet moves must complete as single SQLite transactions.
 - [Live dashboard control plane](dashboard-control-plane.md) — stats and action feeds must reuse the bot session and remain additive over live SQLite data.
 - [SQLite table rebuilds](database-migrations.md) — drop dependent views during uniqueness-constraint table swaps, then recreate them after renaming.
+- [Gateway cache readiness](gateway-cache-diagnostics.md) — full intents can delay ready until startup member chunks finish; inspect guild availability and cached-member counts.

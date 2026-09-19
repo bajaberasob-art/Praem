@@ -427,6 +427,15 @@ async def guild_meta(guild) -> dict:
                   "members": guild.member_count},
         "channels": channels,
         "roles": roles,
+        "members_list": [
+            {
+                "id": str(member.id),
+                "name": member.display_name,
+                "avatar": str(getattr(member.display_avatar, "url", "")),
+            }
+            for member in getattr(guild, "members", ())
+            if not getattr(member, "bot", False)
+        ],
         "stickers": [
             {"id": str(sticker.id), "name": sticker.name, "url": str(sticker.url)}
             for sticker in stickers
@@ -788,6 +797,7 @@ async def api_guild_auto_responses(req):
         ],
         "roles": meta["roles"],
         "emojis": meta["emojis"],
+        "members": meta["members_list"],
     })
 
 

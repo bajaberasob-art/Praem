@@ -663,6 +663,7 @@ class Utilities(commands.Cog):
             return
         if await self._dispatch_shortcut(message):
             return
+        candidates = []
         for responder in self.auto_responders.get(guild_id, []):
             if (
                 responder.get("channel_id") is not None
@@ -671,48 +672,51 @@ class Utilities(commands.Cog):
                 continue
             if not self._matches(responder, content):
                 continue
-            if not self._target_matches(responder, message):
-                continue
-            if not self._consume_bucket(message, responder):
-                continue
-            rendered = self.render_response(responder.get("response", ""), message)
-            reaction = self._parse_reaction(responder.get("reaction_emoji", ""))
-            if not rendered.strip() and reaction is None:
-                continue
-            executed = False
-            if rendered.strip():
-                try:
-                    await message.channel.send(
-                        rendered,
-                        allowed_mentions=discord.AllowedMentions(
-                            users=True,
-                            roles=False,
-                            everyone=False,
-                        ),
-                    )
-                    executed = True
-                except (discord.Forbidden, discord.HTTPException):
-                    LOGGER.warning(
-                        "[AUTORESPONDER] تعذر إرسال رد في السيرفر %s",
-                        guild_id,
-                        exc_info=True,
-                    )
-            if reaction is not None:
-                try:
-                    await message.add_reaction(reaction)
-                    executed = True
-                except (discord.Forbidden, discord.HTTPException):
-                    LOGGER.warning(
-                        "[AUTORESPONDER] تعذر إضافة التفاعل %s في السيرفر %s",
-                        responder.get("reaction_emoji", ""),
-                        guild_id,
-                        exc_info=True,
-                    )
-            if executed:
-                responder["execution_count"] = await record_auto_responder_execution(
-                    guild_id, int(responder["id"])
+            candidates.append(responder)
+        responder = self._select_priority_responder(candidates, message)
+        if responder is None:
+            return
+        # Priority is strict: a selected rule consumes the message even when
+        # its cooldown is exhausted; never fall through to a lower tier.
+        if not self._consume_bucket(message, responder):
+            return
+        rendered = self.render_response(responder.get("response", ""), message)
+        reaction = self._parse_reaction(responder.get("reaction_emoji", ""))
+        if not rendered.strip() and reaction is None:
+            return
+        executed = False
+        if rendered.strip():
+            try:
+                await message.channel.send(
+                    rendered,
+                    allowed_mentions=discord.AllowedMentions(
+                        users=True,
+                        roles=False,
+                        everyone=False,
+                    ),
                 )
-            break
+                executed = True
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.warning(
+                    "[AUTORESPONDER] تعذر إرسال رد في السيرفر %s",
+                    guild_id,
+                    exc_info=True,
+                )
+        if reaction is not None:
+            try:
+                await message.add_reaction(reaction)
+                executed = True
+            except (discord.Forbidden, discord.HTTPException):
+                LOGGER.warning(
+                    "[AUTORESPONDER] تعذر إضافة التفاعل %s في السيرفر %s",
+                    responder.get("reaction_emoji", ""),
+                    guild_id,
+                    exc_info=True,
+                )
+        if executed:
+            responder["execution_count"] = await record_auto_responder_execution(
+                guild_id, int(responder["id"])
+            )
 
     @staticmethod
     def _matches(responder: dict[str, Any], content: str) -> bool:
@@ -738,6 +742,46 @@ class Utilities(commands.Cog):
         if target_type == "role":
             return any(int(role.id) == target_id for role in message.author.roles)
         return False
+
+    @staticmethod
+    def _select_priority_responder(
+        candidates: list[dict[str, Any]],
+        message: discord.Message,
+    ) -> dict[str, Any] | None:
+        """Choose exactly one matching rule using member > role > everyone."""
+        if not candidates:
+            return None
+        author_id = int(message.author.id)
+        user_rules = [
+            item for item in candidates
+            if item.get("target_type", "everyone") == "user"
+            and int(item.get("target_id") or 0) == author_id
+        ]
+        if user_rules:
+            return user_rules[0]
+
+        member_roles = {
+            int(role.id): getattr(role, "position", 0)
+            for role in getattr(message.author, "roles", [])
+        }
+        role_rules = [
+            item for item in candidates
+            if item.get("target_type", "everyone") == "role"
+            and int(item.get("target_id") or 0) in member_roles
+        ]
+        if role_rules:
+            return max(
+                role_rules,
+                key=lambda item: (
+                    member_roles[int(item.get("target_id") or 0)],
+                    -int(item.get("id") or 0),
+                ),
+            )
+
+        return next(
+            (item for item in candidates if item.get("target_type", "everyone") == "everyone"),
+            None,
+        )
 
     @staticmethod
     def _parse_reaction(value: Any):

@@ -100,18 +100,24 @@ class Analytics(commands.Cog):
         guild: discord.Guild,
         category: str,
         embed: discord.Embed,
-    ) -> None:
+        *,
+        strict: bool = False,
+    ) -> bool:
         route = (await self._routing(guild)).get(category, 0)
         channel = guild.get_channel(int(route)) if route else None
         if channel is None or not hasattr(channel, "send"):
-            return
+            return False
         try:
             me = guild.me
             if me and not channel.permissions_for(me).send_messages:
-                return
+                return False
             await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            return True
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to dispatch %s audit for guild %s", category, guild.id, exc_info=True)
+            if strict:
+                raise
+            return False
 
     async def _audit(
         self,
@@ -158,8 +164,9 @@ class Analytics(commands.Cog):
         fields=None,
         thumbnail=None,
         color=None,
+        strict: bool = False,
     ):
-        await self._send(
+        return await self._send(
             guild,
             category,
             self._embed(
@@ -172,6 +179,7 @@ class Analytics(commands.Cog):
                 thumbnail=thumbnail,
                 color=color,
             ),
+            strict=strict,
         )
 
     async def on_ready(self):
@@ -446,14 +454,17 @@ class Analytics(commands.Cog):
         if category not in COLORS:
             raise ValueError("unsupported logging category")
         _, label = COLORS[category]
-        await self._log(
+        sent = await self._log(
             guild, category, f"🧪 اختبار {label}", "هذه رسالة اختبار من موزع السجلات الاحترافي.",
             author=actor or guild.me,
             fields=[
                 ("✅ الحالة", "القناة مرتبطة وتستقبل السجلات", True),
                 ("🧭 التصنيف", category, True),
             ],
+            strict=True,
         )
+        if not sent:
+            raise PermissionError("log channel is not writable")
 
 
 async def setup(bot: commands.Bot):

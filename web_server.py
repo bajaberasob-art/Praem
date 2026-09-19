@@ -701,6 +701,8 @@ async def api_test_log_channel(req):
     actor = guild.get_member(int(session["id"])) or guild.me
     try:
         await analytics.send_test(guild, category, actor=actor)
+    except PermissionError:
+        return json_error(403, "missing_send_permission")
     except (discord.Forbidden, discord.HTTPException):
         return json_error(502, "discord_unavailable")
     return web.json_response({"ok": True, "category": category, "channel_id": str(channel.id)})

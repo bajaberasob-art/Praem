@@ -3909,22 +3909,29 @@
         select,
         el("div", { class: "analytics-route-actions" },
           el("button", {
-            class: "btn analytics-test-button", type: "button", text: "🧪 تجربة الإمبد",
+            class: "btn analytics-test-button", type: "button", title: "إرسال رسالة اختبار إلى القناة المختارة",
+            text: "🧪 إرسال اختبار",
             onClick: async (event) => {
               pulse();
               const button = event.currentTarget;
               button.disabled = true;
               try {
-                const response = await api(`api/guild/${state.guild.id}/logs/test/${key}`, { method: "POST" });
+                const response = await writeApi(`api/guild/${state.guild.id}/logs/test/${key}`, {});
                 const data = await response.json().catch(() => ({}));
-                toast(response.ok ? "تم إرسال تجربة الإمبد إلى Discord" : (data.error === "category_unassigned" ? "عيّن قناة لهذا التصنيف أولاً" : "تعذر إرسال التجربة"), response.ok ? "success" : "warn");
+                const message = {
+                  category_unassigned: "عيّن قناة لهذا التصنيف أولاً ثم احفظ التوزيع",
+                  missing_send_permission: "البوت لا يملك صلاحية إرسال الرسائل في هذه القناة",
+                  discord_unavailable: "تعذر الوصول إلى Discord حالياً",
+                }[data.error] || "تعذر إرسال التجربة";
+                toast(response.ok ? "تم إرسال رسالة الاختبار إلى Discord" : message, response.ok ? "success" : "warn");
               } finally {
                 button.disabled = false;
               }
             },
           }),
           el("button", {
-            class: "icon-action danger", type: "button", title: "تعطيل", text: "✕ تعطيل",
+            class: "btn analytics-disable-button", type: "button", title: "تعطيل هذا التصنيف",
+            text: "✕ تعطيل",
             onClick: () => { select.value = "0"; state.logRouting.channels[key] = "0"; },
           }),
         ),
@@ -3942,11 +3949,10 @@
             const button = event.currentTarget;
             button.disabled = true;
             try {
-              const response = await api(`api/guild/${state.guild.id}/logs/channels`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ channels: state.logRouting.channels }),
-              });
+              const response = await writeApi(
+                `api/guild/${state.guild.id}/logs/channels`,
+                { channels: state.logRouting.channels },
+              );
               const data = await response.json().catch(() => ({}));
               if (response.ok) {
                 state.logRouting = data;

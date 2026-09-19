@@ -4629,17 +4629,41 @@
       if (!me.auth) return redirect();
       state.session = me.session;
       if (!state.session.guilds?.length) {
+        const inviteUrl = state.session.invite_url;
         app.replaceChildren(
           el(
             "main",
             { class: "page" },
             el(
               "div",
-              { class: "empty" },
+              { class: "empty access-empty" },
               el("strong", { text: "لا توجد سيرفرات مصرّح بها" }),
               el("span", {
-                text: "اطلب صلاحية الوصول إلى سيرفر Discord ثم أعد المحاولة.",
+                text: "البوت غير موجود حالياً في أي سيرفر تملك صلاحية إدارته.",
               }),
+              inviteUrl
+                ? el(
+                    "div",
+                    { class: "empty-actions" },
+                    el(
+                      "a",
+                      {
+                        class: "invite-button",
+                        href: inviteUrl,
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                      },
+                      "دعوة البوت إلى سيرفر",
+                    ),
+                    el("small", {
+                      class: "empty-hint",
+                      text: "اختر السيرفر من صفحة Discord ثم وافق على الدعوة، وبعدها أعد تحميل الداشبورد.",
+                    }),
+                  )
+                : el("span", {
+                    class: "empty-hint",
+                    text: "رابط دعوة البوت غير متاح حالياً. تحقق من إعداد CLIENT_ID ثم أعد المحاولة.",
+                  }),
             ),
           ),
         );

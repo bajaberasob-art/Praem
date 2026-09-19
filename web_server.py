@@ -48,6 +48,7 @@ R_URI = os.getenv("REDIRECT_URI")
 DASHBOARD_BASE_PATH = os.getenv("DASHBOARD_BASE_PATH", "/").rstrip("/") + "/"
 DISCORD_API = "https://discord.com/api/v10"
 ADMIN_BIT = 0x8
+BOT_INVITE_PERMISSIONS = os.getenv("BOT_INVITE_PERMISSIONS", "8")
 SESSIONS: dict[str, dict] = {}
 STATES: dict[str, float] = {}
 STATE_TTL, SESSION_TTL = 300, 604800
@@ -74,6 +75,16 @@ def prune_expired():
 def current_session(req):
     prune_expired()
     return SESSIONS.get(req.cookies.get("bot_session"))
+
+
+def bot_invite_url() -> str | None:
+    """Build the public Discord install link without exposing any secret."""
+    if not C_ID:
+        return None
+    return (
+        f"{DISCORD_API}/oauth2/authorize?"
+        f"{urlencode({'client_id': C_ID, 'scope': 'bot applications.commands', 'permissions': BOT_INVITE_PERMISSIONS})}"
+    )
 
 
 @web.middleware
@@ -243,9 +254,15 @@ async def api_me(req):
     session = current_session(req)
     if not session:
         return web.json_response({"auth": False}, status=401)
+    public_session = {
+        key: value for key, value in session.items() if key != "expires_at"
+    }
+    # This is intentionally derived on every request so a session created
+    # before a code update still gets the recovery link.
+    public_session["invite_url"] = bot_invite_url()
     return web.json_response({
         "auth": True,
-        "session": {key: value for key, value in session.items() if key != "expires_at"},
+        "session": public_session,
     })
 
 

@@ -71,6 +71,13 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(dashboard, "C_SEC", None):
             self.assertEqual((await dashboard.login(request())).status, 503)
 
+    async def test_bot_invite_url_uses_public_install_scopes(self):
+        url = dashboard.bot_invite_url()
+        query = parse_qs(urlsplit(url).query)
+        self.assertEqual(query["client_id"], ["test-id"])
+        self.assertEqual(query["scope"], ["bot applications.commands"])
+        self.assertEqual(query["permissions"], [dashboard.BOT_INVITE_PERMISSIONS])
+
     async def test_state_expiry_and_browser_binding(self):
         dashboard.STATES["old"] = time.time() - 301
         dashboard.STATES["live"] = time.time()

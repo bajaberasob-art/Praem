@@ -1372,7 +1372,7 @@ class Community(commands.Cog):
                             name=f"👥 الأعضاء: {guild.member_count}",
                         )
                     except discord.HTTPException:
-                        pass
+                        logger.warning("Could not update member counter in guild %s", guild.id, exc_info=True)
             if channel_id := channels.get("boosts"):
                 if channel := guild.get_channel(channel_id):
                     try:
@@ -1383,7 +1383,7 @@ class Community(commands.Cog):
                             ),
                         )
                     except discord.HTTPException:
-                        pass
+                        logger.warning("Could not update boost counter in guild %s", guild.id, exc_info=True)
 
     @update_counters_task.before_loop
     async def before_counter(self):

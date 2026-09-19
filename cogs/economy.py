@@ -1,9 +1,12 @@
 import datetime
+import logging
 import random
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+
+logger = logging.getLogger("EconomyCog")
 
 from database import (
     add_xp,
@@ -91,7 +94,7 @@ class Economy(commands.Cog):
                     message = await channel.fetch_message(int(giveaway["message_id"]))
                     await message.edit(view=None)
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    pass
+                    logger.debug("Giveaway message cleanup was unavailable", exc_info=True)
             except (discord.Forbidden, discord.HTTPException):
                 continue
             await complete_giveaway(int(giveaway["id"]))

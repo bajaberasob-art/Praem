@@ -68,7 +68,7 @@ class TicketControl(discord.ui.View):
         try:
             await itx.channel.delete()
         except Exception:
-            pass
+            logger.exception("Failed to delete closed ticket channel")
 
 
 class TicketLauncher(discord.ui.View):

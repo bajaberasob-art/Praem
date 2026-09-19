@@ -1599,7 +1599,7 @@ async def api_guild_events(req):
             except asyncio.TimeoutError:
                 await send("ping", ping_payload())
     except (ConnectionResetError, asyncio.CancelledError, aiohttp.ClientConnectionError):
-        pass
+        logger.debug("SSE client disconnected for guild %s", guild_id)
     finally:
         listeners.discard(queue)
         if not listeners:

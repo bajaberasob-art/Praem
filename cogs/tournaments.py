@@ -1,8 +1,11 @@
 import random
+import logging
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+logger = logging.getLogger("TournamentCog")
 
 from database import (
     add_tournament_entry,
@@ -153,7 +156,7 @@ class Tournaments(commands.Cog):
                     reason="Scrims Balancing",
                 )
             except discord.HTTPException:
-                pass
+                logger.warning("Could not move tournament participant %s", member.id, exc_info=True)
 
         embed = discord.Embed(
             title="⚔️ قرعة السكريمات المتوازنة",

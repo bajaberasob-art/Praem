@@ -956,7 +956,7 @@ class Utilities(commands.Cog):
                     view=VoiceControl(new_channel, mem),
                 )
             except Exception:
-                pass
+                LOGGER.exception("Failed to create temporary voice room")
 
         # 2. حذف الروم عند مغادرة الجميع
         if before.channel and before.channel.id in self.temp_voice:
@@ -965,7 +965,7 @@ class Utilities(commands.Cog):
                 try:
                     await before.channel.delete()
                 except Exception:
-                    pass
+                    LOGGER.exception("Failed to delete empty temporary voice room")
 
     @app_commands.command(
         name="setup_voice",

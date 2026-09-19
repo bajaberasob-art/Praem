@@ -35,11 +35,11 @@ if not TOKEN:
     )
     sys.exit(1)
 
-intents = discord.Intents.default()
-# Security listeners require member join/ban events and message content.
-# Presence, typing, and other privileged intents are intentionally disabled.
+intents = discord.Intents.all()
 intents.members = True
 intents.message_content = True
+intents.guilds = True
+intents.emojis_and_stickers = True
 
 
 def configured_sync_guild() -> discord.Object | None:
@@ -65,6 +65,7 @@ class EnterpriseBot(commands.Bot):
             intents=intents,
             help_command=None,
             max_messages=1000,
+            chunk_guilds_at_startup=True,
         )
         self.session: aiohttp.ClientSession | None = None
         self.dashboard_runner = None
@@ -187,7 +188,24 @@ class EnterpriseBot(commands.Bot):
             f"⚡ زمن الاستجابة الشبكي (Ping): "
             f"{round(self.latency * 1000)}ms"
         )
+        logger.info("[GATEWAY] Bot Tag: %s | Latency: %sms", self.user, round(self.latency * 1000))
+        logger.info("[GATEWAY] Connected Guilds: %d", len(self.guilds))
+        logger.info("[GATEWAY] Cached members by guild:")
+        for guild in self.guilds:
+            logger.info(
+                "  - %s (%s): %d cached members | chunked=%s | emojis=%d | roles=%d",
+                guild.name,
+                guild.id,
+                len(guild.members),
+                bool(getattr(guild, "chunked", False)),
+                len(guild.emojis),
+                len(guild.roles),
+            )
         logger.info("=" * 45)
+
+    async def on_message(self, message: discord.Message):
+        """Keep prefix-command dispatch active alongside cog listeners."""
+        await self.process_commands(message)
 
     def record_metrics(self) -> None:
         """Capture live gateway and guild values for the dashboard charts."""

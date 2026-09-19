@@ -29,6 +29,7 @@ from database import (
 
 
 logger = logging.getLogger("EngagementCog")
+_LEVEL_ROLE_LOCKS: dict[tuple[int, int, int], asyncio.Lock] = {}
 
 class TicketControl(discord.ui.View):
     def __init__(self):
@@ -235,21 +236,25 @@ class LevelGatedRoleButton(discord.ui.Button):
                 "⚠️ رتبة البوت أدنى من هذه الرتبة، يرجى إبلاغ الإدارة.",
                 ephemeral=True,
             )
-        try:
-            if role in itx.user.roles:
-                await itx.user.remove_roles(role, reason="Level-gated self-role toggle")
-                message = f"➖ تم إزالة رتبة **{role.name}** من حسابك."
-            else:
-                await itx.user.add_roles(role, reason="Level-gated self-role toggle")
-                message = f"✅ تم منحك رتبة **{role.name}** بنجاح!"
-        except (discord.Forbidden, discord.HTTPException):
-            logger.warning(
-                "[LEVEL_ROLE] تعذر تبديل الرتبة %s للعضو %s",
-                self.role_id,
-                itx.user.id,
-                exc_info=True,
-            )
-            message = "⚠️ تعذر تحديث رتبتك. تحقق من صلاحيات البوت."
+        lock = _LEVEL_ROLE_LOCKS.setdefault(
+            (itx.guild.id, itx.user.id, self.role_id), asyncio.Lock()
+        )
+        async with lock:
+            try:
+                if role in itx.user.roles:
+                    await itx.user.remove_roles(role, reason="Level-gated self-role toggle")
+                    message = f"➖ تم إزالة رتبة **{role.name}** من حسابك."
+                else:
+                    await itx.user.add_roles(role, reason="Level-gated self-role toggle")
+                    message = f"✅ تم منحك رتبة **{role.name}** بنجاح!"
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "[LEVEL_ROLE] تعذر تبديل الرتبة %s للعضو %s",
+                    self.role_id,
+                    itx.user.id,
+                    exc_info=True,
+                )
+                message = "⚠️ تعذر تحديث رتبتك. تحقق من صلاحيات البوت."
         await itx.response.send_message(message, ephemeral=True)
 
 

@@ -427,7 +427,7 @@ async def guild_meta(guild) -> dict:
                   "members": guild.member_count},
         "channels": channels,
         "roles": roles,
-        "members_list": [
+        "members": [
             {
                 "id": str(member.id),
                 "name": member.display_name,
@@ -797,7 +797,7 @@ async def api_guild_auto_responses(req):
         ],
         "roles": meta["roles"],
         "emojis": meta["emojis"],
-        "members": meta["members_list"],
+        "members": meta["members"],
     })
 
 

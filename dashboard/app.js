@@ -2122,12 +2122,17 @@
     form.elements.channel_id.value = rule?.channel_id || "";
     form.elements.target_type.value = rule?.target_type || "everyone";
     form.elements.target_role_id.value = rule?.target_type === "role" ? String(rule?.target_id || "") : "";
-    form.elements.target_user_id.value = rule?.target_type === "user" ? String(rule?.target_id || "") : "";
-    form.elements.reaction_emoji.value = rule?.reaction_emoji || "";
+    if (form._setAutoMember) {
+      form._setAutoMember(rule?.target_type === "user" ? String(rule?.target_id || "") : "");
+    } else {
+      form.elements.target_user_id.value = rule?.target_type === "user" ? String(rule?.target_id || "") : "";
+    }
+    if (form._setAutoReaction) {
+      form._setAutoReaction(rule?.reaction_emoji || "");
+    } else {
+      form.elements.reaction_emoji.value = rule?.reaction_emoji || "";
+    }
     updateAutoTargetFields(form);
-    form.querySelectorAll("[data-reaction-chip]").forEach((chip) => {
-      chip.classList.toggle("active", chip.dataset.reactionChip === (rule?.reaction_emoji || ""));
-    });
     form.elements.trigger.dispatchEvent(new Event("input", { bubbles: true }));
     form.elements.response.dispatchEvent(new Event("input", { bubbles: true }));
     form.querySelectorAll("[data-match-type]").forEach((button) => {
@@ -3950,10 +3955,11 @@
       state.commandRoleFilter = "all";
       state.commandDetail = null;
        state.autoResponses = autoResponses.rules || [];
-       state.autoResponderMeta = {
-         roles: autoResponses.roles || meta.roles || [],
-         emojis: autoResponses.emojis || meta.emojis || [],
-       };
+      state.autoResponderMeta = {
+        roles: autoResponses.roles || meta.roles || [],
+        emojis: autoResponses.emojis || meta.emojis || [],
+        members: autoResponses.members || meta.members || [],
+      };
       state.tickets = {
         active: activeTickets.tickets || [],
         archive: archiveTickets.tickets || [],

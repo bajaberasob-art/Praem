@@ -35,7 +35,7 @@
     onboarding: null,
     commandStudio: { commands: [], roles: [], channels: [], shortcuts: [] },
     autoResponses: [],
-    autoResponderMeta: { roles: [], emojis: [] },
+    autoResponderMeta: { roles: [], emojis: [], members: [] },
     commandSearch: "",
     commandCogFilter: "all",
     commandStatusFilter: "all",
@@ -3998,6 +3998,24 @@
     stopIncidentRefresh();
     state.incidentTimer = setInterval(() => refreshIncidents(id, true), 15000);
   }
+  async function fetchGuildMeta(id) {
+    const response = await api(`api/guild/${id}/meta`);
+    if (!response.ok) throw new Error("meta_unavailable");
+    const meta = await response.json();
+    if (state.guild?.id !== id) return meta;
+    state.meta = meta;
+    state.commandStudio = {
+      ...(state.commandStudio || {}),
+      roles: meta.roles || [],
+      channels: meta.channels || [],
+    };
+    state.autoResponderMeta = {
+      roles: meta.roles || [],
+      emojis: meta.emojis || [],
+      members: meta.members || [],
+    };
+    return meta;
+  }
   async function loadGuild(id) {
     const g = state.session.guilds.find((x) => x.id === id);
     if (!g) return;
@@ -4023,7 +4041,7 @@
     stopIncidentRefresh();
     try {
       const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr] = await Promise.all([
-        api(`api/guild/${id}/meta`),
+        fetchGuildMeta(id),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
         api(`api/guild/${id}/onboarding`),
@@ -4038,7 +4056,7 @@
       ]);
       if (state.guild.id !== id) return;
       const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions] = await Promise.all([
-        mr.json(),
+        Promise.resolve(mr),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
         or.json(),

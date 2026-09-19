@@ -10,10 +10,18 @@ logger = logging.getLogger("EconomyCog")
 
 from database import (
     add_xp,
+    add_economy_audit,
+    adjust_user_balance,
+    adjust_user_level,
     get_economy_leaderboard,
+    get_level_leaderboard,
+    get_level_rewards,
+    get_leaderboard_targets,
     get_guild_settings,
     get_or_create_user,
-    claim_daily_reward,
+    claim_scaled_daily_reward,
+    get_role_multipliers,
+    set_leaderboard_embed_target,
     add_giveaway_entry,
     cancel_giveaway,
     complete_giveaway,
@@ -56,7 +64,9 @@ class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.cooldowns = {}
+        self._leaderboard_locks: dict[int, asyncio.Lock] = {}
         self.giveaway_task.start()
+        self.leaderboard_task.start()
 
     async def cog_load(self):
         for giveaway in await get_open_giveaways():
@@ -67,6 +77,136 @@ class Economy(commands.Cog):
 
     def cog_unload(self):
         self.giveaway_task.cancel()
+        self.leaderboard_task.cancel()
+
+    async def _is_economy_support(self, member: discord.Member) -> bool:
+        if member.guild_permissions.administrator:
+            return True
+        settings = await get_guild_settings(member.guild.id)
+        support_roles = {
+            int(role_id)
+            for role_id in settings["settings"].get("economy_support_role_ids", [])
+            if str(role_id).isdigit()
+        }
+        return any(role.id in support_roles for role in member.roles)
+
+    async def _leaderboard_embed(self, guild: discord.Guild) -> discord.Embed:
+        wealth = await get_economy_leaderboard(guild.id, 10)
+        levels = await get_level_leaderboard(guild.id, 10)
+
+        def member_name(user_id: int) -> str:
+            member = guild.get_member(int(user_id))
+            return member.display_name if member else f"عضو {user_id}"
+
+        wealth_lines = [
+            f"**{index}.** {member_name(row['user_id'])} — "
+            f"`{int(row['total']):,}` عملة"
+            for index, row in enumerate(wealth, 1)
+        ]
+        level_lines = [
+            f"**{index}.** {member_name(row['user_id'])} — "
+            f"مستوى `{int(row['level'])}` · `{int(row['xp']):,}` XP"
+            for index, row in enumerate(levels, 1)
+        ]
+        embed = discord.Embed(
+            title="🏆 لوحة المتصدرين الحية",
+            description="تتحدث تلقائياً كل خمس دقائق ومع كل تغيير في الاقتصاد.",
+            color=0x00E5FF,
+        )
+        embed.add_field(
+            name="💰 أغنى 10 أعضاء",
+            value="\n".join(wealth_lines) or "لا توجد حسابات بعد.",
+            inline=True,
+        )
+        embed.add_field(
+            name="🎖️ أعلى 10 مستويات",
+            value="\n".join(level_lines) or "لا توجد حسابات بعد.",
+            inline=True,
+        )
+        embed.set_footer(text=f"{guild.name} • LIVE ECONOMY")
+        return embed
+
+    async def refresh_leaderboard(self, guild_id: int) -> None:
+        settings = await get_guild_settings(guild_id)
+        config = settings["settings"]
+        channel_id = int(config.get("leaderboard_channel_id") or 0)
+        if channel_id <= 0:
+            return
+        lock = self._leaderboard_locks.setdefault(int(guild_id), asyncio.Lock())
+        async with lock:
+            channel = self.bot.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    return
+            message = None
+            message_id = int(config.get("leaderboard_message_id") or 0)
+            if message_id:
+                try:
+                    message = await channel.fetch_message(message_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = None
+            embed = await self._leaderboard_embed(channel.guild)
+            try:
+                if message is None:
+                    message = await channel.send(embed=embed)
+                    await set_leaderboard_embed_target(
+                        guild_id, channel.id, message.id
+                    )
+                else:
+                    await message.edit(embed=embed)
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Unable to refresh leaderboard for guild %s", guild_id, exc_info=True)
+
+    async def _leaderboard_changed(self, guild_id: int) -> None:
+        try:
+            await self.refresh_leaderboard(guild_id)
+        except (discord.Forbidden, discord.HTTPException):
+            logger.debug("Leaderboard refresh failed for guild %s", guild_id, exc_info=True)
+
+    async def _apply_level_rewards(
+        self,
+        member: discord.Member,
+        old_level: int,
+        new_level: int,
+    ) -> None:
+        rewards = await get_level_rewards(member.guild.id)
+        wanted = {
+            int(row["role_id"])
+            for row in rewards
+            if int(row["level"]) <= int(new_level)
+        }
+        managed = {int(row["role_id"]) for row in rewards}
+        for role_id in managed:
+            role = member.guild.get_role(role_id)
+            if role is None:
+                continue
+            try:
+                if role_id in wanted and role not in member.roles:
+                    await member.add_roles(role, reason="Economy level reward")
+                elif role_id not in wanted and role in member.roles:
+                    await member.remove_roles(role, reason="Economy level reward")
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Unable to update level reward role %s", role_id, exc_info=True)
+
+    async def _admin_check(self, interaction: discord.Interaction) -> bool:
+        if await self._is_economy_support(interaction.user):
+            return True
+        await interaction.response.send_message(
+            "⛔ هذا الإجراء متاح للإدارة أو أدوار دعم الاقتصاد فقط.",
+            ephemeral=True,
+        )
+        return False
+
+    @tasks.loop(minutes=5)
+    async def leaderboard_task(self):
+        for target in await get_leaderboard_targets():
+            await self.refresh_leaderboard(int(target["guild_id"]))
+
+    @leaderboard_task.before_loop
+    async def before_leaderboard_task(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(seconds=10)
     async def giveaway_task(self):

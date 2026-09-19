@@ -2489,12 +2489,10 @@ async def get_guild_panels(guild_id: int) -> list[dict[str, Any]]:
             (int(guild_id),),
         ) as cur:
             ids = [int(row["id"]) for row in await cur.fetchall()]
-    panels = []
-    for panel_id in ids:
-        panel = await get_panel_with_buttons(panel_id)
-        if panel:
-            panels.append(panel)
-    return panels
+    resolved = await asyncio.gather(
+        *(get_panel_with_buttons(panel_id) for panel_id in ids)
+    )
+    return [panel for panel in resolved if panel]
 
 
 async def update_panel_message_id(panel_id: int, message_id: int) -> Optional[dict[str, Any]]:

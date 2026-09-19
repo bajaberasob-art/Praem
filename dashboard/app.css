@@ -54,6 +54,49 @@ a {
 .app {
   padding-bottom: 115px;
 }
+.pwa-install-pill {
+  position: fixed;
+  inset-inline: 14px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: 420px;
+  margin: auto;
+  padding: 10px 12px 10px 10px;
+  color: #f8fbff;
+  background: #05070ceb;
+  border: 1px solid #3153a8;
+  border-radius: 999px;
+  box-shadow: 0 12px 35px #000, 0 0 24px #3153a855;
+  backdrop-filter: blur(18px);
+  font-size: .8rem;
+  font-weight: 800;
+}
+.pwa-install-action,
+.pwa-install-dismiss {
+  border: 0;
+  cursor: pointer;
+  border-radius: 999px;
+}
+.pwa-install-action {
+  padding: 7px 12px;
+  color: #020617;
+  background: #8cb4ff;
+  font-size: .75rem;
+  font-weight: 900;
+}
+.pwa-install-dismiss {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: #a8b7d3;
+  background: #ffffff12;
+  font-size: 1.1rem;
+  line-height: 1;
+}
 .topbar {
   position: sticky;
   top: 0;

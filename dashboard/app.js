@@ -75,6 +75,68 @@
     activeView: sessionStorage.getItem("dashboard-view") || "overview",
     drawerOpen: false,
   };
+  let deferredInstallPrompt = null;
+  let installBanner = null;
+
+  function mobileInstallContext() {
+    const standalone = window.matchMedia?.("(display-mode: standalone)")?.matches
+      || window.navigator.standalone === true;
+    const mobile = window.matchMedia?.("(max-width: 768px)")?.matches
+      || /Android|iPhone|iPad|iPod/i.test(window.navigator.userAgent || "");
+    return mobile && !standalone;
+  }
+
+  function showInstallBanner() {
+    if (!deferredInstallPrompt || !mobileInstallContext() || installBanner) return;
+    installBanner = el(
+      "aside",
+      { class: "pwa-install-pill", id: "pwa-install-banner", role: "status" },
+      el("span", { text: "📲 تثبيت التطبيق على هاتفك" }),
+      el("button", {
+        class: "pwa-install-action",
+        type: "button",
+        text: "تثبيت",
+        onClick: async () => {
+          const prompt = deferredInstallPrompt;
+          deferredInstallPrompt = null;
+          installBanner?.remove();
+          installBanner = null;
+          if (!prompt) return;
+          await prompt.prompt();
+          await prompt.userChoice.catch(() => null);
+        },
+      }),
+      el("button", {
+        class: "pwa-install-dismiss",
+        type: "button",
+        "aria-label": "إخفاء رسالة التثبيت",
+        text: "×",
+        onClick: () => {
+          installBanner?.remove();
+          installBanner = null;
+        },
+      }),
+    );
+    document.body.append(installBanner);
+  }
+
+  function setupPwa() {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(() => {
+        // The dashboard remains fully functional when a browser blocks SWs.
+      });
+    }
+    addEventListener("beforeinstallprompt", (event) => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      showInstallBanner();
+    });
+    addEventListener("appinstalled", () => {
+      deferredInstallPrompt = null;
+      installBanner?.remove();
+      installBanner = null;
+    });
+  }
   const keys = [
     "prefix",
     "anti_nuke",
@@ -4736,5 +4798,6 @@
     }
   });
   setInterval(health, 15000);
+  setupPwa();
   start();
 })();

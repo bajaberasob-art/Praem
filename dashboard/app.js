@@ -54,6 +54,7 @@
       canned: [],
     },
     gaming: [],
+    economy: { wealth: [], levels: [], settings: null, multipliers: {} },
     ticketSearch: "",
     ticketStatusFilter: "all",
     ticketCategories: [
@@ -3721,6 +3722,128 @@
     if (response.ok) toast("تم إرسال بيانات الغرفة إلى قناة السكريم", "success", 3000);
     else toast("تعذر إرسال بيانات الغرفة");
   }
+  function economyView() {
+    const snapshot = state.economy.settings || { settings: {} };
+    const config = snapshot.settings || {};
+    const channels = (state.meta?.channels || []).filter((channel) => channel.type === "text" || !channel.type);
+    const roles = state.meta?.roles || [];
+    const channelSelect = el(
+      "select",
+      { name: "leaderboard_channel_id", required: true },
+      el("option", { value: "0", text: "لا توجد قناة مثبتة" }),
+      channels.map((channel) => el("option", { value: channel.id, text: `#${channel.name}` })),
+    );
+    channelSelect.value = String(config.leaderboard_channel_id || "0");
+    const supportSelect = el(
+      "select",
+      { name: "economy_support_role_ids", multiple: true, size: "4" },
+      roles.map((role) => el("option", { value: role.id, text: role.name })),
+    );
+    const selectedSupportRoles = new Set((config.economy_support_role_ids || []).map(String));
+    supportSelect.querySelectorAll("option").forEach((option) => {
+      option.selected = selectedSupportRoles.has(String(option.value));
+    });
+    const form = el(
+      "form",
+      { class: "fields economy-config-form" },
+      el("label", {}, el("span", { text: "قناة لوحة المتصدرين" }), channelSelect),
+      el("label", {}, el("span", { text: "المكافأة اليومية الأساسية" }), el("input", { name: "daily_base_amount", type: "number", min: "0", max: "1000000", value: String(config.daily_base_amount ?? 200) })),
+      el("label", {}, el("span", { text: "نسبة زيادة المستوى %" }), el("input", { name: "level_multiplier_pct", type: "range", min: "0", max: "500", value: String(config.level_multiplier_pct ?? 10), onInput: (event) => { pctValue.textContent = `${event.target.value}%`; } })),
+      el("span", { class: "economy-slider-value", text: `${config.level_multiplier_pct ?? 10}%` }),
+      el("div", { class: "economy-role-multipliers" },
+        el("div", { class: "panel-heading" }, el("h3", { text: "مضاعفات الرتب" }), el("small", { text: "اترك القيمة فارغة لإلغاء المضاعف" })),
+        ...roles.map((role) => {
+          const input = el("input", { type: "number", min: "0.1", max: "10", step: "0.1", value: state.economy.multipliers[String(role.id)] ?? "", "data-role-multiplier": role.id, placeholder: "1.0×" });
+          return el("label", { class: "economy-role-row" }, el("span", { text: role.name }), input);
+        }),
+      ),
+      el("label", {}, el("span", { text: "أدوار دعم الاقتصاد" }), supportSelect),
+      el("button", { class: "btn primary", type: "submit", text: "حفظ وتثبيت اللوحة 📌" }),
+    );
+    const pctValue = form.querySelector(".economy-slider-value");
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const multipliers = {};
+      form.querySelectorAll("[data-role-multiplier]").forEach((input) => {
+        if (input.value) multipliers[input.dataset.roleMultiplier] = Number(input.value);
+      });
+      const body = {
+        leaderboard_channel_id: channelSelect.value,
+        daily_base_amount: Number(form.elements.daily_base_amount.value),
+        level_multiplier_pct: Number(form.elements.level_multiplier_pct.value),
+        role_multipliers: multipliers,
+        economy_support_role_ids: [...supportSelect.selectedOptions].map((option) => option.value),
+      };
+      const response = await writeApi(`api/guild/${state.guild.id}/economy/config`, body);
+      const data = await response.json();
+      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ إعدادات الاقتصاد");
+      toast("✅ تم حفظ إعدادات الاقتصاد وتثبيت اللوحة", "success", 3000);
+      await refreshEconomy();
+    };
+    const openAdjust = (row) => {
+      const back = el("div", { class: "modal-back", role: "dialog", "aria-modal": "true" });
+      const wallet = el("input", { name: "wallet_delta", type: "number", placeholder: "مثال: 500 أو -250", value: "0" });
+      const level = el("input", { name: "level_delta", type: "number", placeholder: "مثال: 1 أو -1", value: "0" });
+      const edit = el("form", { class: "fields" },
+        el("label", {}, el("span", { text: "إضافة/خصم رصيد" }), wallet),
+        el("label", {}, el("span", { text: "تعديل المستوى" }), level),
+        el("button", { class: "btn primary", type: "submit", text: "تنفيذ التعديل فوراً" }),
+      );
+      edit.onsubmit = async (event) => {
+        event.preventDefault();
+        const response = await writeApi(`api/guild/${state.guild.id}/economy/adjust`, {
+          user_id: row.user_id,
+          wallet_delta: Number(wallet.value || 0),
+          level_delta: Number(level.value || 0),
+        });
+        const data = await response.json();
+        if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر تعديل الحساب");
+        back.remove();
+        toast("✅ تم تحديث حساب العضو", "success", 2500);
+        await refreshEconomy();
+      };
+      back.append(el("div", { class: "modal" },
+        el("h2", { text: `تعديل حساب ${row.user_id}` }),
+        el("p", { text: `الرصيد الحالي: ${(Number(row.balance) + Number(row.bank)).toLocaleString()} · المستوى: ${row.level}` }),
+        edit,
+        el("button", { class: "btn ghost", type: "button", text: "إلغاء", onClick: () => back.remove() }),
+      ));
+      document.body.append(back);
+    };
+    const rows = state.economy.wealth.length
+      ? state.economy.wealth.map((row, index) => el("button", { class: "economy-user-row", type: "button", onClick: () => openAdjust(row) },
+        el("span", { text: `#${index + 1}` }),
+        el("strong", { text: `عضو ${row.user_id}` }),
+        el("span", { text: `${Number(row.total).toLocaleString()} عملة · مستوى ${row.level}` }),
+      ))
+      : [el("div", { class: "empty-row", text: "لا توجد حسابات اقتصادية بعد" })];
+    return el("section", { id: "view-economy", class: "economy-view" },
+      el("div", { class: "section-intro" }, el("div", { class: "eyebrow", text: `${state.guild.name} / ECONOMY CONTROL` }), el("h1", { text: "الاقتصاد والمتصدرون" }), el("p", { text: "مكافآت يومية متدرجة، مضاعفات للرتب، ولوحة متصدرين حية لا تختفي عند التحديث." })),
+      card("إعدادات الاقتصاد واللوحة الحية", form),
+      el("section", { class: "overview-panel economy-leaderboard-panel" },
+        el("div", { class: "panel-heading" }, el("div", { class: "eyebrow", text: "LIVE BALANCE MANAGER" }), el("h2", { text: "أغنى الأعضاء" }), el("small", { text: "اضغط على أي صف لفتح التعديل السريع" })),
+        el("div", { class: "economy-user-list" }, rows),
+      ),
+    );
+  }
+  async function refreshEconomy() {
+    if (!state.guild?.id) return;
+    try {
+      const response = await api(`api/guild/${state.guild.id}/economy`);
+      if (response.ok) {
+        const data = await response.json();
+        state.economy = {
+          wealth: data.wealth || [],
+          levels: data.levels || [],
+          settings: data.settings || { settings: {} },
+          multipliers: data.multipliers || {},
+        };
+        if (state.activeView === "economy") renderPage();
+      }
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر تحديث مركز الاقتصاد");
+    }
+  }
   function renderPage() {
     const main = $("#main");
     main.replaceChildren();
@@ -3749,7 +3872,8 @@
     else if (view === "gaming") main.append(gamingView());
     else if (view === "onboarding") main.append(onboardingView());
     else if (view === "security") main.append(securityView());
-    else if (["moderation", "economy", "community", "ai", "system"].includes(view)) main.append(operationsView(view));
+    else if (view === "economy") main.append(economyView());
+    else if (["moderation", "community", "ai", "system"].includes(view)) main.append(operationsView(view));
     else main.append(settingsView());
     renderDock();
     renderDynamic();
@@ -4160,6 +4284,7 @@
     state.commandSearch = "";
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };
     state.gaming = [];
+    state.economy = { wealth: [], levels: [], settings: null, multipliers: {} };
     state.ticketSearch = "";
     state.ticketStatusFilter = "all";
     state.selfRoleBuilder = null;
@@ -4168,7 +4293,7 @@
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr, gr] = await Promise.all([
+      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr, gr, er] = await Promise.all([
         fetchGuildMeta(id),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
@@ -4182,9 +4307,10 @@
         api(`api/guild/${id}/stats`),
         api(`api/guild/${id}/actions`),
         api(`api/guild/${id}/gaming`),
+        api(`api/guild/${id}/economy`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming] = await Promise.all([
+      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming, economy] = await Promise.all([
         Promise.resolve(mr),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
@@ -4198,6 +4324,7 @@
         str.ok ? str.json() : Promise.resolve({ counts: {}, series: [] }),
         acr.ok ? acr.json() : Promise.resolve({ actions: [] }),
         gr.ok ? gr.json() : Promise.resolve({ scrims: [] }),
+        er.ok ? er.json() : Promise.resolve({ wealth: [], levels: [], settings: { settings: {} }, multipliers: {} }),
       ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
@@ -4231,6 +4358,12 @@
       state.stats = stats;
       state.actions = actions.actions || [];
       state.gaming = gaming.scrims || [];
+      state.economy = {
+        wealth: economy.wealth || [],
+        levels: economy.levels || [],
+        settings: economy.settings || { settings: {} },
+        multipliers: economy.multipliers || {},
+      };
       state.baseline = clone(settings.settings);
       state.onboarding = onboarding;
       state.baseline = { ...state.baseline, ...(onboarding.settings || {}) };

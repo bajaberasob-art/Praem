@@ -67,7 +67,10 @@ def create_elite_log_embed(
     if author_user:
         name = getattr(author_user, "display_name", None) or getattr(author_user, "name", "System")
         icon = _avatar(author_user)
-        embed.set_author(name=_safe(name, 256), icon_url=icon or discord.Embed.Empty)
+        if icon:
+            embed.set_author(name=_safe(name, 256), icon_url=icon)
+        else:
+            embed.set_author(name=_safe(name, 256))
         thumbnail_url = thumbnail_url or icon
     if thumbnail_url:
         embed.set_thumbnail(url=str(thumbnail_url))
@@ -135,10 +138,13 @@ class Analytics(commands.Cog):
             thumbnail_url=thumbnail,
         )
         icon = getattr(getattr(guild, "icon", None), "url", None)
-        embed.set_footer(
-            text=f"Enterprise Security Audit • Guild ID: {guild.id}",
-            icon_url=str(icon) if icon else discord.Embed.Empty,
-        )
+        if icon:
+            embed.set_footer(
+                text=f"Enterprise Security Audit • Guild ID: {guild.id}",
+                icon_url=str(icon),
+            )
+        else:
+            embed.set_footer(text=f"Enterprise Security Audit • Guild ID: {guild.id}")
         return embed
 
     async def _log(

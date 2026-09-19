@@ -306,6 +306,32 @@ async def init_db() -> None:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_xp ON users(guild_id, xp DESC);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_warnings_guild_user ON warnings(guild_id, user_id);")
             await db.execute("""
+                CREATE TABLE IF NOT EXISTS level_rewards (
+                    guild_id INTEGER NOT NULL,
+                    level INTEGER NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, level, role_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS economy_audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    actor_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    wallet_delta INTEGER NOT NULL DEFAULT 0,
+                    level_delta INTEGER NOT NULL DEFAULT 0,
+                    details TEXT NOT NULL DEFAULT '',
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_economy_audit_guild "
+                "ON economy_audit_logs(guild_id, created_at DESC);"
+            )
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS economy_transactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER NOT NULL,

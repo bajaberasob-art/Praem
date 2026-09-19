@@ -1524,6 +1524,25 @@ async def create_scrim_config(
     return dict(row)
 
 
+async def set_scrim_message(scrim_id: int, message_id: int) -> None:
+    async with connect() as db:
+        await db.execute(
+            "UPDATE scrim_configs SET message_id = ? WHERE id = ?",
+            (int(message_id), int(scrim_id)),
+        )
+        await db.commit()
+
+
+async def close_scrim(scrim_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            "UPDATE scrim_configs SET is_active = 0 WHERE id = ? AND is_active = 1",
+            (int(scrim_id),),
+        )
+        await db.commit()
+    return cur.rowcount > 0
+
+
 async def get_active_scrims(guild_id: int) -> list[Dict[str, Any]]:
     """Return active scrims with occupancy and roster data for the dashboard."""
     async with connect(aiosqlite.Row) as db:

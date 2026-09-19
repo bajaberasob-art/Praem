@@ -892,6 +892,51 @@ class Utilities(commands.Cog):
                 message, f"تم ضبط الوضع البطيء إلى `{seconds}` ثانية."
             )
 
+        if name == "warn":
+            member = self._member_from_alias_args(message, args)
+            if member is None:
+                await message.channel.send(
+                    "⚠️ الاستخدام: `الاختصار @العضو <السبب>`",
+                    delete_after=7,
+                )
+                return False
+            if getattr(member, "bot", False):
+                await message.channel.send(
+                    "❌ لا يمكن تحذير هذا الحساب.",
+                    delete_after=7,
+                )
+                return False
+            if not await self._target_is_actionable(message, member):
+                return False
+            reason = str(args or "").strip()
+            mention = str(getattr(member, "mention", "") or "")
+            if mention:
+                reason = reason.replace(mention, "", 1).strip()
+            reason = re.sub(
+                rf"<@!?{re.escape(str(getattr(member, 'id', '')))}>",
+                "",
+                reason,
+                count=1,
+            ).strip()
+            if reason.isdigit() and str(getattr(member, "id", "")) == reason:
+                reason = ""
+            if not reason:
+                await message.channel.send(
+                    "⚠️ الاستخدام: `الاختصار @العضو <السبب>`",
+                    delete_after=7,
+                )
+                return False
+            await add_warning(
+                int(member.id),
+                int(message.guild.id),
+                int(message.author.id),
+                reason,
+            )
+            return await self._send_alias_action_note(
+                message,
+                f"تم تسجيل تحذير على {member.mention} بسبب: {reason}",
+            )
+
         if name in {"timeout", "untimeout", "mute", "unmute"}:
             member = self._member_from_alias_args(message, args)
             if member is None:
@@ -957,10 +1002,12 @@ class Utilities(commands.Cog):
 
     async def _target_is_actionable(self, message, member) -> bool:
         me = getattr(message.guild, "me", None)
-        if me is not None and getattr(member, "top_role", None) >= getattr(me, "top_role", None):
+        member_top = getattr(member, "top_role", None)
+        bot_top = getattr(me, "top_role", None) if me is not None else None
+        if member_top is not None and bot_top is not None and member_top >= bot_top:
             await message.channel.send("❌ رتبة البوت يجب أن تكون أعلى من العضو المستهدف.", delete_after=7)
             return False
-        if getattr(member, "id", None) == getattr(me, "id", None):
+        if me is not None and getattr(member, "id", None) == getattr(me, "id", None):
             await message.channel.send("❌ لا يمكن للبوت تنفيذ هذا الإجراء على نفسه.", delete_after=7)
             return False
         return True

@@ -1900,18 +1900,17 @@
     );
     const render = () => {
       const query = search.value.trim().toLowerCase();
-      chips.replaceChildren(
-        picked.size
-          ? [...picked].map((id) => {
-              const item = choices.find((choice) => String(choice.id) === id);
-              const chip = el("button", { class: "command-policy-chip", type: "button", text: `× ${formatter(item || { id })}` });
-              chip.onclick = () => { picked.delete(id); render(); };
-              return chip;
-            })
-          : el("span", { class: "command-policy-empty", text: "لم يتم تحديد أي عنصر" }),
-      );
-      list.replaceChildren(
-        choices
+      const chipNodes = picked.size
+        ? [...picked].map((id) => {
+            const item = choices.find((choice) => String(choice.id) === id);
+            const chip = el("button", { class: "command-policy-chip", type: "button", text: `× ${formatter(item || { id })}` });
+            chip.onclick = () => { picked.delete(id); render(); };
+            return chip;
+          })
+        : [el("span", { class: "command-policy-empty", text: "لم يتم تحديد أي عنصر" })];
+      chips.replaceChildren(...chipNodes);
+
+      const optionNodes = choices
           .filter((item) => !query || formatter(item).toLowerCase().includes(query))
           .slice(0, 80)
           .map((item) => {
@@ -1927,8 +1926,8 @@
               render();
             };
             return button;
-          }),
-      );
+          });
+      list.replaceChildren(...optionNodes);
     };
     search.oninput = render;
     render();

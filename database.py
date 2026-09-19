@@ -467,6 +467,18 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_command_policies_guild "
                 "ON command_policies(guild_id);"
             )
+            async with db.execute("PRAGMA table_info(command_policies)") as cur:
+                command_policy_columns = {row[1] for row in await cur.fetchall()}
+            policy_migrations = {
+                "aliases": "TEXT NOT NULL DEFAULT '[]'",
+                "allowed_roles": "TEXT NOT NULL DEFAULT '[]'",
+                "allowed_channels": "TEXT NOT NULL DEFAULT '[]'",
+            }
+            for column, definition in policy_migrations.items():
+                if column not in command_policy_columns:
+                    await db.execute(
+                        f"ALTER TABLE command_policies ADD COLUMN {column} {definition}"
+                    )
             # Preserve policies created by older dashboard versions while
             # making command_policies the canonical store for new writes.
             await db.execute("""

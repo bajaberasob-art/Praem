@@ -536,7 +536,7 @@ class Utilities(commands.Cog):
         }
         if allowed_channels and str(ctx.channel.id) not in allowed_channels:
             raise CommandIntercepted(
-                f"الأمر `{ctx.command.qualified_name}` غير مسموح في هذه القناة."
+                "⚠️ هذا الأمر مخصص للعمل في قنوات محددة فقط."
             )
         allowed_roles = {str(role_id) for role_id in control["allowed_roles"]}
         if allowed_roles:
@@ -545,7 +545,7 @@ class Utilities(commands.Cog):
             }
             if not member_roles.intersection(allowed_roles):
                 raise CommandIntercepted(
-                    f"لا تملك رتبة مسموحة للأمر `{ctx.command.qualified_name}`."
+                    "⛔ ليس لديك الرتبة المسموح لها باستخدام هذا الأمر."
                 )
         return True
 
@@ -589,18 +589,14 @@ class Utilities(commands.Cog):
                 str(channel_id) for channel_id in control.get("allowed_channels", [])
             }
             if allowed_channels and str(interaction.channel_id) not in allowed_channels:
-                reason = (
-                    f"الأمر `/{interaction.command.qualified_name}` "
-                    "غير مسموح في هذه القناة."
-                )
+                reason = "⚠️ هذا الأمر مخصص للعمل في قنوات محددة فقط."
             allowed_roles = {str(role_id) for role_id in control["allowed_roles"]}
             member_roles = {
                 str(role.id) for role in getattr(interaction.user, "roles", [])
             }
             if not reason and allowed_roles and not member_roles.intersection(allowed_roles):
                 reason = (
-                    f"لا تملك رتبة مسموحة للأمر "
-                    f"`/{interaction.command.qualified_name}`."
+                    "⛔ ليس لديك الرتبة المسموح لها باستخدام هذا الأمر."
                 )
         if reason:
             await self._send_policy_denial(interaction, reason)
@@ -792,7 +788,8 @@ class Utilities(commands.Cog):
         if allowed_channels and str(message.channel.id) not in allowed_channels and not is_admin:
             await self._send_alias_denial(
                 message,
-                "⛔ هذا الاختصار غير مسموح في هذه القناة.",
+                "⚠️ هذا الأمر مخصص للعمل في قنوات محددة فقط. "
+                "غير مسموح بهذا الاختصار في هذه القناة.",
             )
             return True
         allowed_roles = {str(item) for item in policy.get("allowed_roles", [])}
@@ -802,7 +799,7 @@ class Utilities(commands.Cog):
         if allowed_roles and not is_admin and not member_roles.intersection(allowed_roles):
             await self._send_alias_denial(
                 message,
-                "⛔ ليس لديك الصلاحية لاستخدام هذا الأمر.",
+                "⛔ ليس لديك الرتبة المسموح لها باستخدام هذا الأمر.",
             )
             return True
 

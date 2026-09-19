@@ -2058,6 +2058,11 @@ async def index(req):
                     font-size: 14px;
                     font-style: normal;
                 }
+                .brand-footer i svg {
+                    width: 15px;
+                    height: 15px;
+                    stroke: currentColor;
+                }
                 .auth-card {
                     position: relative;
                     display: flex;
@@ -2169,6 +2174,71 @@ async def index(req):
                     font-size: 11px;
                     text-align: center;
                 }
+                .creator-credit {
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 12px;
+                    width: min(100%, 310px);
+                    margin: 27px auto 0;
+                    padding: 14px 18px;
+                    border: 1px solid rgba(126, 143, 255, .25);
+                    border-radius: 18px;
+                    background: linear-gradient(135deg, rgba(99, 115, 255, .12), rgba(255, 255, 255, .025));
+                    box-shadow: inset 0 1px rgba(255, 255, 255, .08), 0 12px 28px rgba(0, 0, 0, .16);
+                    overflow: hidden;
+                    text-align: right;
+                }
+                .creator-credit::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    border-radius: inherit;
+                    background: linear-gradient(110deg, transparent 20%, rgba(117, 226, 255, .13), transparent 72%);
+                    pointer-events: none;
+                }
+                .creator-shield {
+                    position: relative;
+                    display: grid;
+                    place-items: center;
+                    flex: none;
+                    width: 41px;
+                    height: 47px;
+                    color: #dce2ff;
+                    filter: drop-shadow(0 0 10px rgba(112, 137, 255, .5));
+                }
+                .creator-shield svg { width: 41px; height: 47px; }
+                .creator-shield path:last-child { color: #7ce6ff; }
+                .creator-copy {
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1px;
+                    min-width: 0;
+                }
+                .creator-copy strong {
+                    direction: ltr;
+                    color: #f3f6ff;
+                    font-family: var(--font-display);
+                    font-size: 15px;
+                    font-weight: 800;
+                    letter-spacing: .055em;
+                    white-space: nowrap;
+                }
+                .creator-copy small {
+                    color: #8f9db5;
+                    font-size: 11px;
+                    line-height: 1.6;
+                    white-space: nowrap;
+                }
+                .creator-copy b {
+                    direction: ltr;
+                    color: #aeb7ff;
+                    font-family: var(--font-display);
+                    font-size: 13px;
+                    font-weight: 700;
+                }
                 @media (max-width: 820px) {
                     body { padding: 14px; }
                     .auth-shell { display: block; min-height: auto; border-radius: 23px; }
@@ -2193,6 +2263,7 @@ async def index(req):
                     .brand-footer span { min-height: 68px; padding: 8px; font-size: 10px; }
                     .trust-grid { gap: 6px; }
                     .trust-item { font-size: 10px; }
+                    .creator-credit { margin-top: 24px; }
                 }
                 @media (prefers-reduced-motion: reduce) {
                     *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
@@ -2221,9 +2292,34 @@ async def index(req):
                         <p>رتّب كل شيء من لوحة واحدة، راقب أدق التفاصيل، واضبط إعداداتك بضغطة زر وبدون أي تعقيد.</p>
                     </div>
                     <div class="brand-footer" aria-label="مزايا المنصة">
-                        <span><i>◌</i><b>لِقّة واجهتنا.</b><small>تجربة واضحة وسلسة</small></span>
-                        <span><i>⌁</i><b>ضبط على الطاير</b><small>تحكم فوري بإعداداتك</small></span>
-                        <span><i>◈</i><b>حماية 24/7</b><small>بياناتك في أمان</small></span>
+                        <span>
+                            <i aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
+                                    <path d="M12 3 19 6v5.4c0 4.3-2.9 7.9-7 9.6-4.1-1.7-7-5.3-7-9.6V6l7-3Z"/>
+                                    <path d="m8.8 12 2.1 2.1 4.5-4.6"/>
+                                </svg>
+                            </i>
+                            <b>حماية 24/7</b><small>بياناتك في أمان</small>
+                        </span>
+                        <span>
+                            <i aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
+                                    <path d="M4 6h16M4 12h16M4 18h16"/>
+                                    <circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="7" cy="18" r="2"/>
+                                </svg>
+                            </i>
+                            <b>ضبط على الطاير</b><small>تحكم فوري بإعداداتك</small>
+                        </span>
+                        <span>
+                            <i aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8">
+                                    <circle cx="12" cy="12" r="7.5"/>
+                                    <path d="m14.8 9.2-1.3 3.1-3.1 1.3 1.3-3.1 3.1-1.3Z"/>
+                                    <path d="M12 2v2M22 12h-2M12 22v-2M2 12h2"/>
+                                </svg>
+                            </i>
+                            <b>دقّة واجهتنا</b><small>تجربة واضحة وسلسة</small>
+                        </span>
                     </div>
                 </section>
                 <section class="auth-card" aria-labelledby="login-title">
@@ -2246,6 +2342,25 @@ async def index(req):
                         <div class="trust-item"><span class="trust-icon">▣</span><strong>بيانات محمية.</strong><span>بياناتك في الحفظ والصون.</span></div>
                     </div>
                     <div class="auth-footer">بوابتك الرسمية لإدارة السيرفر — بأمان.</div>
+                    <div class="creator-credit" aria-label="هوية تطوير المنصة">
+                        <span class="creator-shield" aria-hidden="true">
+                            <svg viewBox="0 0 48 56" fill="none">
+                                <path d="M24 2 44 10v14.5C44 37.2 35.7 47.5 24 53 12.3 47.5 4 37.2 4 24.5V10L24 2Z" fill="url(#shieldFill)" stroke="#8999ff" stroke-width="1.5"/>
+                                <path d="m15.5 27.5 5.4 5.4 11.8-12" stroke="#dbf7ff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M24 8 38 13.6v10.6c0 8.5-5.4 15.9-14 20-8.6-4.1-14-11.5-14-20V13.6L24 8Z" stroke="#74e4ff" stroke-opacity=".5"/>
+                                <defs>
+                                    <linearGradient id="shieldFill" x1="8" y1="4" x2="38" y2="53" gradientUnits="userSpaceOnUse">
+                                        <stop stop-color="#5e70ff" stop-opacity=".8"/>
+                                        <stop offset="1" stop-color="#16235e" stop-opacity=".7"/>
+                                    </linearGradient>
+                                </defs>
+                            </svg>
+                        </span>
+                        <span class="creator-copy">
+                            <strong>PRIME CONTROL</strong>
+                            <small>تطوير <b>Abood515</b></small>
+                        </span>
+                    </div>
                 </section>
             </main>
         </body>

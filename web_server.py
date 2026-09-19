@@ -3,12 +3,15 @@ import json
 import logging
 import os
 import re
+import resource
 import secrets
+import struct
 import time
 from collections import deque
 from html import escape
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
+import zlib
 
 import aiohttp
 import discord
@@ -56,11 +59,27 @@ STATES: dict[str, float] = {}
 STATE_TTL, SESSION_TTL = 300, 604800
 # حدود معدل الطلبات: (عدد الطلبات، النافذة بالثواني)
 SAVE_LIMIT, READ_LIMIT = (5, 10.0), (60, 10.0)
+IP_API_LIMIT, IP_SENSITIVE_LIMIT = (60, 60.0), (10, 60.0)
 MAX_BODY = 16 * 1024
 GRANT_TTL = 60.0
 RATE_BUCKETS: dict[tuple, deque] = {}
 GRANT_CACHE: dict[tuple[str, int], tuple[float, bool]] = {}
 SETTINGS_LISTENERS: dict[int, set[asyncio.Queue]] = {}
+PROCESS_STARTED_AT = time.monotonic()
+_DANGEROUS_BLOCK_RE = re.compile(
+    r"<\s*(script|style|iframe|object|embed|svg|math|form)\b[^>]*>.*?"
+    r"<\s*/\s*\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_DANGEROUS_TAG_RE = re.compile(
+    r"<\s*/?\s*(script|style|iframe|object|embed|svg|math|form)\b[^>]*>",
+    re.IGNORECASE,
+)
+_HTML_TAG_RE = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
+_EVENT_HANDLER_RE = re.compile(r"\bon[a-z]+\s*=", re.IGNORECASE)
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_DISCORD_TOKEN_RE = re.compile(r"<(?:a?):[A-Za-z0-9_~]+:\d+>|<@!?\d+>|<#\d+>|<@&\d+>")
+_SENSITIVE_PATH_RE = re.compile(r"(backup|purge|mass|reset|delete|lockdown)", re.IGNORECASE)
 logger = logging.getLogger("DashboardOAuth")
 
 
@@ -92,12 +111,38 @@ def bot_invite_url() -> str | None:
 @web.middleware
 async def private_responses(req, handler):
     try:
-        response = await handler(req)
+        if req.path.startswith("/api/") and req.path not in {"/api/status", "/api/health"}:
+            tier = "sensitive" if _SENSITIVE_PATH_RE.search(req.path) else "standard"
+            limit = IP_SENSITIVE_LIMIT if tier == "sensitive" else IP_API_LIMIT
+            wait = rate_limited(("ip", request_ip(req), tier), limit)
+            if wait:
+                response = web.json_response(
+                    {"error": "Too Many Requests", "retry_after": max(1, int(wait) + 1)},
+                    status=429,
+                    headers={"Retry-After": str(max(1, int(wait) + 1))},
+                )
+            else:
+                response = await handler(req)
+        else:
+            response = await handler(req)
     except web.HTTPException as error:
         response = error
-    response.headers["Cache-Control"] = "no-store"
+    if req.path.startswith(("/static/", "/manifest.json", "/sw.js", "/icon-")):
+        response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=86400"
+    else:
+        response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob: https://cdn.discordapp.com https://media.discordapp.net; "
+        "connect-src 'self' https://discord.com; frame-ancestors 'none'; "
+        "base-uri 'self'; form-action 'self' https://discord.com"
+    )
     return response
 
 
@@ -275,6 +320,46 @@ def json_error(status: int, error: str, **extra):
     return web.json_response({"error": error, **extra}, status=status)
 
 
+def request_ip(req) -> str:
+    """Use the forwarded client address supplied by the workspace proxy."""
+    forwarded = req.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        candidate = forwarded.split(",", 1)[0].strip()
+        if candidate:
+            return candidate[:128]
+    return (req.remote or "unknown")[:128]
+
+
+def sanitize_string(value: str) -> str:
+    """Remove executable HTML while preserving Discord mention/emoji tokens."""
+    text = _CONTROL_RE.sub("", str(value))
+    tokens: list[str] = []
+
+    def preserve(match):
+        tokens.append(match.group(0))
+        return f"\x00DISCORD_TOKEN_{len(tokens) - 1}\x00"
+
+    text = _DISCORD_TOKEN_RE.sub(preserve, text)
+    text = _DANGEROUS_BLOCK_RE.sub("", text)
+    text = _DANGEROUS_TAG_RE.sub("", text)
+    text = _HTML_TAG_RE.sub("", text)
+    text = _EVENT_HANDLER_RE.sub("", text)
+    text = re.sub(r"(?i)javascript\s*:", "", text)
+    for index, token in enumerate(tokens):
+        text = text.replace(f"\x00DISCORD_TOKEN_{index}\x00", token)
+    return text.strip()
+
+
+def sanitize_payload(value):
+    if isinstance(value, str):
+        return sanitize_string(value)
+    if isinstance(value, list):
+        return [sanitize_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitize_payload(item) for key, item in value.items()}
+    return value
+
+
 async def read_json_body(req) -> dict:
     """Read a bounded JSON object for action endpoints."""
     if req.content_length and req.content_length > MAX_BODY:
@@ -287,7 +372,7 @@ async def read_json_body(req) -> dict:
         raise web.HTTPBadRequest(text=json.dumps({"error": "invalid_json"}), content_type="application/json") from error
     if not isinstance(body, dict):
         raise web.HTTPBadRequest(text=json.dumps({"error": "validation"}), content_type="application/json")
-    return body
+    return sanitize_payload(body)
 
 
 def rate_limited(key: tuple, limit: tuple[int, float]) -> float:

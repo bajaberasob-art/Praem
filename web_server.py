@@ -15,6 +15,7 @@ import discord
 from aiohttp import web
 
 from database import (
+    LOG_ROUTING_ALL_KEYS,
     LOG_ROUTING_KEYS,
     SETTINGS_SCHEMA,
     SettingsConflict,
@@ -650,7 +651,7 @@ async def api_get_log_channels(req):
     _, guild = await authorize(req)
     return web.json_response({
         "channels": _public_log_routes(await get_logging_channels(guild.id)),
-        "categories": list(LOG_ROUTING_KEYS),
+        "categories": list(LOG_ROUTING_ALL_KEYS),
     })
 
 
@@ -665,7 +666,9 @@ async def api_set_log_channels(req):
         return json_error(400, "validation", fields={"channels": "صيغة القنوات غير صالحة"})
     clean = {}
     errors = {}
-    for key in LOG_ROUTING_KEYS:
+    # Validate both the dedicated routes and legacy names so old dashboard
+    # clients and integrations remain valid during the additive migration.
+    for key in LOG_ROUTING_ALL_KEYS:
         raw = requested.get(key, 0)
         try:
             channel_id = int(raw or 0)
@@ -688,7 +691,7 @@ async def api_set_log_channels(req):
 async def api_test_log_channel(req):
     session, guild = await authorize(req, write=True)
     category = str(req.match_info.get("category", "")).strip()
-    if category not in LOG_ROUTING_KEYS:
+    if category not in LOG_ROUTING_ALL_KEYS:
         return json_error(400, "unsupported_category")
     route = await get_logging_channels(guild.id)
     channel_id = int(route.get(category, 0) or 0)

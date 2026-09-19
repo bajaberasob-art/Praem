@@ -35,6 +35,7 @@
     onboarding: null,
     commandStudio: { commands: [], roles: [], channels: [], shortcuts: [] },
     autoResponses: [],
+    autoResponderMeta: { roles: [], emojis: [] },
     commandSearch: "",
     commandCogFilter: "all",
     commandStatusFilter: "all",
@@ -2119,6 +2120,14 @@
     form.elements.response.value = rule?.response || "";
     form.elements.cooldown_seconds.value = rule?.cooldown_seconds ?? 5;
     form.elements.channel_id.value = rule?.channel_id || "";
+    form.elements.target_type.value = rule?.target_type || "everyone";
+    form.elements.target_role_id.value = rule?.target_type === "role" ? String(rule?.target_id || "") : "";
+    form.elements.target_user_id.value = rule?.target_type === "user" ? String(rule?.target_id || "") : "";
+    form.elements.reaction_emoji.value = rule?.reaction_emoji || "";
+    updateAutoTargetFields(form);
+    form.querySelectorAll("[data-reaction-chip]").forEach((chip) => {
+      chip.classList.toggle("active", chip.dataset.reactionChip === (rule?.reaction_emoji || ""));
+    });
     form.elements.trigger.dispatchEvent(new Event("input", { bubbles: true }));
     form.elements.response.dispatchEvent(new Event("input", { bubbles: true }));
     form.querySelectorAll("[data-match-type]").forEach((button) => {
@@ -2128,6 +2137,11 @@
     if (title) title.textContent = rule ? "تعديل قاعدة الرد" : "إنشاء رد تلقائي";
     form.scrollIntoView({ behavior: "smooth", block: "center" });
   }
+  function updateAutoTargetFields(form) {
+    const type = form.elements.target_type.value;
+    form.querySelector(".auto-role-target")?.toggleAttribute("hidden", type !== "role");
+    form.querySelector(".auto-user-target")?.toggleAttribute("hidden", type !== "user");
+  }
   async function saveAutoResponder(form) {
     const selected = form.querySelector(".match-badge.active")?.dataset.matchType || "exact";
     const body = {
@@ -2136,9 +2150,16 @@
       response: form.elements.response.value,
       cooldown_seconds: Number(form.elements.cooldown_seconds.value),
       channel_id: form.elements.channel_id.value || null,
+      target_type: form.elements.target_type.value,
+      target_id: form.elements.target_type.value === "role"
+        ? form.elements.target_role_id.value
+        : form.elements.target_type.value === "user"
+          ? form.elements.target_user_id.value.trim()
+          : 0,
+      reaction_emoji: form.elements.reaction_emoji.value.trim(),
     };
-    if (!body.trigger || !body.response.trim()) {
-      toast("أدخل المشغل ونص الرد");
+    if (!body.trigger || (!body.response.trim() && !body.reaction_emoji)) {
+      toast("أدخل المشغل ونص الرد أو اختر إيموجي التفاعل");
       return;
     }
     try {
@@ -3848,7 +3869,11 @@
       state.commandStatusFilter = "all";
       state.commandRoleFilter = "all";
       state.commandDetail = null;
-      state.autoResponses = autoResponses.rules || [];
+       state.autoResponses = autoResponses.rules || [];
+       state.autoResponderMeta = {
+         roles: autoResponses.roles || meta.roles || [],
+         emojis: autoResponses.emojis || meta.emojis || [],
+       };
       state.tickets = {
         active: activeTickets.tickets || [],
         archive: archiveTickets.tickets || [],

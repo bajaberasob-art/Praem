@@ -402,8 +402,17 @@ class Utilities(commands.Cog):
             raise ValueError("trigger must contain 1-500 characters")
         if match_type == "regex":
             re.compile(trigger, re.IGNORECASE)
-        if not str(response).strip() or len(str(response)) > 2000:
-            raise ValueError("response must contain 1-2000 characters")
+        if len(str(response)) > 2000:
+            raise ValueError("response must contain at most 2000 characters")
+        target_type = str(target_type).strip().lower()
+        if target_type not in {"everyone", "role", "user"}:
+            raise ValueError("target_type must be one of everyone, role, user")
+        try:
+            target_id = max(0, int(target_id or 0))
+        except (TypeError, ValueError) as error:
+            raise ValueError("target_id must be a numeric Discord ID") from error
+        if target_type != "everyone" and target_id <= 0:
+            raise ValueError("target_id is required for role and user targets")
         item = await save_auto_responder(
             guild_id,
             trigger,
@@ -413,6 +422,9 @@ class Utilities(commands.Cog):
             cooldown_seconds=cooldown_seconds,
             bucket_capacity=bucket_capacity,
             channel_id=channel_id,
+            target_type=target_type,
+            target_id=target_id,
+            reaction_emoji=reaction_emoji,
         )
         await self.sync_auto_responders(guild_id)
         return item
@@ -656,27 +668,44 @@ class Utilities(commands.Cog):
                 continue
             if not self._matches(responder, content):
                 continue
+            if not self._target_matches(responder, message):
+                continue
             if not self._consume_bucket(message, responder):
                 continue
-            rendered = self.render_response(responder["response"], message)
-            if not rendered.strip():
+            rendered = self.render_response(responder.get("response", ""), message)
+            reaction = self._parse_reaction(responder.get("reaction_emoji", ""))
+            if not rendered.strip() and reaction is None:
                 continue
-            try:
-                await message.channel.send(
-                    rendered,
-                    allowed_mentions=discord.AllowedMentions(
-                        users=True,
-                        roles=False,
-                        everyone=False,
-                    ),
-                )
-            except (discord.Forbidden, discord.HTTPException):
-                LOGGER.warning(
-                    "[AUTORESPONDER] تعذر إرسال رد في السيرفر %s",
-                    guild_id,
-                    exc_info=True,
-                )
-            else:
+            executed = False
+            if rendered.strip():
+                try:
+                    await message.channel.send(
+                        rendered,
+                        allowed_mentions=discord.AllowedMentions(
+                            users=True,
+                            roles=False,
+                            everyone=False,
+                        ),
+                    )
+                    executed = True
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning(
+                        "[AUTORESPONDER] تعذر إرسال رد في السيرفر %s",
+                        guild_id,
+                        exc_info=True,
+                    )
+            if reaction is not None:
+                try:
+                    await message.add_reaction(reaction)
+                    executed = True
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning(
+                        "[AUTORESPONDER] تعذر إضافة التفاعل %s في السيرفر %s",
+                        responder.get("reaction_emoji", ""),
+                        guild_id,
+                        exc_info=True,
+                    )
+            if executed:
                 responder["execution_count"] = await record_auto_responder_execution(
                     guild_id, int(responder["id"])
                 )
@@ -694,6 +723,28 @@ class Utilities(commands.Cog):
             compiled = responder.get("_compiled")
             return bool(compiled and compiled.search(content))
         return False
+
+    @staticmethod
+    def _target_matches(responder: dict[str, Any], message: discord.Message) -> bool:
+        target_type = responder.get("target_type", "everyone")
+        target_id = int(responder.get("target_id") or 0)
+        if target_type == "everyone":
+            return True
+        if target_type == "user":
+            return int(message.author.id) == target_id
+        if target_type == "role":
+            return any(int(role.id) == target_id for role in message.author.roles)
+        return False
+
+    @staticmethod
+    def _parse_reaction(value: Any):
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.startswith("<") and raw.endswith(">"):
+            emoji = discord.PartialEmoji.from_str(raw)
+            return emoji if emoji.id else None
+        return raw
 
     def _consume_bucket(
         self,

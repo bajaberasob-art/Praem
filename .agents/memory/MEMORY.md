@@ -13,3 +13,4 @@
 - [SQLite table rebuilds](database-migrations.md) — drop dependent views during uniqueness-constraint table swaps, then recreate them after renaming.
 - [Gateway cache readiness](gateway-cache-diagnostics.md) — full intents can delay ready until startup member chunks finish; inspect guild availability and cached-member counts.
 - [DOM list rendering](dom-list-rendering.md) — pass mapped node arrays to replaceChildren with spread; a nested array becomes `[object HTMLButtonElement]`.
+- [Gaming operations architecture](gaming-operations.md) — persistent scrim reservations and Discord boards stay additive to tournament state.

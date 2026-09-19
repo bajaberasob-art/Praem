@@ -19,6 +19,7 @@ from discord import app_commands
 LOGGER = logging.getLogger("CoreRunner.interactions")
 _WRAPPED_COMMAND = "_interaction_runtime_wrapped"
 _WRAPPED_CALLBACK = "_interaction_runtime_callback_wrapped"
+_OPENS_MODAL = "_interaction_runtime_opens_modal"
 
 
 def _exception_info(error: BaseException):
@@ -115,10 +116,22 @@ class InteractionProxy:
         return getattr(self._interaction, name)
 
 
+def mark_modal_callback(callback: Callable[..., Any]) -> Callable[..., Any]:
+    """Mark a callback whose first response is opened by a delegated method."""
+    setattr(callback, _OPENS_MODAL, True)
+    return callback
+
+
 def _callback_opens_modal(callback: Callable[..., Any]) -> bool:
     """Modal launches cannot be preceded by deferReply in Discord's protocol."""
+    candidates = [callback]
+    nested_callback = getattr(callback, "callback", None)
+    if nested_callback is not None:
+        candidates.append(nested_callback)
+    if any(getattr(candidate, _OPENS_MODAL, False) for candidate in candidates):
+        return True
     try:
-        source = inspect.getsource(callback)
+        source = "\n".join(inspect.getsource(candidate) for candidate in candidates)
     except (OSError, TypeError):
         source = ""
     return ".send_modal(" in source

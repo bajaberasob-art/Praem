@@ -44,6 +44,7 @@ from database import (
     get_due_reminders,
     get_user_reminders,
 )
+from interaction_runtime import mark_modal_callback
 
 
 logger = logging.getLogger(__name__)
@@ -245,6 +246,7 @@ class TicketPanelView(discord.ui.View):
             async def callback(itx: discord.Interaction, selected=category):
                 await itx.response.send_modal(TicketCategoryModal(selected))
 
+            mark_modal_callback(callback)
             button.callback = callback
             self.add_item(button)
 
@@ -284,6 +286,7 @@ class TicketControlView(discord.ui.View):
         emoji="🔒",
         custom_id="ticket:close",
     )
+    @mark_modal_callback
     async def close(self, itx: discord.Interaction, btn: discord.ui.Button):
         cog = await self._cog(itx)
         if cog:
@@ -306,6 +309,7 @@ class TicketControlView(discord.ui.View):
         emoji="📝",
         custom_id="ticket:internal-note",
     )
+    @mark_modal_callback
     async def internal_note(self, itx: discord.Interaction, btn: discord.ui.Button):
         cog = await self._cog(itx)
         if cog:
@@ -317,6 +321,7 @@ class TicketControlView(discord.ui.View):
         emoji="➕",
         custom_id="ticket:add-member",
     )
+    @mark_modal_callback
     async def add_member(self, itx: discord.Interaction, btn: discord.ui.Button):
         cog = await self._cog(itx)
         if cog:
@@ -328,6 +333,7 @@ class TicketControlView(discord.ui.View):
         emoji="➖",
         custom_id="ticket:remove-member",
     )
+    @mark_modal_callback
     async def remove_member(self, itx: discord.Interaction, btn: discord.ui.Button):
         cog = await self._cog(itx)
         if cog:
@@ -350,6 +356,7 @@ class TicketControlView(discord.ui.View):
         emoji="🔁",
         custom_id="ticket:transfer",
     )
+    @mark_modal_callback
     async def transfer(self, itx: discord.Interaction, btn: discord.ui.Button):
         cog = await self._cog(itx)
         if cog:

@@ -1782,10 +1782,17 @@ async def api_guild_events(req):
 @routes.get('/static/{name}')
 async def static_asset(req):
     name = req.match_info["name"]
-    types = {"app.css": "text/css", "app.js": "application/javascript"}
+    types = {
+        "app.css": "text/css",
+        "app.js": "application/javascript",
+        "login-hero.png": "image/png",
+    }
     if name not in types:
         raise web.HTTPNotFound()
-    return web.Response(text=(DASHBOARD_DIR / name).read_text("utf-8"), content_type=types[name], charset="utf-8")
+    asset = DASHBOARD_DIR / name
+    if name.endswith(".png"):
+        return web.Response(body=asset.read_bytes(), content_type=types[name])
+    return web.Response(text=asset.read_text("utf-8"), content_type=types[name], charset="utf-8")
 
 
 @routes.get('/')

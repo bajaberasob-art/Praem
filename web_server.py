@@ -375,6 +375,11 @@ def parse_custom_emoji(value: str):
 
 
 async def guild_meta(guild) -> dict:
+    if not getattr(guild, "chunked", True):
+        try:
+            await guild.chunk()
+        except (discord.Forbidden, discord.HTTPException, asyncio.TimeoutError):
+            logger.warning("[META] Unable to chunk guild %s", guild.id, exc_info=True)
     icon = getattr(guild, "icon", None)
     me = guild.me
     top = me.top_role if me else None
@@ -396,12 +401,12 @@ async def guild_meta(guild) -> dict:
         for c in sorted(text_channels, key=lambda c: (c.category.position if c.category else -1, c.position))
     ]
     roles = []
-    for role in sorted(guild.roles, key=lambda r: -r.position):
+    for role in reversed(guild.roles):
         if role.is_default():
             continue
         roles.append({
             "id": str(role.id), "name": role.name,
-            "color": f"#{role.color.value:06x}" if role.color.value else None,
+            "color": str(role.color),
             "assignable": bool(top and role < top and not role.managed),
         })
     stickers = list(getattr(guild, "stickers", ()) or ())
@@ -422,36 +427,45 @@ async def guild_meta(guild) -> dict:
                 emojis = list(fetched_emojis)
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to refresh emojis for guild %s", guild.id, exc_info=True)
+    members = [
+        {
+            "id": str(member.id),
+            "name": member.display_name,
+            "avatar": str(getattr(getattr(member, "display_avatar", None), "url", "")),
+        }
+        for member in getattr(guild, "members", ())
+        if not getattr(member, "bot", False)
+    ]
+    serialized_emojis = [
+        {
+            "id": str(emoji.id),
+            "name": emoji.name,
+            "url": str(emoji.url),
+            "animated": bool(getattr(emoji, "animated", False)),
+            "token": str(emoji),
+        }
+        for emoji in emojis
+        if getattr(emoji, "available", True)
+    ]
+    logger.info(
+        "[META] Guild: %s | Members: %d | Roles: %d | Emojis: %d",
+        guild.name,
+        len(members),
+        len(roles),
+        len(serialized_emojis),
+    )
     return {
         "guild": {"id": str(guild.id), "name": guild.name, "icon": icon.url if icon else None,
                   "members": guild.member_count},
         "channels": channels,
         "roles": roles,
-        "members": [
-            {
-                "id": str(member.id),
-                "name": member.display_name,
-                "avatar": str(getattr(getattr(member, "display_avatar", None), "url", "")),
-            }
-            for member in getattr(guild, "members", ())
-            if not getattr(member, "bot", False)
-        ],
+        "members": members,
         "stickers": [
             {"id": str(sticker.id), "name": sticker.name, "url": str(sticker.url)}
             for sticker in stickers
             if getattr(sticker, "available", True)
         ],
-        "emojis": [
-            {
-                "id": str(emoji.id),
-                "name": emoji.name,
-                "url": str(emoji.url),
-                "animated": bool(getattr(emoji, "animated", False)),
-                "token": str(emoji),
-            }
-            for emoji in emojis
-            if getattr(emoji, "available", True)
-        ],
+        "emojis": serialized_emojis,
     }
 
 
@@ -537,7 +551,21 @@ async def api_health(req):
 
 @routes.get('/api/guild/{guild_id}/meta')
 async def api_guild_meta(req):
-    _, guild = await authorize(req)
+    raw_guild_id = req.match_info.get("guild_id", "")
+    try:
+        guild_id = int(raw_guild_id)
+    except (TypeError, ValueError):
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "not_found"}),
+            content_type="application/json",
+        )
+    _, authorized_guild = await authorize(req)
+    guild = bot_ref.get_guild(guild_id) if bot_ref else None
+    if guild is None or guild.id != authorized_guild.id:
+        raise web.HTTPNotFound(
+            text=json.dumps({"error": "not_found"}),
+            content_type="application/json",
+        )
     return web.json_response(await guild_meta(guild))
 
 

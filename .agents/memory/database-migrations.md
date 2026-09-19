@@ -14,3 +14,9 @@ For migrations that copy rows with `INSERT ... SELECT`, use SQLite-compatible co
 **Why:** Some SQLite builds parse `ON CONFLICT ... DO NOTHING` after a `SELECT` as a syntax error near `DO`, even though the equivalent insert behavior is supported.
 
 **How to apply:** Prefer the simpler conflict form for additive backfills and reserve `ON CONFLICT DO UPDATE` for statements that actually need to replace existing values.
+
+Legacy policy tables can be missing non-key columns such as `allowed_channels`, `aliases`, or `updated_at`; `CREATE TABLE IF NOT EXISTS` does not repair those tables.
+
+**Why:** Existing SQLite tables survive schema code changes unchanged, so later SELECT and upsert statements fail unless every newly required column is added explicitly.
+
+**How to apply:** Inspect `PRAGMA table_info` after ensuring the table exists, add each missing column with a safe default, then run compatibility backfills.

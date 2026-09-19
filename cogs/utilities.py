@@ -589,7 +589,10 @@ class Utilities(commands.Cog):
                 str(channel_id) for channel_id in control.get("allowed_channels", [])
             }
             if allowed_channels and str(interaction.channel_id) not in allowed_channels:
-                reason = "⚠️ هذا الأمر مخصص للعمل في قنوات محددة فقط."
+                reason = (
+                    "⚠️ هذا الأمر مخصص للعمل في قنوات محددة فقط. "
+                    "غير مسموح في هذه القناة."
+                )
             allowed_roles = {str(role_id) for role_id in control["allowed_roles"]}
             member_roles = {
                 str(role.id) for role in getattr(interaction.user, "roles", [])

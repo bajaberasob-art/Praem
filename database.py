@@ -470,9 +470,11 @@ async def init_db() -> None:
             async with db.execute("PRAGMA table_info(command_policies)") as cur:
                 command_policy_columns = {row[1] for row in await cur.fetchall()}
             policy_migrations = {
+                "is_enabled": "INTEGER NOT NULL DEFAULT 1",
                 "aliases": "TEXT NOT NULL DEFAULT '[]'",
                 "allowed_roles": "TEXT NOT NULL DEFAULT '[]'",
                 "allowed_channels": "TEXT NOT NULL DEFAULT '[]'",
+                "updated_at": "TEXT DEFAULT NULL",
             }
             for column, definition in policy_migrations.items():
                 if column not in command_policy_columns:

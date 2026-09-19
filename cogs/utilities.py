@@ -392,6 +392,9 @@ class Utilities(commands.Cog):
         cooldown_seconds: float = 5.0,
         bucket_capacity: int = 1,
         channel_id: int | str | None = None,
+        target_type: str = "everyone",
+        target_id: int | str | None = 0,
+        reaction_emoji: str = "",
     ) -> dict[str, Any]:
         """Management helper for creating a trigger without touching SQL."""
         match_type = str(match_type).strip().lower()

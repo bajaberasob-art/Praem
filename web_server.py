@@ -768,12 +768,15 @@ async def api_guild_shortcut_delete(req):
 async def api_guild_auto_responses(req):
     _, guild = await authorize(req)
     rules = await get_auto_responders(guild.id)
+    meta = await guild_meta(guild)
     return web.json_response({
         "rules": rules,
         "channels": [
             {"id": str(channel.id), "name": channel.name}
             for channel in guild.text_channels
         ],
+        "roles": meta["roles"],
+        "emojis": meta["emojis"],
     })
 
 
@@ -795,12 +798,42 @@ async def api_guild_auto_responses_save(req):
     trigger = str(body.get("trigger", "")).strip()
     match_type = str(body.get("match_type", "")).strip().lower()
     response = str(body.get("response", ""))
+    target_type = str(body.get("target_type", "everyone")).strip().lower()
+    reaction_emoji = str(body.get("reaction_emoji", "") or "").strip()
     if not trigger or len(trigger) > 500:
         return json_error(400, "validation", fields={"trigger": "المشغل يجب أن يكون بين 1 و500 حرف"})
     if match_type not in {"exact", "contains", "regex"}:
         return json_error(400, "validation", fields={"match_type": "نوع المطابقة غير صالح"})
-    if not response.strip() or len(response) > 2000:
-        return json_error(400, "validation", fields={"response": "الرد يجب أن يكون بين 1 و2000 حرف"})
+    if len(response) > 2000:
+        return json_error(400, "validation", fields={"response": "الرد يجب ألا يتجاوز 2000 حرف"})
+    if target_type not in {"everyone", "role", "user"}:
+        return json_error(400, "validation", fields={"target_type": "نطاق الاستهداف غير صالح"})
+    try:
+        target_id = max(0, int(body.get("target_id") or 0))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"target_id": "معرف الاستهداف غير صالح"})
+    if target_type == "role":
+        role = guild.get_role(target_id)
+        if role is None or role.is_default():
+            return json_error(400, "validation", fields={"target_id": "الرتبة غير موجودة في هذا السيرفر"})
+    elif target_type == "user":
+        member = guild.get_member(target_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(target_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                member = None
+        if member is None:
+            return json_error(400, "validation", fields={"target_id": "العضو غير موجود في هذا السيرفر"})
+    elif target_id:
+        return json_error(400, "validation", fields={"target_id": "لا تستخدم معرفاً مع نطاق الجميع"})
+    if reaction_emoji.startswith("<") and reaction_emoji.endswith(">"):
+        parsed_emoji = discord.PartialEmoji.from_str(reaction_emoji)
+        if not parsed_emoji.id or guild.get_emoji(parsed_emoji.id) is None:
+            return json_error(400, "validation", fields={"reaction_emoji": "الإيموجي المخصص غير موجود في هذا السيرفر"})
+        reaction_emoji = str(parsed_emoji)
+    if not response.strip() and not reaction_emoji:
+        return json_error(400, "validation", fields={"response": "أدخل نص الرد أو اختر إيموجي تفاعلاً"})
     try:
         cooldown = float(body.get("cooldown_seconds", 5))
     except (TypeError, ValueError):
@@ -830,6 +863,9 @@ async def api_guild_auto_responses_save(req):
             cooldown_seconds=cooldown,
             bucket_capacity=max(1, min(20, int(body.get("bucket_capacity", 1)))),
             channel_id=channel_id,
+            target_type=target_type,
+            target_id=target_id,
+            reaction_emoji=reaction_emoji,
         )
     except (ValueError, re.error) as error:
         return json_error(400, "validation", fields={"trigger": str(error)})

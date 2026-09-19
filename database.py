@@ -894,7 +894,12 @@ def validate_setting(key: str, value: Any) -> Any:
         if not isinstance(value, (int, float)):
             raise ValueError("يجب أن تكون القيمة رقماً")
         value = int(value)
-        limits = {"anti_alt_days": (0, 365), "daily_amount": (0, 1_000_000)}
+        limits = {
+            "anti_alt_days": (0, 365),
+            "daily_amount": (0, 1_000_000),
+            "daily_base_amount": (0, 1_000_000),
+            "level_multiplier_pct": (0, 500),
+        }
         low, high = limits.get(key, (0, 2**31 - 1))
         if not low <= value <= high:
             raise ValueError(f"القيمة يجب أن تكون بين {low} و {high}")

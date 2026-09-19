@@ -1220,12 +1220,14 @@
       ),
       title: saved?.title || "اختر رتبتك",
       description: saved?.description || "اختر الرتب التي تناسبك من القائمة التالية:",
-      color: normalizePanelColor(saved?.color),
+      color: normalizePanelColor(saved?.color_hex || saved?.color),
       emoji: saved?.emoji || "🏷️",
-      roles: (saved?.role_specs || []).map((role) => ({
-        id: String(role.id),
-        label: String(role.label || role.name || role.id),
-        emoji: String(role.emoji || "🏷️"),
+      min_level: Math.max(0, Number(saved?.min_level || 0)),
+      roles: (saved?.buttons || saved?.role_specs || []).map((role) => ({
+        id: String(role.role_id || role.id),
+        label: String(role.label || role.name || role.role_id || role.id),
+        emoji: String(role.emoji || ""),
+        custom_min_level: Math.max(0, Number(role.custom_min_level || 0)),
       })),
     };
     return state.selfRoleBuilder;
@@ -1246,6 +1248,7 @@
       el("div", { class: "self-role-preview-kicker", text: "DISCORD / ROLE SELECTOR" }),
       el("h3", { text: `${builder.emoji || "🏷️"} ${builder.title || "اختر رتبتك"}` }),
       el("p", { text: builder.description || "اختر الرتب التي تناسبك:" }),
+      el("span", { class: "level-gate-badge", text: builder.min_level > 0 ? `🔒 يتطلب لفل ${builder.min_level}` : "متاح للجميع" }),
     );
     const grid = el("div", { class: "role-button-grid" });
     (builder.roles.length ? builder.roles : [{ id: "preview", label: "رتبة تجريبية", emoji: "✨" }]).forEach(
@@ -1287,11 +1290,23 @@
         class: "builder-emoji-input",
         type: "text",
         maxlength: "8",
-        value: role.emoji || "🏷️",
+        value: role.emoji || "",
         "aria-label": `إيموجي الرتبة ${index + 1}`,
+      });
+      const minLevel = el("input", {
+        class: "builder-level-input",
+        type: "number",
+        min: "0",
+        max: "1000",
+        value: String(role.custom_min_level || 0),
+        "aria-label": `المستوى المطلوب للرتبة ${index + 1}`,
       });
       label.oninput = () => (role.label = label.value);
       emoji.oninput = () => (role.emoji = emoji.value);
+      minLevel.oninput = () => {
+        role.custom_min_level = Math.max(0, Number(minLevel.value || 0));
+        scheduleOnboardingPreview();
+      };
       roleRows.append(
         el(
           "div",
@@ -1299,6 +1314,8 @@
           el("span", { class: "role-dot", style: `background:${roles.find((r) => String(r.id) === String(role.id))?.color || "#64748b"}` }),
           emoji,
           label,
+           el("span", { class: "builder-level-prefix", text: "لفل" }),
+           minLevel,
           el("small", { class: "builder-role-source", text: roleName(role.id) }),
           el("button", {
             class: "icon-button",
@@ -1356,6 +1373,14 @@
       value: builder.emoji,
       "aria-label": "إيموجي لوحة الرتب",
     });
+    const minLevel = el("input", {
+      class: "builder-input builder-level-gate-input",
+      type: "number",
+      min: "0",
+      max: "1000",
+      value: String(builder.min_level || 0),
+      "aria-label": "المستوى الأدنى للوحة",
+    });
     title.oninput = () => {
       builder.title = title.value;
       const current = $(".self-role-preview-panel");
@@ -1373,6 +1398,11 @@
     };
     emoji.oninput = () => {
       builder.emoji = emoji.value;
+      const current = $(".self-role-preview-panel");
+      if (current) current.replaceWith(selfRolePreview(builder));
+    };
+    minLevel.oninput = () => {
+      builder.min_level = Math.max(0, Number(minLevel.value || 0));
       const current = $(".self-role-preview-panel");
       if (current) current.replaceWith(selfRolePreview(builder));
     };
@@ -1395,6 +1425,7 @@
       el("div", { class: "builder-form-row" }, el("label", { text: "العنوان" }), title),
       el("div", { class: "builder-form-row" }, el("label", { text: "الوصف" }), description),
       el("div", { class: "builder-inline-fields" }, el("div", { class: "builder-form-row" }, el("label", { text: "الإيموجي" }), emoji), el("div", { class: "builder-form-row" }, el("label", { text: "اللون" }), color)),
+      el("div", { class: "builder-form-row level-gate-control" }, el("label", { text: "شرط المستوى العام" }), minLevel, el("small", { text: "0 = متاح للجميع، وأي رقم آخر يقفل اللوحة حتى يصل العضو إليه." })),
       el("div", { class: "builder-form-row" }, el("label", { text: "الرتب" }), rolePicker),
       roleRows,
       deploy,
@@ -1409,7 +1440,7 @@
           el("div", { class: "deployed-panel" },
             el("span", { class: "deployed-panel-icon", text: panel.emoji || "🏷️" }),
             el("span", { class: "ell", text: panel.title || "لوحة رتب" }),
-            el("small", { text: `${panel.role_specs?.length || 0} رتب · رسالة ${panel.message_id}` }),
+            el("small", { text: `${panel.buttons?.length || panel.role_specs?.length || 0} رتب · ${panel.min_level ? `لفل ${panel.min_level}` : "مفتوحة"} · رسالة ${panel.message_id}` }),
           ),
         );
       });

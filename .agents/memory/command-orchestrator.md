@@ -9,6 +9,12 @@ Dynamic prefixes must resolve through the shared guild-settings cache, while com
 
 **How to apply:** Keep the policy cache lazy and refreshable per guild; preserve the original tree check when registering the orchestrator and restore it when unloading the cog.
 
+Dashboard aliases for commands with typed or required arguments need explicit message adapters; a generic Slash callback bridge cannot reliably construct members, durations, or reasons from plain message text.
+
+**Why:** Discord resolves typed Slash arguments before invoking callbacks, while an alias arrives as untyped message content.
+
+**How to apply:** Add a focused adapter for each supported required-argument moderation command, validate its target and arguments, then send the shared success confirmation only after the underlying action succeeds.
+
 Auto-responder registries are process-local views of durable SQLite rows and must be rehydrated on every ready event; cooldown state is intentionally ephemeral.
 
 **Why:** Discord reconnects recreate the in-memory event environment, but trigger definitions and shortcut bindings must survive restarts while user-level token buckets should not block users after a restart.

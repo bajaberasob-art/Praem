@@ -641,6 +641,28 @@ class Engagement(commands.Cog):
                         self._restored_self_role_panels.add(panel["message_id"])
             except (discord.Forbidden, discord.HTTPException):
                 logger.warning("[SELF_ROLE_PANEL] تعذر استعادة لوحة في %s", guild.id)
+            try:
+                for panel in await get_guild_panels(guild.id):
+                    buttons = [
+                        button for button in panel.get("buttons", [])
+                        if int(button.get("id") or 0) > 0
+                    ]
+                    if (
+                        not panel.get("message_id")
+                        or not buttons
+                        or panel["message_id"] in self._restored_self_role_panels
+                    ):
+                        continue
+                    channel = guild.get_channel(int(panel["channel_id"]))
+                    if channel is None:
+                        continue
+                    self.bot.add_view(
+                        LevelGatedRoleView({**panel, "buttons": buttons}),
+                        message_id=int(panel["message_id"]),
+                    )
+                    self._restored_self_role_panels.add(int(panel["message_id"]))
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("[LEVEL_ROLE_PANEL] تعذر استعادة لوحة في %s", guild.id)
 
     async def agree_to_rules(self, itx: discord.Interaction) -> dict[str, Any]:
         guild, member = itx.guild, itx.user
@@ -864,6 +886,94 @@ class Engagement(commands.Cog):
             logger.warning("[SELF_ROLE_PANEL] فشل نشر لوحة في %s", guild.id, exc_info=True)
             return {"ok": False, "error": "send_failed"}
         return {"ok": True, "panel": panel}
+
+    async def deploy_level_role_panel(
+        self,
+        guild_id: int,
+        target_channel_id: int,
+        title: str,
+        description: str,
+        min_level: int,
+        color_hex: str,
+        buttons: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return {"ok": False, "error": "guild_not_found"}
+        channel = await self.resolve_text_channel(guild, int(target_channel_id))
+        if channel is None or not callable(getattr(channel, "send", None)):
+            return {"ok": False, "error": "channel_not_found"}
+        if not isinstance(buttons, list) or not 1 <= len(buttons) <= 25:
+            return {"ok": False, "error": "buttons_invalid"}
+        clean_buttons = []
+        seen_roles = set()
+        for item in buttons:
+            if not isinstance(item, dict) or not str(item.get("role_id", "")).isdigit():
+                return {"ok": False, "error": "buttons_invalid"}
+            role = guild.get_role(int(item["role_id"]))
+            if (
+                role is None
+                or role.managed
+                or not guild.me
+                or guild.me.top_role.position <= role.position
+                or role.id in seen_roles
+            ):
+                return {"ok": False, "error": "role_not_assignable"}
+            try:
+                button_level = max(0, int(item.get("custom_min_level", 0)))
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "buttons_invalid"}
+            clean_buttons.append({
+                "role_id": role.id,
+                "label": str(item.get("label") or role.name)[:100],
+                "emoji": str(item.get("emoji") or "")[:100],
+                "custom_min_level": button_level,
+            })
+            seen_roles.add(role.id)
+        try:
+            min_level = max(0, int(min_level))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "min_level_invalid"}
+        normalized_color = str(color_hex or "#5865F2").strip().upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}", normalized_color):
+            normalized_color = "#5865F2"
+
+        panel = await create_self_role_panel(
+            guild.id,
+            channel.id,
+            title,
+            description,
+            min_level,
+            normalized_color,
+        )
+        try:
+            for item in clean_buttons:
+                await add_panel_button(
+                    panel["id"],
+                    item["role_id"],
+                    item["label"],
+                    item["emoji"],
+                    item["custom_min_level"],
+                )
+            panel = await get_panel_with_buttons(panel["id"])
+            embed = discord.Embed(
+                title=str(title or "اختر رتبتك")[:256],
+                description=str(description or "اختر الرتب المناسبة لك:")[:4000],
+                color=int(normalized_color[1:], 16),
+            )
+            embed.set_footer(text=f"بوابة الرتب • المستوى المطلوب: {min_level}")
+            message = await channel.send(
+                embed=embed,
+                view=LevelGatedRoleView(panel),
+            )
+            panel = await update_panel_message_id(panel["id"], message.id)
+            panel = await get_panel_with_buttons(panel["id"])
+            self._restored_self_role_panels.add(message.id)
+            return {"ok": True, "panel": panel}
+        except (discord.Forbidden, discord.HTTPException):
+            await delete_panel(panel["id"])
+            logger.warning("[LEVEL_ROLE_PANEL] فشل نشر لوحة في %s", guild.id, exc_info=True)
+            return {"ok": False, "error": "send_failed"}
 
     @app_commands.command(
         name="setup_tickets",

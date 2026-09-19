@@ -1542,7 +1542,7 @@
     });
     const seen = new Set();
     return [...policyAliases, ...legacy].filter((shortcut) => {
-      const key = String(shortcut.trigger || "").caseFold?.() || String(shortcut.trigger || "").toLowerCase();
+      const key = String(shortcut.trigger || "").toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

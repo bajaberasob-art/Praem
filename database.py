@@ -470,13 +470,12 @@ async def init_db() -> None:
             # Preserve policies created by older dashboard versions while
             # making command_policies the canonical store for new writes.
             await db.execute("""
-                INSERT INTO command_policies
+                INSERT OR IGNORE INTO command_policies
                     (guild_id, command_name, is_enabled, aliases,
                      allowed_roles, allowed_channels, updated_at)
                 SELECT guild_id, command_name, enabled, '[]',
                        allowed_roles, allowed_channels, updated_at
                 FROM guild_command_controls
-                ON CONFLICT(guild_id, command_name) DO NOTHING
             """)
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS guild_auto_responders (
@@ -1859,9 +1858,6 @@ async def save_command_policy(
     }
     COMMAND_CACHE.setdefault(guild_id, {})[name] = result
     return result
-        "allowed_roles": roles,
-        "allowed_channels": channels,
-    }
 
 
 async def get_auto_responders(guild_id: int) -> list[dict[str, Any]]:

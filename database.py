@@ -194,6 +194,51 @@ async def _ensure_canonical_views(db: aiosqlite.Connection) -> None:
         await db.execute(f"CREATE VIEW IF NOT EXISTS {name} AS {query}")
 
 
+async def _migrate_auto_responder_uniqueness(db: aiosqlite.Connection) -> None:
+    """Allow one trigger to have a fallback, role, and member rule together."""
+    async with db.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guild_auto_responders'"
+    ) as cur:
+        row = await cur.fetchone()
+    schema = str(row[0] or "") if row else ""
+    if "UNIQUE (guild_id, trigger, match_type)" not in schema:
+        return
+
+    await db.execute("""
+        CREATE TABLE guild_auto_responders_v2 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            trigger TEXT NOT NULL,
+            match_type TEXT NOT NULL,
+            response TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            cooldown_seconds REAL NOT NULL DEFAULT 5,
+            bucket_capacity INTEGER NOT NULL DEFAULT 1,
+            channel_id INTEGER DEFAULT NULL,
+            target_type TEXT NOT NULL DEFAULT 'everyone',
+            target_id INTEGER NOT NULL DEFAULT 0,
+            reaction_emoji TEXT NOT NULL DEFAULT '',
+            execution_count INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (guild_id, trigger, match_type, target_type, target_id)
+        );
+    """)
+    await db.execute("""
+        INSERT INTO guild_auto_responders_v2
+            (id, guild_id, trigger, match_type, response, enabled,
+             cooldown_seconds, bucket_capacity, channel_id, target_type,
+             target_id, reaction_emoji, execution_count, updated_at)
+        SELECT id, guild_id, trigger, match_type, response, enabled,
+               cooldown_seconds, bucket_capacity, channel_id, target_type,
+               target_id, reaction_emoji, execution_count, updated_at
+        FROM guild_auto_responders
+    """)
+    await db.execute("DROP TABLE guild_auto_responders")
+    await db.execute(
+        "ALTER TABLE guild_auto_responders_v2 RENAME TO guild_auto_responders"
+    )
+
+
 async def init_db() -> None:
     """تهيئة الجداول، العلاقات، والفهارس مع تفعيل قيود المفاتيح الخارجية."""
     try:
@@ -411,7 +456,7 @@ async def init_db() -> None:
                     reaction_emoji TEXT NOT NULL DEFAULT '',
                     execution_count INTEGER NOT NULL DEFAULT 0,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE (guild_id, trigger, match_type)
+                    UNIQUE (guild_id, trigger, match_type, target_type, target_id)
                 );
             """)
             async with db.execute("PRAGMA table_info(guild_auto_responders)") as cur:
@@ -439,6 +484,7 @@ async def init_db() -> None:
                     "ALTER TABLE guild_auto_responders "
                     "ADD COLUMN reaction_emoji TEXT NOT NULL DEFAULT ''"
                 )
+            await _migrate_auto_responder_uniqueness(db)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_auto_responders_guild "
                 "ON guild_auto_responders(guild_id, enabled);"
@@ -1732,7 +1778,7 @@ async def save_auto_responder(
                  cooldown_seconds, bucket_capacity, channel_id,
                  target_type, target_id, reaction_emoji, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(guild_id, trigger, match_type) DO UPDATE SET
+            ON CONFLICT(guild_id, trigger, match_type, target_type, target_id) DO UPDATE SET
                 response = excluded.response,
                 enabled = excluded.enabled,
                 cooldown_seconds = excluded.cooldown_seconds,

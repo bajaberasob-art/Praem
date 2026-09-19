@@ -3238,10 +3238,9 @@
     };
     form.elements.trigger.oninput = updateAutoPreview;
     form.elements.response.oninput = updateAutoPreview;
+    form._setAutoMember = setAutoMember;
+    form._setAutoReaction = setAutoReaction;
     form.elements.target_type.onchange = () => updateAutoTargetFields(form);
-    reactionInput.oninput = () => reactionPicker.querySelectorAll("[data-reaction-chip]").forEach((item) => {
-      item.classList.toggle("active", item.dataset.reactionChip === reactionInput.value.trim());
-    });
     updateAutoTargetFields(form);
     updateAutoPreview();
     form.elements.cooldown_seconds.oninput = () => {

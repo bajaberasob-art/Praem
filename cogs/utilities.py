@@ -6,7 +6,6 @@ import re
 import shlex
 import time
 from dataclasses import dataclass
-from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -162,13 +161,14 @@ class ShortcutInteraction:
         self.command = command
         self.client = message._state._get_client() if getattr(message, "_state", None) else None
         self.namespace = SimpleNamespace()
-        self.permissions = getattr(
-            message.author,
-            "guild_permissions",
-            getattr(message.channel, "permissions_for", lambda _member: None)(message.author)
-            if getattr(message.channel, "permissions_for", None)
-            else discord.Permissions.none(),
-        )
+        self.permissions = getattr(message.author, "guild_permissions", None)
+        if self.permissions is None:
+            permissions_for = getattr(message.channel, "permissions_for", None)
+            self.permissions = (
+                permissions_for(message.author)
+                if permissions_for is not None
+                else discord.Permissions.none()
+            )
         self._shortcut_adapter = True
         self.response_error = False
         self.response_messages: list[tuple[Any, dict[str, Any]]] = []
@@ -856,7 +856,12 @@ class Utilities(commands.Cog):
             arguments,
         )
         if succeeded:
-            await self._send_alias_confirmation(message, alias, command_name)
+            await self._send_alias_confirmation(
+                message,
+                alias,
+                command_name,
+                details=arguments.strip() or "بدون وسائط إضافية",
+            )
         return True
 
     @staticmethod
@@ -1377,6 +1382,8 @@ class Utilities(commands.Cog):
         message: discord.Message,
         alias: str,
         command_name: str,
+        *,
+        details: str = "بدون وسائط إضافية",
     ) -> None:
         embed = discord.Embed(
             title="⚡ تم تنفيذ الأمر بنجاح",
@@ -1386,6 +1393,12 @@ class Utilities(commands.Cog):
             ),
             color=0x10B981,
             timestamp=discord.utils.utcnow(),
+        )
+        embed.add_field(name="تفاصيل العملية", value=f"`{details[:1000]}`", inline=False)
+        embed.add_field(
+            name="المسؤول عن التنفيذ",
+            value=f"{message.author.mention} (`{message.author.id}`)",
+            inline=False,
         )
         try:
             await message.channel.send(embed=embed, reference=message)

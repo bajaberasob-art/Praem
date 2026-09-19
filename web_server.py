@@ -1785,7 +1785,7 @@ async def static_asset(req):
     types = {
         "app.css": "text/css",
         "app.js": "application/javascript",
-        "login-hero.png": "image/png",
+        "login-hero-clean.png": "image/png",
     }
     if name not in types:
         raise web.HTTPNotFound()
@@ -2175,7 +2175,7 @@ async def index(req):
                     </div>
                     <div class="hero-art" aria-hidden="true">
                         <span class="smart-tag">مساحة إدارتك الذكية</span>
-                        <img src="static/login-hero.png" alt="">
+                        <img src="static/login-hero-clean.png" alt="">
                     </div>
                     <div class="brand-copy">
                         <span class="eyebrow">مساحة الإدارة الذكية</span>

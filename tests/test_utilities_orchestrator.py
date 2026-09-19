@@ -248,6 +248,83 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("الصيغة", embed.fields[0].name)
         self.assertIn("warn", embed.fields[0].value)
 
+    async def test_policy_alias_parses_typed_slash_arguments_and_runs_checks(self):
+        target = SimpleNamespace(
+            id=42,
+            name="Ahmed",
+            display_name="Ahmed",
+            global_name="Ahmed",
+            mention="<@42>",
+            bot=False,
+        )
+        self.bot.tree.get_command = lambda name: command if name == "demo" else None
+        checks = []
+
+        async def callback(interaction, member, minutes, reason="غير محدد"):
+            checks.append((member, minutes, reason, interaction.namespace.member))
+            await interaction.response.send_message("تم التنفيذ")
+
+        async def check_can_run(interaction):
+            checks.append(("checked", interaction.permissions))
+            return True
+
+        command = SimpleNamespace(
+            name="demo",
+            qualified_name="demo",
+            callback=callback,
+            binding=None,
+            parameters=[
+                SimpleNamespace(name="member", required=True, type=6),
+                SimpleNamespace(name="minutes", required=True, type=4),
+                SimpleNamespace(name="reason", required=False, type=3),
+            ],
+            _check_can_run=check_can_run,
+        )
+        self.bot.tree.get_command = lambda name: command if name == "demo" else None
+        self.bot.tree.walk_commands = lambda: [command]
+        self.bot.tree.get_command = lambda name: command if name == "demo" else None
+        self.bot.tree.get_command("demo")
+        self.bot.tree.get_command = lambda name: command if name == "demo" else None
+
+        self.bot.tree.get_command = lambda name: command if name == "demo" else None
+        self.bot.tree.walk_commands = lambda: [command]
+        self.bot.tree.get_command = lambda name: command if name == "demo" else None
+        await self.cog.toggle_command(700, "demo", True, aliases=["run"])
+        message = FakeMessage("run 42 2h policy reason")
+        message.guild.get_member = lambda member_id: target if member_id == 42 else None
+
+        await self.cog.on_message(message)
+
+        self.assertEqual(checks[0][0], "checked")
+        self.assertIs(checks[1][0], target)
+        self.assertEqual(checks[1][1], 120)
+        self.assertEqual(checks[1][2], "policy reason")
+        self.assertIs(checks[1][3], target)
+        self.assertEqual(len(message.channel.sent), 2)
+        self.assertIn("تفاصيل العملية", message.channel.sent[1][1]["embed"].fields[0].name)
+
+    async def test_policy_alias_does_not_confirm_callback_error(self):
+        async def callback(interaction):
+            await interaction.response.send_message("❌ تعذر تنفيذ العملية")
+
+        command = SimpleNamespace(
+            name="demo",
+            qualified_name="demo",
+            callback=callback,
+            binding=None,
+            parameters=[],
+            _check_can_run=lambda interaction: True,
+        )
+        self.bot.tree.get_command = lambda name: command if name == "demo" else None
+        await self.cog.toggle_command(700, "demo", True, aliases=["run"])
+
+        message = FakeMessage("run")
+        await self.cog.on_message(message)
+
+        self.assertEqual(len(message.channel.sent), 2)
+        self.assertIn("❌", message.channel.sent[0][0])
+        self.assertEqual(message.channel.sent[1][1]["embed"].title, "تعذر تنفيذ الاختصار")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,3 +12,4 @@
 - [Live dashboard control plane](dashboard-control-plane.md) — stats and action feeds must reuse the bot session and remain additive over live SQLite data.
 - [SQLite table rebuilds](database-migrations.md) — drop dependent views during uniqueness-constraint table swaps, then recreate them after renaming.
 - [Gateway cache readiness](gateway-cache-diagnostics.md) — full intents can delay ready until startup member chunks finish; inspect guild availability and cached-member counts.
+- [DOM list rendering](dom-list-rendering.md) — pass mapped node arrays to replaceChildren with spread; a nested array becomes `[object HTMLButtonElement]`.

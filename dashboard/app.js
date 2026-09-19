@@ -3003,7 +3003,7 @@
         .filter((member) => !normalized || String(member.name || "").toLocaleLowerCase().includes(normalized))
         .slice(0, 100);
       memberOptions.replaceChildren(
-        filtered.length
+        ...(filtered.length
           ? filtered.map((member) => el(
               "button",
               {
@@ -3021,7 +3021,7 @@
               el("img", { src: member.avatar || "", alt: "", loading: "lazy" }),
               el("span", { text: member.name }),
             ))
-          : [el("small", { class: "hint", text: "لا يوجد عضو مطابق" })],
+          : [el("small", { class: "hint", text: "لا يوجد عضو مطابق" })]),
       );
     };
     memberSearch.oninput = () => renderMemberOptions(memberSearch.value);
@@ -3132,7 +3132,7 @@
       const normalized = query.trim().toLocaleLowerCase();
       const filtered = responderEmojis.filter((emoji) => !normalized || String(emoji.name || "").toLocaleLowerCase().includes(normalized));
       emojiGrid.replaceChildren(
-        filtered.length
+        ...(filtered.length
           ? filtered.map((emoji) => {
               const token = emoji.token || `<${emoji.animated ? "a" : ""}:${emoji.name}:${emoji.id}>`;
               return el("button", {
@@ -3148,7 +3148,7 @@
                 },
               }, el("img", { src: emoji.url, alt: emoji.name }), el("span", { text: emoji.name }));
             })
-          : [el("small", { class: "hint", text: "لا يوجد إيموجي مطابق" })],
+          : [el("small", { class: "hint", text: "لا يوجد إيموجي مطابق" })]),
       );
     };
     emojiSearch.oninput = () => renderEmojiGrid(emojiSearch.value);

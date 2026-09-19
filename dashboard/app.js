@@ -53,6 +53,7 @@
       kpis: [],
       canned: [],
     },
+    gaming: [],
     ticketSearch: "",
     ticketStatusFilter: "all",
     ticketCategories: [
@@ -318,6 +319,7 @@
   const viewLabels = {
     overview: { label: "نظرة عامة", icon: "⌂", hint: "مركز القيادة" },
     tickets: { label: "التذاكر", icon: "▣", hint: "Help Desk" },
+    gaming: { label: "السكريمات", icon: "🎮", hint: "Gaming Ops" },
     commands: { label: "الأوامر والأتمتة", icon: "⌘", hint: "Commands" },
     onboarding: { label: "الترحيب والأدوار", icon: "✦", hint: "Onboarding" },
     security: { label: "الحماية", icon: "◈", hint: "Security" },
@@ -442,6 +444,7 @@
       "div",
       { class: "mobile-more-menu", hidden: true },
       navButton("onboarding"),
+      navButton("gaming"),
       navButton("security"),
       navButton("moderation"),
       navButton("economy"),
@@ -453,7 +456,7 @@
     const moreButton = el(
       "button",
       {
-         class: `nav-item ${["onboarding", "security", "moderation", "economy", "community", "ai", "settings", "system"].includes(state.activeView) ? "active" : ""}`,
+         class: `nav-item ${["onboarding", "gaming", "security", "moderation", "economy", "community", "ai", "settings", "system"].includes(state.activeView) ? "active" : ""}`,
         type: "button",
         "aria-expanded": "false",
         onClick: () => {
@@ -3626,6 +3629,98 @@
       el("footer", { class: "footer", text: "الإعدادات تُحفظ في قاعدة بيانات البوت وتُطبّق على الميزات المرتبطة بها" }),
     );
   }
+  function gamingView() {
+    const channels = state.meta?.channels || [];
+    const channelOptions = channels
+      .filter((channel) => channel.type === "text" || !channel.type)
+      .map((channel) => el("option", { value: channel.id, text: `#${channel.name}` }));
+    const form = el(
+      "form",
+      { class: "fields gaming-deploy-form" },
+      el("label", {}, el("span", { text: "عنوان السكريم" }), el("input", { name: "title", required: true, maxlength: "150", placeholder: "Friday Night Scrim" })),
+      el("label", {}, el("span", { text: "اللعبة" }), el("input", { name: "game_type", required: true, maxlength: "80", placeholder: "Valorant / PUBG / FIFA" })),
+      el("label", {}, el("span", { text: "القناة" }), el("select", { name: "target_channel_id", required: true }, el("option", { value: "", text: "اختر قناة النشر" }), channelOptions)),
+      el("label", {}, el("span", { text: "حجم الفريق" }), el("input", { name: "team_size", type: "number", min: "1", max: "16", value: "5" })),
+      el("label", {}, el("span", { text: "عدد المقاعد" }), el("input", { name: "max_slots", type: "number", min: "1", max: "128", value: "8" })),
+      el("button", { class: "btn primary", type: "submit", text: "نشر لوحة سكريم" }),
+    );
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      body.team_size = Number(body.team_size);
+      body.max_slots = Number(body.max_slots);
+      const response = await writeApi(`api/guild/${state.guild.id}/gaming/deploy`, body);
+      const data = await response.json();
+      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر نشر لوحة السكريم");
+      toast("✅ نُشرت لوحة السكريم في Discord", "success", 3000);
+      await refreshGaming();
+    };
+    const list = el("div", { class: "gaming-list" });
+    if (!state.gaming.length) {
+      list.append(el("div", { class: "empty studio-empty", text: "لا توجد لوحات سكريم محفوظة بعد" }));
+    } else {
+      state.gaming.forEach((scrim) => {
+        const closed = !scrim.is_active;
+        const registrations = scrim.registrations || [];
+        const roster = registrations.length
+          ? registrations.map((item) => `#${item.slot_number} ${item.team_name}${item.checked_in ? " ✅" : ""}`).join(" · ")
+          : "لا توجد فرق مسجلة";
+        const actions = [];
+        if (!closed) {
+          actions.push(el("button", {
+            class: "btn danger",
+            type: "button",
+            text: "إغلاق التسجيل",
+            onClick: async () => {
+              if (!confirm(`إغلاق سكريم «${scrim.title}»؟`)) return;
+              const response = await writeApi(`api/guild/${state.guild.id}/gaming/close`, { scrim_id: scrim.id });
+              if (response.ok) { toast("تم إغلاق السكريم", "success", 2500); await refreshGaming(); }
+              else toast("تعذر إغلاق السكريم");
+            },
+          }));
+          actions.push(el("button", {
+            class: "btn ghost",
+            type: "button",
+            text: "إرسال بيانات الغرفة",
+            onClick: () => openCredentialPrompt(scrim.id),
+          }));
+        }
+        list.append(el("article", { class: `overview-panel gaming-card ${closed ? "is-closed" : ""}` },
+          el("div", { class: "gaming-card-head" },
+            el("div", {}, el("span", { class: "eyebrow", text: `${scrim.game_type} / ${closed ? "CLOSED" : "LIVE"}` }), el("h3", { text: scrim.title })),
+            el("strong", { text: `${scrim.occupied_slots || 0}/${scrim.max_slots}` }),
+          ),
+          el("p", { class: "muted", text: `حجم الفريق ${scrim.team_size} · ${roster}` }),
+          el("div", { class: "gaming-card-actions" }, actions),
+        ));
+      });
+    }
+    return el("section", { id: "view-gaming", class: "gaming-view" },
+      el("div", { class: "section-intro" }, el("div", { class: "eyebrow", text: `${state.guild.name} / GAMING OPS` }), el("h1", { text: "Gaming, Scrims & Esports" }), el("p", { text: "أنشئ لوحات سكريم تفاعلية، راقب الحجوزات، وأرسل بيانات الغرف من مكان واحد." })),
+      card("نشر لوحة جديدة", form),
+      el("div", { class: "section-intro compact-intro" }, el("h2", { text: "اللوحات المحفوظة" }), el("p", { text: "الحجوزات تُحفظ وتستمر بعد إعادة تشغيل البوت." })),
+      list,
+    );
+  }
+  async function refreshGaming() {
+    if (!state.guild?.id) return;
+    try {
+      const response = await api(`api/guild/${state.guild.id}/gaming`);
+      if (response.ok) {
+        state.gaming = (await response.json()).scrims || [];
+        if (state.activeView === "gaming") renderPage();
+      }
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر تحديث مركز السكريمات");
+    }
+  }
+  async function openCredentialPrompt(scrimId) {
+    const credentials = prompt("أدخل بيانات غرفة اللعب (الرابط/الكود):", "");
+    if (!credentials?.trim()) return;
+    const response = await writeApi(`api/guild/${state.guild.id}/gaming/credentials`, { scrim_id: scrimId, credentials: credentials.trim() });
+    if (response.ok) toast("تم إرسال بيانات الغرفة إلى قناة السكريم", "success", 3000);
+    else toast("تعذر إرسال بيانات الغرفة");
+  }
   function renderPage() {
     const main = $("#main");
     main.replaceChildren();
@@ -3651,6 +3746,7 @@
     if (view === "overview") main.append(overviewView());
     else if (view === "tickets") main.append(ticketsView());
     else if (view === "commands") main.append(commandsView());
+    else if (view === "gaming") main.append(gamingView());
     else if (view === "onboarding") main.append(onboardingView());
     else if (view === "security") main.append(securityView());
     else if (["moderation", "economy", "community", "ai", "system"].includes(view)) main.append(operationsView(view));
@@ -4063,6 +4159,7 @@
     state.autoResponses = [];
     state.commandSearch = "";
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };
+    state.gaming = [];
     state.ticketSearch = "";
     state.ticketStatusFilter = "all";
     state.selfRoleBuilder = null;
@@ -4071,7 +4168,7 @@
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr] = await Promise.all([
+      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr, gr] = await Promise.all([
         fetchGuildMeta(id),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
@@ -4084,9 +4181,10 @@
         api(`api/guild/${id}/tickets/canned`),
         api(`api/guild/${id}/stats`),
         api(`api/guild/${id}/actions`),
+        api(`api/guild/${id}/gaming`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions] = await Promise.all([
+      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming] = await Promise.all([
         Promise.resolve(mr),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
@@ -4099,6 +4197,7 @@
         tc.ok ? tc.json() : Promise.resolve({ responses: [] }),
         str.ok ? str.json() : Promise.resolve({ counts: {}, series: [] }),
         acr.ok ? acr.json() : Promise.resolve({ actions: [] }),
+        gr.ok ? gr.json() : Promise.resolve({ scrims: [] }),
       ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
@@ -4131,6 +4230,7 @@
       state.lockdown = Boolean(incidents.locked);
       state.stats = stats;
       state.actions = actions.actions || [];
+      state.gaming = gaming.scrims || [];
       state.baseline = clone(settings.settings);
       state.onboarding = onboarding;
       state.baseline = { ...state.baseline, ...(onboarding.settings || {}) };

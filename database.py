@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 DB_NAME = "bot_database.db"
 logger = logging.getLogger("DatabaseEngine")
+DB_TIMEOUT = 20.0
+WAL_CHECKPOINT_INTERVAL = 30 * 60
 
 # -------------------------------------------------------------
 # إعدادات السيرفر: المخطط، القيم الافتراضية، والتحقق
@@ -124,9 +126,9 @@ async def _configure(db: aiosqlite.Connection) -> None:
     await db.execute("PRAGMA foreign_keys = ON;")
     await db.execute("PRAGMA journal_mode = WAL;")
     await db.execute("PRAGMA synchronous = NORMAL;")
-    await db.execute("PRAGMA cache_size = -64000;")
+    await db.execute("PRAGMA cache_size = -32000;")
     await db.execute("PRAGMA temp_store = MEMORY;")
-    await db.execute("PRAGMA busy_timeout = 5000;")
+    await db.execute(f"PRAGMA busy_timeout = {int(DB_TIMEOUT * 1000)};")
 
 
 class _Connection:
@@ -142,7 +144,7 @@ class _Connection:
             _db_semaphore = asyncio.Semaphore(8)
         await _db_semaphore.acquire()
         try:
-            self._db = await aiosqlite.connect(DB_NAME)
+            self._db = await aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT)
             if self._row_factory:
                 self._db.row_factory = self._row_factory
             await _configure(self._db)
@@ -162,6 +164,27 @@ class _Connection:
 
 def connect(row_factory=None) -> _Connection:
     return _Connection(row_factory)
+
+
+async def checkpoint_wal() -> tuple:
+    """Run a non-blocking WAL checkpoint without replacing or rebuilding tables."""
+    async with connect() as db:
+        async with db.execute("PRAGMA wal_checkpoint(PASSIVE);") as cur:
+            result = await cur.fetchone()
+    return tuple(result or ())
+
+
+async def wal_checkpoint_loop() -> None:
+    """Keep the WAL bounded while allowing normal bot traffic to continue."""
+    while True:
+        try:
+            await asyncio.sleep(WAL_CHECKPOINT_INTERVAL)
+            await checkpoint_wal()
+            logger.debug("[DB] Passive WAL checkpoint completed.")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("[DB] Passive WAL checkpoint failed.", exc_info=True)
 
 
 async def _migrate_guild_settings(db: aiosqlite.Connection) -> None:

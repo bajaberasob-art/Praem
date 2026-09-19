@@ -360,6 +360,153 @@ def sanitize_payload(value):
     return value
 
 
+def _process_memory_mb() -> float:
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as status:
+            for line in status:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024, 2)
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        return round(float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / 1024, 2)
+    except (AttributeError, ValueError):
+        return 0.0
+
+
+async def health_payload() -> dict:
+    database_status = "healthy"
+    try:
+        from database import connect
+
+        async with connect() as db:
+            async with db.execute("SELECT 1") as cur:
+                await cur.fetchone()
+    except Exception:
+        database_status = "unhealthy"
+        logger.warning("[HEALTH] Database probe failed.", exc_info=True)
+
+    bot = bot_ref
+    latency = getattr(bot, "latency", float("nan")) if bot else float("nan")
+    latency_ms = (
+        round(latency * 1000)
+        if isinstance(latency, (int, float)) and latency == latency and latency != float("inf")
+        else None
+    )
+    started_at = getattr(bot, "started_at", PROCESS_STARTED_AT) if bot else PROCESS_STARTED_AT
+    return {
+        "status": "online",
+        "bot_latency_ms": latency_ms,
+        "uptime_seconds": max(0, int(time.monotonic() - started_at)),
+        "guilds_count": len(getattr(bot, "guilds", ())) if bot else 0,
+        "database_status": database_status,
+        "system_memory_mb": _process_memory_mb(),
+    }
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(payload))
+        + kind
+        + payload
+        + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    )
+
+
+def pwa_png(size: int) -> bytes:
+    """Generate a small maskable AMOLED icon without adding binary assets."""
+    rows = bytearray()
+    center = (size - 1) / 2
+    for y in range(size):
+        rows.append(0)
+        for x in range(size):
+            dx, dy = x - center, y - center
+            distance = (dx * dx + dy * dy) ** 0.5 / size
+            red, green, blue = 0, 0, 0
+            if distance < 0.44:
+                red, green, blue = 24, 44, 104
+            shield_top = size * 0.25
+            shield_bottom = size * 0.75
+            shield_width = size * 0.26 * ((y - shield_top) / (shield_bottom - shield_top) + 0.2)
+            if shield_top <= y <= shield_bottom and abs(dx) <= max(2, shield_width):
+                red, green, blue = 76, 132, 255
+            if y > size * 0.55 and abs(dx) < size * 0.08 and y < size * 0.68:
+                red, green, blue = 240, 248, 255
+            rows.extend((red, green, blue, 255))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+        + _png_chunk(b"IDAT", zlib.compress(bytes(rows), 9))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def pwa_svg() -> str:
+    return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" rx="112" fill="#000"/>
+<circle cx="256" cy="256" r="220" fill="#182c68"/>
+<path d="M256 112l112 38v106c0 72-47 120-112 150-65-30-112-78-112-150V150z" fill="#4c84ff"/>
+<path d="M211 262l31 31 61-70" fill="none" stroke="#f0f8ff" stroke-linecap="round" stroke-linejoin="round" stroke-width="28"/>
+</svg>"""
+
+
+def service_worker_source() -> str:
+    return """const CACHE = "prime-dashboard-shell-v1";
+const STATIC = [
+  "./",
+  "./static/app.css",
+  "./static/app.js",
+  "./manifest.json",
+  "./icon.svg",
+  "./icon-192.png",
+  "./icon-512.png"
+];
+const isAsset = (url) =>
+  url.pathname.includes("/static/") ||
+  url.pathname.endsWith("/manifest.json") ||
+  url.pathname.endsWith("/icon.svg") ||
+  url.pathname.includes("/icon-");
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(STATIC)));
+  self.skipWaiting();
+});
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))
+    ).then(() => self.clients.claim())
+  );
+});
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      caches.match(new URL("./", self.registration.scope).href).then((cached) => {
+        const fresh = fetch(event.request).then((response) => {
+          if (response.ok) caches.open(CACHE).then((cache) => cache.put(event.request, response.clone()));
+          return response;
+        }).catch(() => cached);
+        return cached || fresh;
+      })
+    );
+    return;
+  }
+  if (!isAsset(url)) return;
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      const fresh = fetch(event.request).then((response) => {
+        if (response.ok) caches.open(CACHE).then((cache) => cache.put(event.request, response.clone()));
+        return response;
+      }).catch(() => cached);
+      return cached || fresh;
+    })
+  );
+});"""
+
+
 async def read_json_body(req) -> dict:
     """Read a bounded JSON object for action endpoints."""
     if req.content_length and req.content_length > MAX_BODY:

@@ -9,3 +9,4 @@
 - [Shortcut execution policies](shortcut-execution-policies.md) — synthetic Prefix/Slash shortcut callbacks must invoke the same command policy checks as native Discord commands.
 - [Interaction runtime](interaction-runtime.md) — central ACK/proxy/error guards protect all Slash commands and UI callbacks while preserving existing response code.
 - [Economy atomicity](economy-atomicity.md) — account creation, XP, daily claims, and wallet moves must complete as single SQLite transactions.
+- [Live dashboard control plane](dashboard-control-plane.md) — stats and action feeds must reuse the bot session and remain additive over live SQLite data.

@@ -75,7 +75,7 @@ _settings_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict(
 _stats_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict()
 COMMAND_CACHE: Dict[int, Dict[str, Dict[str, Any]]] = {}
 LOG_ROUTING_CACHE: Dict[int, Dict[str, int]] = {}
-LOG_ROUTING_KEYS = (
+LEGACY_LOG_ROUTING_KEYS = (
     "log_messages",
     "log_roles",
     "log_channels",
@@ -83,6 +83,26 @@ LOG_ROUTING_KEYS = (
     "log_warnings",
     "log_voice",
 )
+LOG_ROUTING_KEYS = (
+    "log_sanctions",
+    "log_violations",
+    "log_automod",
+    "log_ticket",
+    "log_channel",
+    "log_server",
+    "log_member",
+    "log_message",
+    "log_voice",
+    "log_react",
+    "log_roles",
+)
+LOG_ROUTING_ALIASES = {
+    "log_moderation": "log_sanctions",
+    "log_warnings": "log_violations",
+    "log_messages": "log_message",
+    "log_channels": "log_channel",
+}
+LOG_ROUTING_ALL_KEYS = tuple(dict.fromkeys((*LOG_ROUTING_KEYS, *LEGACY_LOG_ROUTING_KEYS)))
 _guild_locks: Dict[int, asyncio.Lock] = {}
 _db_semaphore: Optional[asyncio.Semaphore] = None
 
@@ -211,6 +231,25 @@ async def _ensure_canonical_views(db: aiosqlite.Connection) -> None:
         await db.execute(f"CREATE VIEW IF NOT EXISTS {name} AS {query}")
 
 
+async def _migrate_logging_channels(db: aiosqlite.Connection) -> None:
+    """Add the dedicated audit routes without rebuilding the live table."""
+    async with db.execute("PRAGMA table_info(logging_channels);") as cur:
+        existing = {row[1] for row in await cur.fetchall()}
+    missing = [key for key in LOG_ROUTING_KEYS if key not in existing]
+    for key in missing:
+        await db.execute(
+            f"ALTER TABLE logging_channels ADD COLUMN {key} INTEGER DEFAULT 0;"
+        )
+    # Existing installations used six legacy names. Seed only newly added
+    # columns from their matching legacy values, preserving every old value.
+    for legacy, dedicated in LOG_ROUTING_ALIASES.items():
+        if legacy in existing and dedicated in missing:
+            await db.execute(
+                f"UPDATE logging_channels SET {dedicated} = {legacy} "
+                f"WHERE {legacy} IS NOT NULL AND {legacy} != 0;"
+            )
+
+
 async def _migrate_auto_responder_uniqueness(db: aiosqlite.Connection) -> None:
     """Allow one trigger to have a fallback, role, and member rule together."""
     async with db.execute(
@@ -318,9 +357,21 @@ async def init_db() -> None:
                     log_channels INTEGER DEFAULT 0,
                     log_moderation INTEGER DEFAULT 0,
                     log_warnings INTEGER DEFAULT 0,
-                    log_voice INTEGER DEFAULT 0
+                    log_voice INTEGER DEFAULT 0,
+                    log_sanctions INTEGER DEFAULT 0,
+                    log_violations INTEGER DEFAULT 0,
+                    log_automod INTEGER DEFAULT 0,
+                    log_ticket INTEGER DEFAULT 0,
+                    log_channel INTEGER DEFAULT 0,
+                    log_server INTEGER DEFAULT 0,
+                    log_member INTEGER DEFAULT 0,
+                    log_message INTEGER DEFAULT 0,
+                    log_react INTEGER DEFAULT 0
                 );
             """)
+            # Additive migration for the dedicated audit destinations. Existing
+            # columns and rows remain untouched; only missing columns are added.
+            await _migrate_logging_channels(db)
 
             # فهارس لتسريع استعلامات الرتب ولوحة الشرف (Leaderboard)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_guild_xp ON users(guild_id, xp DESC);")
@@ -836,7 +887,7 @@ async def init_db() -> None:
 # إعدادات السيرفر (Guild Settings API) مع كاش LRU/TTL
 # -------------------------------------------------------------
 def _empty_log_routing() -> Dict[str, int]:
-    return {key: 0 for key in LOG_ROUTING_KEYS}
+    return {key: 0 for key in LOG_ROUTING_ALL_KEYS}
 
 
 def get_cached_logging_channels(guild_id: int) -> Dict[str, int]:
@@ -846,15 +897,15 @@ def get_cached_logging_channels(guild_id: int) -> Dict[str, int]:
 
 
 async def get_logging_channels(guild_id: int) -> Dict[str, int]:
-    """Read a guild's six log destinations and warm the process cache."""
+    """Read all dedicated and legacy log destinations and warm the cache."""
     guild_id = int(guild_id)
     cached = LOG_ROUTING_CACHE.get(guild_id)
     if cached is not None:
         return dict(cached)
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
-            "SELECT log_messages, log_roles, log_channels, log_moderation, "
-            "log_warnings, log_voice FROM logging_channels WHERE guild_id = ?",
+            "SELECT " + ", ".join(LOG_ROUTING_ALL_KEYS)
+            + " FROM logging_channels WHERE guild_id = ?",
             (guild_id,),
         ) as cur:
             row = await cur.fetchone()
@@ -877,26 +928,33 @@ async def set_logging_channels(
     snapshot = _empty_log_routing()
     for key in LOG_ROUTING_KEYS:
         value = channels_dict.get(key, 0)
+        if not value:
+            value = next(
+                (
+                    legacy
+                    for legacy, dedicated in LOG_ROUTING_ALIASES.items()
+                    if dedicated == key and channels_dict.get(legacy)
+                ),
+                0,
+            )
         try:
             snapshot[key] = max(0, int(value or 0))
         except (TypeError, ValueError):
             raise ValueError(f"invalid logging channel for {key}") from None
+    for legacy, dedicated in LOG_ROUTING_ALIASES.items():
+        snapshot[legacy] = snapshot[dedicated]
     async with connect() as db:
         await db.execute(
             """
             INSERT INTO logging_channels
-                (guild_id, log_messages, log_roles, log_channels,
-                 log_moderation, log_warnings, log_voice)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (guild_id, """ + ", ".join(LOG_ROUTING_ALL_KEYS) + """)
+            VALUES (?, """ + ", ".join("?" for _ in LOG_ROUTING_ALL_KEYS) + """)
             ON CONFLICT(guild_id) DO UPDATE SET
-                log_messages = excluded.log_messages,
-                log_roles = excluded.log_roles,
-                log_channels = excluded.log_channels,
-                log_moderation = excluded.log_moderation,
-                log_warnings = excluded.log_warnings,
-                log_voice = excluded.log_voice
+                """ + ", ".join(
+                    f"{key} = excluded.{key}" for key in LOG_ROUTING_ALL_KEYS
+                ) + """
             """,
-            (guild_id, *(snapshot[key] for key in LOG_ROUTING_KEYS)),
+            (guild_id, *(snapshot[key] for key in LOG_ROUTING_ALL_KEYS)),
         )
         await db.commit()
     LOG_ROUTING_CACHE[guild_id] = snapshot

@@ -72,6 +72,7 @@ class EnterpriseBot(commands.Bot):
         self.presence_step = 0
         self.sync_guild = configured_sync_guild()
         self.metrics: deque[dict[str, int | float | str | None]] = deque(maxlen=600)
+        self._gateway_watchdog_task: asyncio.Task | None = None
 
     async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):
         options = {"override": override}
@@ -103,6 +104,9 @@ class EnterpriseBot(commands.Bot):
 
     async def setup_hook(self):
         self.session = aiohttp.ClientSession()
+        self._gateway_watchdog_task = asyncio.create_task(
+            self._gateway_startup_watchdog()
+        )
 
         try:
             await init_db()
@@ -166,12 +170,43 @@ class EnterpriseBot(commands.Bot):
     async def close(self):
         logger.info("🛑 جاري إنهاء الجلسات وإيقاف البوت بأمان...")
         self.rotate_status.cancel()
+        if self._gateway_watchdog_task:
+            self._gateway_watchdog_task.cancel()
+            self._gateway_watchdog_task = None
         if self.dashboard_runner:
             await self.dashboard_runner.cleanup()
             self.dashboard_runner = None
         if self.session and not self.session.closed:
             await self.session.close()
         await super().close()
+
+    async def _gateway_startup_watchdog(self):
+        await asyncio.sleep(10)
+        if self.is_ready():
+            return
+        logger.warning(
+            "[GATEWAY] Ready is still pending after 10s: guilds=%d, "
+            "cached_members=%d, chunked=%d",
+            len(self.guilds),
+            sum(len(guild.members) for guild in self.guilds),
+            sum(bool(getattr(guild, "chunked", False)) for guild in self.guilds),
+        )
+
+    async def on_connect(self):
+        logger.info(
+            "[GATEWAY] Session connected: guilds=%d, cached_members=%d",
+            len(self.guilds),
+            sum(len(guild.members) for guild in self.guilds),
+        )
+
+    async def on_guild_available(self, guild: discord.Guild):
+        logger.info(
+            "[GATEWAY] Guild available: %s (%s), members=%d, chunked=%s",
+            guild.name,
+            guild.id,
+            len(guild.members),
+            bool(getattr(guild, "chunked", False)),
+        )
 
     async def on_ready(self):
         self.record_metrics()

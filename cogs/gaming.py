@@ -1,8 +1,8 @@
 """Persistent scrim lobbies and lightweight esports operations."""
 
-import json
 import logging
 
+import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -205,6 +205,50 @@ class Gaming(commands.Cog):
                 message_id=int(scrim["message_id"]),
             )
 
+    async def deploy_scrim(
+        self,
+        guild: discord.Guild,
+        channel: discord.abc.Messageable,
+        title: str,
+        game_type: str,
+        team_size: int,
+        max_slots: int,
+    ) -> dict:
+        scrim = await create_scrim_config(
+            guild.id, channel.id, title, game_type, team_size, max_slots
+        )
+        scrim["registrations"] = []
+        scrim["occupied_slots"] = 0
+        view = ScrimBoardView(scrim["id"], guild.id)
+        try:
+            message = await channel.send(embed=await _scrim_embed(scrim), view=view)
+            await set_scrim_message(scrim["id"], message.id)
+            self.bot.add_view(view, message_id=message.id)
+        except (discord.Forbidden, discord.HTTPException):
+            await close_scrim(scrim["id"])
+            raise
+        scrim["message_id"] = message.id
+        return scrim
+
+    async def close_scrim_board(self, scrim_id: int, guild: discord.Guild) -> bool:
+        changed = await close_scrim(scrim_id)
+        if not changed:
+            return False
+        for channel in guild.text_channels:
+            try:
+                async for message in channel.history(limit=100):
+                    if message.author.id == self.bot.user.id and message.embeds:
+                        footer = message.embeds[0].footer.text or ""
+                        if footer == f"SCRIM:{int(scrim_id)} • الحجز خاص، والقائمة ظاهرة للجميع":
+                            embed = message.embeds[0]
+                            embed.title = f"🔒 {embed.title.lstrip('🎮 ').strip()} (مغلق)"
+                            embed.color = 0x667085
+                            await message.edit(embed=embed, view=None)
+                            return True
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+        return True
+
     @app_commands.command(name="scrim_open", description="فتح لوحة تسجيل سكريم للفرق")
     @app_commands.checks.has_permissions(manage_events=True)
     @app_commands.describe(title="عنوان السكريم", game_type="اسم اللعبة", team_size="حجم الفريق", max_slots="عدد المقاعد")
@@ -220,18 +264,11 @@ class Gaming(commands.Cog):
             return await interaction.response.send_message(
                 "❌ حجم الفريق بين 1 و16 وعدد المقاعد بين 1 و128.", ephemeral=True
             )
-        scrim = await create_scrim_config(
-            interaction.guild.id, interaction.channel.id, title, game_type, team_size, max_slots
-        )
-        scrim["registrations"] = []
-        scrim["occupied_slots"] = 0
-        view = ScrimBoardView(scrim["id"], interaction.guild.id)
         try:
-            message = await interaction.channel.send(embed=await _scrim_embed(scrim), view=view)
-            await set_scrim_message(scrim["id"], message.id)
-            self.bot.add_view(view, message_id=message.id)
+            scrim = await self.deploy_scrim(
+                interaction.guild, interaction.channel, title, game_type, team_size, max_slots
+            )
         except (discord.Forbidden, discord.HTTPException):
-            await close_scrim(scrim["id"])
             raise
         await interaction.response.send_message(
             f"✅ تم فتح لوحة السكريم رقم `{scrim['id']}`.", ephemeral=True
@@ -241,7 +278,7 @@ class Gaming(commands.Cog):
 async def get_active_scrims_for_restore():
     # Restore all guilds without changing the public guild-scoped API helper.
     from database import connect
-    async with connect() as db:
+    async with connect(aiosqlite.Row) as db:
         async with db.execute(
             "SELECT * FROM scrim_configs WHERE is_active = 1 AND message_id > 0"
         ) as cur:

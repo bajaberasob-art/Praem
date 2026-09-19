@@ -136,6 +136,7 @@ class EnterpriseBot(commands.Bot):
             "cogs.economy",
             "cogs.utilities",
             "cogs.tournaments",
+            "cogs.gaming",
             "cogs.community",
             "cogs.ai_tools",
         ]

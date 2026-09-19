@@ -22,6 +22,7 @@ from database import (
     get_warning,
     get_recent_warnings,
     get_dashboard_stats,
+    get_scrims,
     get_guild_settings,
     delete_shortcut,
     save_shortcut,
@@ -678,6 +679,103 @@ def _utilities_cog():
 
 def _community_cog():
     return bot_ref.get_cog("Community") if bot_ref else None
+
+
+def _gaming_cog():
+    return bot_ref.get_cog("Gaming") if bot_ref else None
+
+
+@routes.get('/api/guild/{guild_id}/gaming')
+async def api_guild_gaming(req):
+    _, guild = await authorize(req)
+    return web.json_response({"scrims": await get_scrims(guild.id)})
+
+
+@routes.post('/api/guild/{guild_id}/gaming/deploy')
+async def api_guild_gaming_deploy(req):
+    _, guild = await authorize(req, write=True)
+    gaming = _gaming_cog()
+    if gaming is None:
+        return json_error(503, "gaming_unavailable")
+    body = await read_json_body(req)
+    title = str(body.get("title") or "").strip()
+    game_type = str(body.get("game_type") or "").strip()
+    try:
+        team_size = int(body.get("team_size", 5))
+        max_slots = int(body.get("max_slots", 8))
+        channel_id = int(body.get("target_channel_id"))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"target_channel_id": "بيانات غير صالحة"})
+    channel = guild.get_channel(channel_id)
+    if channel is None or not isinstance(channel, discord.TextChannel):
+        return json_error(400, "validation", fields={"target_channel_id": "اختر قناة نصية صالحة"})
+    if not title or len(title) > 150 or not game_type or len(game_type) > 80:
+        return json_error(400, "validation", fields={"title": "أدخل عنواناً ونوع لعبة صالحين"})
+    if not 1 <= team_size <= 16 or not 1 <= max_slots <= 128:
+        return json_error(400, "validation", fields={"max_slots": "القيم خارج النطاق المسموح"})
+    try:
+        scrim = await gaming.deploy_scrim(
+            guild, channel, title, game_type, team_size, max_slots
+        )
+    except discord.Forbidden:
+        return json_error(403, "discord_forbidden")
+    except discord.HTTPException:
+        return json_error(502, "discord_unavailable")
+    return web.json_response({"ok": True, "scrim": scrim})
+
+
+@routes.post('/api/guild/{guild_id}/gaming/close')
+async def api_guild_gaming_close(req):
+    _, guild = await authorize(req, write=True)
+    gaming = _gaming_cog()
+    if gaming is None:
+        return json_error(503, "gaming_unavailable")
+    body = await read_json_body(req)
+    try:
+        scrim_id = int(body.get("scrim_id"))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"scrim_id": "معرف السكريم غير صالح"})
+    scrims = await get_scrims(guild.id)
+    if not any(int(item["id"]) == scrim_id for item in scrims):
+        return json_error(404, "scrim_not_found")
+    if not await gaming.close_scrim_board(scrim_id, guild):
+        return json_error(409, "scrim_already_closed")
+    return web.json_response({"ok": True, "scrim_id": scrim_id})
+
+
+@routes.post('/api/guild/{guild_id}/gaming/credentials')
+async def api_guild_gaming_credentials(req):
+    _, guild = await authorize(req, write=True)
+    body = await read_json_body(req)
+    try:
+        scrim_id = int(body.get("scrim_id"))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"scrim_id": "معرف السكريم غير صالح"})
+    credentials = str(body.get("credentials") or "").strip()
+    if not credentials or len(credentials) > 1500:
+        return json_error(400, "validation", fields={"credentials": "أدخل بيانات الغرفة"})
+    scrim = next(
+        (item for item in await get_scrims(guild.id) if int(item["id"]) == scrim_id),
+        None,
+    )
+    if not scrim:
+        return json_error(404, "scrim_not_found")
+    channel = guild.get_channel(int(scrim["channel_id"]))
+    if channel is None:
+        return json_error(404, "channel_not_found")
+    embed = discord.Embed(
+        title=f"🔐 بيانات غرفة السكريم: {scrim['title']}",
+        description=credentials,
+        color=0x8B5CF6,
+    )
+    embed.set_footer(text=f"SCRIM:{scrim_id} • أرسلها فقط للمشاركين")
+    try:
+        message = await channel.send(embed=embed)
+    except discord.Forbidden:
+        return json_error(403, "discord_forbidden")
+    except discord.HTTPException:
+        return json_error(502, "discord_unavailable")
+    return web.json_response({"ok": True, "message_id": str(message.id)})
 
 
 def _command_roles(guild, role_ids):

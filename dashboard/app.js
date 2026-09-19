@@ -55,6 +55,7 @@
     },
     gaming: [],
     economy: { wealth: [], levels: [], settings: null, multipliers: {} },
+    logRouting: { channels: {} },
     ticketSearch: "",
     ticketStatusFilter: "all",
     ticketCategories: [
@@ -325,6 +326,7 @@
     onboarding: { label: "الترحيب والأدوار", icon: "✦", hint: "Onboarding" },
     security: { label: "الحماية", icon: "◈", hint: "Security" },
     moderation: { label: "المراقبة", icon: "⚔", hint: "Moderation" },
+    analytics: { label: "السجلات", icon: "◉", hint: "Analytics" },
     economy: { label: "الاقتصاد", icon: "◌", hint: "Economy" },
     community: { label: "المجتمع", icon: "◎", hint: "Community" },
     ai: { label: "الذكاء الاصطناعي", icon: "✧", hint: "AI Tools" },
@@ -448,6 +450,7 @@
       navButton("gaming"),
       navButton("security"),
       navButton("moderation"),
+      navButton("analytics"),
       navButton("economy"),
       navButton("community"),
       navButton("ai"),
@@ -457,7 +460,7 @@
     const moreButton = el(
       "button",
       {
-         class: `nav-item ${["onboarding", "gaming", "security", "moderation", "economy", "community", "ai", "settings", "system"].includes(state.activeView) ? "active" : ""}`,
+         class: `nav-item ${["onboarding", "gaming", "security", "moderation", "analytics", "economy", "community", "ai", "settings", "system"].includes(state.activeView) ? "active" : ""}`,
         type: "button",
         "aria-expanded": "false",
         onClick: () => {
@@ -4325,7 +4328,7 @@
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr, gr, er] = await Promise.all([
+      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr, gr, er, lr] = await Promise.all([
         fetchGuildMeta(id),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
@@ -4340,9 +4343,10 @@
         api(`api/guild/${id}/actions`),
         api(`api/guild/${id}/gaming`),
         api(`api/guild/${id}/economy`),
+        api(`api/guild/${id}/logs/channels`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming, economy] = await Promise.all([
+      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming, economy, logRouting] = await Promise.all([
         Promise.resolve(mr),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
@@ -4357,6 +4361,7 @@
         acr.ok ? acr.json() : Promise.resolve({ actions: [] }),
         gr.ok ? gr.json() : Promise.resolve({ scrims: [] }),
         er.ok ? er.json() : Promise.resolve({ wealth: [], levels: [], settings: { settings: {} }, multipliers: {} }),
+        lr.ok ? lr.json() : Promise.resolve({ channels: {} }),
       ]);
       if (state.guild.id !== id) return;
       state.meta = meta;
@@ -4396,6 +4401,7 @@
         settings: economy.settings || { settings: {} },
         multipliers: economy.multipliers || {},
       };
+      state.logRouting = logRouting || { channels: {} };
       state.baseline = clone(settings.settings);
       state.onboarding = onboarding;
       state.baseline = { ...state.baseline, ...(onboarding.settings || {}) };

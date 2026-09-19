@@ -15,6 +15,7 @@ import discord
 from aiohttp import web
 
 from database import (
+    LOG_ROUTING_KEYS,
     SETTINGS_SCHEMA,
     SettingsConflict,
     get_auto_responders,
@@ -24,6 +25,8 @@ from database import (
     get_dashboard_stats,
     get_economy_leaderboard,
     get_level_leaderboard,
+    get_logging_channels,
+    set_logging_channels,
     get_role_multipliers,
     get_scrims,
     get_guild_settings,
@@ -611,6 +614,78 @@ def _security_cog():
 
 def _moderation_cog():
     return bot_ref.get_cog("Moderation") if bot_ref else None
+
+
+def _analytics_cog():
+    return bot_ref.get_cog("Analytics") if bot_ref else None
+
+
+def _public_log_routes(routes_snapshot: dict) -> dict[str, str]:
+    return {
+        key: str(int(routes_snapshot.get(key, 0) or 0))
+        for key in LOG_ROUTING_KEYS
+    }
+
+
+@routes.get('/api/guild/{guild_id}/logs/channels')
+async def api_get_log_channels(req):
+    _, guild = await authorize(req)
+    return web.json_response({
+        "channels": _public_log_routes(await get_logging_channels(guild.id)),
+        "categories": list(LOG_ROUTING_KEYS),
+    })
+
+
+@routes.post('/api/guild/{guild_id}/logs/channels')
+async def api_set_log_channels(req):
+    _, guild = await authorize(req, write=True)
+    body = await read_json_body(req)
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة التوزيع غير صالحة"})
+    requested = body.get("channels", body)
+    if not isinstance(requested, dict):
+        return json_error(400, "validation", fields={"channels": "صيغة القنوات غير صالحة"})
+    clean = {}
+    errors = {}
+    for key in LOG_ROUTING_KEYS:
+        raw = requested.get(key, 0)
+        try:
+            channel_id = int(raw or 0)
+        except (TypeError, ValueError):
+            errors[key] = "معرف القناة غير صالح"
+            continue
+        if channel_id:
+            channel = guild.get_channel(channel_id)
+            if channel is None or not isinstance(channel, discord.TextChannel):
+                errors[key] = "اختر قناة نصية من هذا السيرفر"
+                continue
+        clean[key] = channel_id
+    if errors:
+        return json_error(400, "validation", fields=errors)
+    snapshot = await set_logging_channels(guild.id, clean)
+    return web.json_response({"ok": True, "channels": _public_log_routes(snapshot)})
+
+
+@routes.post('/api/guild/{guild_id}/logs/test/{category}')
+async def api_test_log_channel(req):
+    session, guild = await authorize(req, write=True)
+    category = str(req.match_info.get("category", "")).strip()
+    if category not in LOG_ROUTING_KEYS:
+        return json_error(400, "unsupported_category")
+    route = await get_logging_channels(guild.id)
+    channel_id = int(route.get(category, 0) or 0)
+    channel = guild.get_channel(channel_id) if channel_id else None
+    if channel is None:
+        return json_error(400, "category_unassigned")
+    analytics = _analytics_cog()
+    if analytics is None:
+        return json_error(503, "analytics_unavailable")
+    actor = guild.get_member(int(session["id"])) or guild.me
+    try:
+        await analytics.send_test(guild, category, actor=actor)
+    except (discord.Forbidden, discord.HTTPException):
+        return json_error(502, "discord_unavailable")
+    return web.json_response({"ok": True, "category": category, "channel_id": str(channel.id)})
 
 
 @routes.get('/api/guild/{guild_id}/actions')

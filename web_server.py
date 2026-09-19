@@ -363,6 +363,17 @@ def public_settings(snapshot: dict) -> dict:
     return {"revision": snapshot["revision"], "updated_at": snapshot["updated_at"], "settings": settings}
 
 
+def parse_custom_emoji(value: str):
+    match = re.fullmatch(r"<(a?):([A-Za-z0-9_~]+):(\d+)>", str(value or "").strip())
+    if not match:
+        return None
+    return discord.PartialEmoji(
+        name=match.group(2),
+        id=int(match.group(3)),
+        animated=bool(match.group(1)),
+    )
+
+
 async def guild_meta(guild) -> dict:
     icon = getattr(guild, "icon", None)
     me = guild.me
@@ -828,7 +839,7 @@ async def api_guild_auto_responses_save(req):
     elif target_id:
         return json_error(400, "validation", fields={"target_id": "لا تستخدم معرفاً مع نطاق الجميع"})
     if reaction_emoji.startswith("<") and reaction_emoji.endswith(">"):
-        parsed_emoji = discord.PartialEmoji.from_str(reaction_emoji)
+        parsed_emoji = parse_custom_emoji(reaction_emoji)
         if not parsed_emoji.id or guild.get_emoji(parsed_emoji.id) is None:
             return json_error(400, "validation", fields={"reaction_emoji": "الإيموجي المخصص غير موجود في هذا السيرفر"})
         reaction_emoji = str(parsed_emoji)

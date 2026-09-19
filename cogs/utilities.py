@@ -744,9 +744,15 @@ class Utilities(commands.Cog):
         raw = str(value or "").strip()
         if not raw:
             return None
+        custom = re.fullmatch(r"<(a?):([A-Za-z0-9_~]+):(\d+)>", raw)
+        if custom:
+            return discord.PartialEmoji(
+                name=custom.group(2),
+                id=int(custom.group(3)),
+                animated=bool(custom.group(1)),
+            )
         if raw.startswith("<") and raw.endswith(">"):
-            emoji = discord.PartialEmoji.from_str(raw)
-            return emoji if emoji.id else None
+            return None
         return raw
 
     def _consume_bucket(

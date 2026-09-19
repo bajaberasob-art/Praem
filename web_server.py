@@ -1306,10 +1306,8 @@ async def api_guild_commands_toggle(req):
     utilities = _utilities_cog()
     if utilities is None:
         return json_error(503, "utilities_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        body = await req.json()
+        body = await read_json_body(req)
     except (json.JSONDecodeError, ValueError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -1350,10 +1348,8 @@ async def api_guild_command_policy(req):
     utilities = _utilities_cog()
     if utilities is None:
         return json_error(503, "utilities_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        body = await req.json()
+        body = await read_json_body(req)
     except (json.JSONDecodeError, ValueError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -1392,10 +1388,8 @@ async def api_guild_command_policy(req):
 @routes.post('/api/guild/{guild_id}/shortcuts')
 async def api_guild_shortcut_save(req):
     _, guild = await authorize(req, write=True)
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        body = await req.json()
+        body = await read_json_body(req)
     except (json.JSONDecodeError, ValueError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -1478,10 +1472,8 @@ async def api_guild_auto_responses_save(req):
     utilities = _utilities_cog()
     if utilities is None:
         return json_error(503, "utilities_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        body = await req.json()
+        body = await read_json_body(req)
     except (json.JSONDecodeError, ValueError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -1901,7 +1893,7 @@ async def api_security_lockdown(req):
     if security is None:
         return json_error(503, "security_unavailable")
     try:
-        body = json.loads((await req.content.read(MAX_BODY + 1))[:MAX_BODY].decode("utf-8") or "{}")
+        body = await read_json_body(req)
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -1932,7 +1924,7 @@ async def api_security_whitelist(req):
     if security is None:
         return json_error(503, "security_unavailable")
     try:
-        body = json.loads((await req.content.read(MAX_BODY + 1))[:MAX_BODY].decode("utf-8"))
+        body = await read_json_body(req)
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -2039,13 +2031,8 @@ async def api_test_welcome(req):
     engagement = bot_ref.get_cog("Engagement") if bot_ref else None
     if engagement is None:
         return json_error(503, "engagement_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        raw_body = await req.content.read(MAX_BODY + 1)
-        if len(raw_body) > MAX_BODY:
-            return json_error(413, "too_large")
-        body = json.loads(raw_body.decode("utf-8") or "{}")
+        body = await read_json_body(req)
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -2117,13 +2104,8 @@ async def api_post_onboarding(req):
     engagement = bot_ref.get_cog("Engagement") if bot_ref else None
     if engagement is None:
         return json_error(503, "engagement_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        raw_body = await req.content.read(MAX_BODY + 1)
-        if len(raw_body) > MAX_BODY:
-            return json_error(413, "too_large")
-        body = json.loads(raw_body.decode("utf-8") or "{}")
+        body = await read_json_body(req)
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -2165,13 +2147,8 @@ async def api_onboarding_test_welcome(req):
     engagement = bot_ref.get_cog("Engagement") if bot_ref else None
     if engagement is None:
         return json_error(503, "engagement_unavailable")
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
     try:
-        raw_body = await req.content.read(MAX_BODY + 1)
-        if len(raw_body) > MAX_BODY:
-            return json_error(413, "too_large")
-        body = json.loads(raw_body.decode("utf-8") or "{}")
+        body = await read_json_body(req)
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
@@ -2350,12 +2327,8 @@ async def api_get_settings(req):
 @routes.post('/api/guild/{guild_id}/settings')
 async def api_post_settings(req):
     session, guild = await authorize(req, write=True)
-    if req.content_length and req.content_length > MAX_BODY:
-        return json_error(413, "too_large")
-    if not req.content_type.startswith("application/json"):
-        return json_error(415, "json_required")
     try:
-        body = json.loads((await req.content.read(MAX_BODY + 1))[:MAX_BODY].decode("utf-8"))
+        body = await read_json_body(req)
     except (ValueError, UnicodeDecodeError):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict) or not isinstance(body.get("revision"), int) or isinstance(body.get("revision"), bool):

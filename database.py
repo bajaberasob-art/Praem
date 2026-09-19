@@ -204,6 +204,16 @@ async def _migrate_auto_responder_uniqueness(db: aiosqlite.Connection) -> None:
     if "UNIQUE (guild_id, trigger, match_type)" not in schema:
         return
 
+    async with db.execute(
+        "SELECT type FROM sqlite_master WHERE name = 'auto_responses'"
+    ) as cur:
+        canonical = await cur.fetchone()
+    if canonical and canonical[0] == "view":
+        # ALTER TABLE ... RENAME updates dependent view SQL to the staging
+        # name. Drop it before the swap so the canonical view can be rebuilt
+        # against the final table name.
+        await db.execute("DROP VIEW auto_responses")
+
     await db.execute("""
         CREATE TABLE guild_auto_responders_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

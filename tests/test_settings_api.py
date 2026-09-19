@@ -230,6 +230,38 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
             (False, [str(ROLES[2].id)], [str(CHANNELS[1].id)]),
         )
 
+        policy_body = {
+            "is_enabled": True,
+            "aliases": ["انذار", "!مسح"],
+            "allowed_roles": [str(ROLES[1].id)],
+            "allowed_channels": [str(CHANNELS[0].id)],
+        }
+        req = request(
+            "POST",
+            "/x",
+            "s10",
+            policy_body,
+            self.headers,
+        )
+        req.match_info["command_name"] = "ping"
+        status, data = await call(ws.api_guild_command_policy, req)
+        self.assertEqual(
+            (
+                status,
+                data["command"]["enabled"],
+                data["command"]["aliases"],
+                data["command"]["allowed_roles"],
+                data["command"]["allowed_channels"],
+            ),
+            (
+                200,
+                True,
+                ["انذار", "مسح"],
+                [str(ROLES[1].id)],
+                [str(CHANNELS[0].id)],
+            ),
+        )
+
         rule_body = {
             "trigger": "hello",
             "match_type": "contains",

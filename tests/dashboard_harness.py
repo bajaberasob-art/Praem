@@ -232,6 +232,8 @@ class FakeBot:
                     command.update(
                         enabled=control["enabled"],
                         allowed_roles=control["allowed_roles"],
+                        allowed_channels=control.get("allowed_channels", []),
+                        aliases=control.get("aliases", []),
                         configured=True,
                     )
                 commands.append(command)
@@ -242,10 +244,21 @@ class FakeBot:
             }
 
         async def toggle_command(
-            self, guild_id, command_name, enabled, allowed_roles, allowed_channels=None
+            self,
+            guild_id,
+            command_name,
+            enabled,
+            allowed_roles,
+            allowed_channels=None,
+            aliases=None,
         ):
-            result = await database.save_command_control(
-                guild_id, command_name, enabled, allowed_roles, allowed_channels or []
+            result = await database.save_command_policy(
+                guild_id,
+                command_name,
+                enabled,
+                allowed_roles=allowed_roles,
+                allowed_channels=allowed_channels or [],
+                aliases=aliases,
             )
             item = next((x for x in self.commands if x["command_name"] == command_name), None)
             if item is None:
@@ -260,6 +273,7 @@ class FakeBot:
                 enabled=enabled,
                 allowed_roles=allowed_roles,
                 allowed_channels=allowed_channels or [],
+                aliases=result.get("aliases", aliases or []),
                 configured=True,
             )
             return result

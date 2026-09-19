@@ -1938,7 +1938,8 @@ async def index(req):
                     place-items: center;
                     width: min(100%, 430px);
                     height: 260px;
-                    margin: 20px auto 6px;
+                    margin: 20px auto 12px;
+                    overflow: hidden;
                 }
                 .hero-art::before {
                     content: "";
@@ -1959,9 +1960,20 @@ async def index(req):
                     object-fit: contain;
                     filter: drop-shadow(0 18px 24px rgba(45, 84, 255, .28));
                 }
+                .hero-art::after {
+                    content: "";
+                    position: absolute;
+                    right: 0;
+                    bottom: 0;
+                    left: 0;
+                    z-index: 2;
+                    height: 34px;
+                    background: linear-gradient(to bottom, transparent, #0b1528);
+                    pointer-events: none;
+                }
                 .smart-tag {
                     position: absolute;
-                    z-index: 2;
+                    z-index: 3;
                     top: 32px;
                     right: 18px;
                     padding: 7px 10px;
@@ -1983,7 +1995,7 @@ async def index(req):
                     background: #57d8ff;
                     box-shadow: 0 0 10px #57d8ff;
                 }
-                .brand-copy { position: relative; max-width: 470px; margin: 0 auto; }
+                .brand-copy { position: relative; z-index: 3; max-width: 470px; margin: 0 auto; }
                 .eyebrow {
                     display: inline-flex;
                     align-items: center;
@@ -2035,7 +2047,7 @@ async def index(req):
                 .brand-footer span {
                     display: flex;
                     flex-direction: column;
-                    align-items: flex-start;
+                    align-items: center;
                     gap: 5px;
                     min-height: 72px;
                     padding: 10px;
@@ -2046,7 +2058,10 @@ async def index(req):
                     box-shadow: inset 0 1px rgba(255, 255, 255, .08);
                     font-size: 11px;
                     line-height: 1.35;
+                    text-align: center;
                 }
+                .brand-footer b { color: #d7def0; font-weight: 700; }
+                .brand-footer small { color: #8493ab; font-size: 10px; }
                 .brand-footer i {
                     display: grid;
                     place-items: center;
@@ -2160,11 +2175,13 @@ async def index(req):
                 .trust-item {
                     display: flex;
                     flex-direction: column;
+                    align-items: center;
                     gap: 7px;
                     min-width: 0;
                     color: #8594ad;
                     font-size: 11px;
                     line-height: 1.5;
+                    text-align: center;
                 }
                 .trust-icon { color: #99a5ff; font-size: 17px; }
                 .trust-item strong { color: #c9d3e6; font-size: 12px; }
@@ -2249,13 +2266,13 @@ async def index(req):
                         border-bottom: 1px solid var(--line);
                     }
                     .brand-panel::before { top: 15px; left: 24px; font-size: 100px; }
-                    .hero-art { height: 245px; margin-top: 16px; }
-                    .hero-art img { width: min(100%, 330px); }
+                    .hero-art { height: 224px; margin-top: 16px; margin-bottom: 16px; }
+                    .hero-art img { width: min(100%, 306px); }
                     .smart-tag { top: 24px; right: 3px; }
-                    .brand-copy { margin: 8px 0 0; }
-                    .brand-copy h1 { margin-top: 14px; font-size: clamp(2.2rem, 11vw, 3.4rem); }
+                    .brand-copy { margin: 0; }
+                    .brand-copy h1 { margin-top: 17px; font-size: clamp(2rem, 10vw, 3rem); line-height: 1.2; }
                     .brand-copy p { font-size: 14px; line-height: 1.75; }
-                    .brand-footer { margin-top: 20px; }
+                    .brand-footer { margin-top: 24px; }
                     .auth-card { padding: 34px 25px 30px; }
                 }
                 @media (max-width: 430px) {

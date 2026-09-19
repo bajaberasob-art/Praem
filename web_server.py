@@ -1809,6 +1809,9 @@ async def index(req):
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>بوابة الإدارة والتحكم السحابية | تسجيل الدخول</title>
             <link rel="icon" href="data:,">
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
             <style>
                 :root {
                     color-scheme: dark;
@@ -1819,6 +1822,8 @@ async def index(req):
                     --blue: #6c7cff;
                     --cyan: #41d9ff;
                     --green: #45d39a;
+                    --font-body: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+                    --font-display: "Cairo", "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
                 }
                 * { box-sizing: border-box; }
                 html, body { min-height: 100%; }
@@ -1833,7 +1838,9 @@ async def index(req):
                     min-height: 100vh;
                     margin: 0;
                     padding: 28px;
-                    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+                    font-family: var(--font-body);
+                    -webkit-font-smoothing: antialiased;
+                    text-rendering: optimizeLegibility;
                     overflow-x: hidden;
                 }
                 body::before {
@@ -1900,6 +1907,7 @@ async def index(req):
                     align-items: center;
                     gap: 12px;
                     width: fit-content;
+                    font-family: var(--font-display);
                     font-weight: 800;
                     letter-spacing: .02em;
                 }
@@ -1919,6 +1927,7 @@ async def index(req):
                     display: block;
                     margin-top: 3px;
                     color: var(--muted);
+                    font-family: var(--font-body);
                     font-size: 11px;
                     font-weight: 500;
                     letter-spacing: .08em;
@@ -1995,19 +2004,27 @@ async def index(req):
                     margin: 12px 0 13px;
                     max-width: 470px;
                     font-size: clamp(2rem, 4.7vw, 4rem);
-                    line-height: 1.08;
-                    letter-spacing: -.045em;
+                    font-family: var(--font-display);
+                    font-weight: 900;
+                    line-height: 1.16;
+                    letter-spacing: -.035em;
+                    text-wrap: balance;
                 }
                 .brand-copy h1 span {
-                    color: #91a0ff;
-                    text-shadow: 0 0 30px rgba(108, 124, 255, .3);
+                    background: linear-gradient(110deg, #aeb6ff 8%, #7c8bff 48%, #70ddff 100%);
+                    -webkit-background-clip: text;
+                    background-clip: text;
+                    color: transparent;
+                    text-shadow: 0 0 30px rgba(108, 124, 255, .2);
                 }
                 .brand-copy p {
                     max-width: 430px;
                     margin: 0;
                     color: var(--muted);
-                    font-size: 14px;
-                    line-height: 1.8;
+                    font-size: 13px;
+                    font-weight: 400;
+                    line-height: 2;
+                    text-wrap: pretty;
                 }
                 .brand-footer {
                     display: grid;
@@ -2042,11 +2059,22 @@ async def index(req):
                     font-style: normal;
                 }
                 .auth-card {
+                    position: relative;
                     display: flex;
                     flex-direction: column;
                     justify-content: center;
                     padding: clamp(30px, 5vw, 64px);
                     background: rgba(6, 11, 22, .7);
+                }
+                .auth-card::before {
+                    content: "";
+                    position: absolute;
+                    top: 0;
+                    right: 18%;
+                    left: 18%;
+                    height: 1px;
+                    background: linear-gradient(90deg, transparent, rgba(124, 139, 255, .8), transparent);
+                    box-shadow: 0 0 22px rgba(124, 139, 255, .55);
                 }
                 .auth-card-head { margin-bottom: 32px; }
                 .auth-card-head .badge {
@@ -2058,19 +2086,25 @@ async def index(req):
                     border-radius: 999px;
                     color: #b8c0ff;
                     background: rgba(108, 124, 255, .1);
+                    font-family: var(--font-body);
                     font-size: 12px;
                     font-weight: 800;
                 }
                 .auth-card h2 {
                     margin: 22px 0 10px;
+                    font-family: var(--font-display);
                     font-size: clamp(1.8rem, 3vw, 2.4rem);
-                    letter-spacing: -.04em;
+                    font-weight: 800;
+                    line-height: 1.3;
+                    letter-spacing: -.025em;
+                    text-wrap: balance;
                 }
                 .auth-card-intro {
                     margin: 0;
                     color: var(--muted);
-                    font-size: 14px;
-                    line-height: 1.85;
+                    font-family: var(--font-body);
+                    font-size: 13px;
+                    line-height: 2;
                 }
                 .btn-login {
                     display: flex;
@@ -2084,8 +2118,10 @@ async def index(req):
                     color: #fff;
                     background: linear-gradient(135deg, #6878ff, #4b5be0);
                     box-shadow: 0 14px 28px rgba(80, 92, 236, .26), inset 0 1px rgba(255, 255, 255, .22);
+                    font-family: var(--font-display);
                     font-size: 16px;
-                    font-weight: 800;
+                    font-weight: 700;
+                    letter-spacing: -.01em;
                     text-decoration: none;
                     transition: transform .2s ease, box-shadow .2s ease, filter .2s ease;
                 }
@@ -2103,9 +2139,10 @@ async def index(req):
                     margin: 17px 0 0;
                     color: #7888a4;
                     font-size: 12px;
+                    font-weight: 400;
                     line-height: 1.7;
                 }
-                .login-note strong { color: #a7b8d2; }
+                .login-note strong { color: #a7b8d2; font-weight: 700; }
                 .login-note svg { flex: none; margin-top: 2px; color: var(--green); }
                 .trust-grid {
                     display: grid;

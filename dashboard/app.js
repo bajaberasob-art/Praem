@@ -1530,9 +1530,22 @@
   }
   function commandShortcuts(command) {
     const name = String(command.command_name || "").toLowerCase();
-    return (state.commandStudio.shortcuts || []).filter((shortcut) => {
+    const policyAliases = (Array.isArray(command.aliases) ? command.aliases : []).map((trigger) => ({
+      trigger: String(trigger),
+      target_type: "command",
+      target: `/${name}`,
+      policyAlias: true,
+    }));
+    const legacy = (state.commandStudio.shortcuts || []).filter((shortcut) => {
       const target = String(shortcut.target || "").trim().toLowerCase();
       return target.replace(/^[/!]/, "").split(/\s+/)[0] === name;
+    });
+    const seen = new Set();
+    return [...policyAliases, ...legacy].filter((shortcut) => {
+      const key = String(shortcut.trigger || "").caseFold?.() || String(shortcut.trigger || "").toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
   }
   function commandPermissionWarnings(command) {
@@ -1707,14 +1720,15 @@
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم");
     }
   }
-  async function saveCommandPolicy(command, enabled, allowedRoles, allowedChannels) {
+  async function saveCommandPolicy(command, enabled, allowedRoles, allowedChannels, aliases = command.aliases || []) {
     try {
-      const r = await api(`api/guild/${state.guild.id}/commands/toggle`, {
+      const r = await api(`api/guild/${state.guild.id}/commands/${encodeURIComponent(command.command_name)}/policy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
         body: JSON.stringify({
           command_name: command.command_name,
-          enabled,
+          is_enabled: Boolean(enabled),
+          aliases,
           allowed_roles: allowedRoles,
           allowed_channels: allowedChannels,
         }),
@@ -1730,6 +1744,23 @@
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");
       return false;
     }
+  }
+  function parseCommandAliases(input) {
+    const aliases = [...new Set(
+      String(input?.value || "")
+        .split(/[,،\n]+/)
+        .map((value) => value.trim().replace(/^[/!]/, ""))
+        .filter(Boolean),
+    )];
+    if (aliases.length > 20) {
+      toast("يمكن إضافة 20 اختصاراً كحد أقصى للأمر", "warn");
+      return null;
+    }
+    if (aliases.some((value) => /\s/.test(value) || value.length > 80)) {
+      toast("كل اختصار يجب أن يكون كلمة واحدة وبحد أقصى 80 حرفاً", "warn");
+      return null;
+    }
+    return aliases;
   }
   async function saveCommandPrefix(input, feedback) {
     const value = input.value.trim();
@@ -1992,15 +2023,16 @@
       statusSwitch.setAttribute("aria-checked", String(detailEnabled));
     };
     const saveDetails = async () => {
+      const aliases = parseCommandAliases(shortcutInput);
+      if (aliases === null) return;
       const policySaved = await saveCommandPolicy(
         command,
         detailEnabled,
         rolesEditor.values(),
         channelsEditor.values(),
+        aliases,
       );
       if (!policySaved) return;
-      const aliasesSaved = await saveCommandShortcuts(command, shortcutInput, { deferRender: true });
-      if (aliasesSaved === false) return;
       pulse();
       toast("تم حفظ إعدادات الأمر وتطبيقها على السيرفر", "success", 2600);
       closeCommandDetail();

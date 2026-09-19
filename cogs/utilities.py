@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from database import (
+    add_warning,
     get_auto_responders,
     get_command_controls,
     get_command_policies,
@@ -242,6 +243,7 @@ class Utilities(commands.Cog):
         self.auto_responders: dict[int, list[dict[str, Any]]] = {}
         self.shortcuts: dict[int, list[dict[str, Any]]] = {}
         self.command_controls: dict[int, dict[str, dict[str, Any]]] = {}
+        self.command_aliases: dict[int, dict[str, tuple[str, dict[str, Any]]]] = {}
         self._cooldowns: dict[tuple[int, int, int], TokenBucket] = {}
         self._check_registered = False
         self._original_tree_check = getattr(self.bot.tree, "interaction_check", None)
@@ -259,8 +261,7 @@ class Utilities(commands.Cog):
     async def get_guild_commands_status(self, guild_id: int) -> dict[str, Any]:
         """Return command policy state merged with the commands currently loaded."""
         guild_id = int(guild_id)
-        controls = await get_command_controls(guild_id)
-        self.command_controls[guild_id] = controls
+        controls = await self._load_command_controls(guild_id)
         snapshot = await get_guild_settings(guild_id)
         known = {}
         for command in self.bot.commands:
@@ -331,6 +332,22 @@ class Utilities(commands.Cog):
             "commands": sorted(known.values(), key=lambda item: item["command_name"]),
         }
 
+    async def _load_command_controls(
+        self,
+        guild_id: int,
+        *,
+        refresh: bool = False,
+    ) -> dict[str, dict[str, Any]]:
+        guild_id = int(guild_id)
+        controls = await get_command_policies(guild_id, refresh=refresh)
+        self.command_controls[guild_id] = controls
+        aliases = {}
+        for command_name, policy in controls.items():
+            for alias in policy.get("aliases", []):
+                aliases[str(alias).casefold()] = (command_name, policy)
+        self.command_aliases[guild_id] = aliases
+        return controls
+
     async def toggle_command(
         self,
         guild_id: int,
@@ -370,6 +387,11 @@ class Utilities(commands.Cog):
             aliases=aliases,
         )
         self.command_controls.setdefault(int(guild_id), {})[name] = result
+        self.command_aliases[int(guild_id)] = {
+            str(alias).casefold(): (command, policy)
+            for command, policy in self.command_controls[int(guild_id)].items()
+            for alias in policy.get("aliases", [])
+        }
         return result
 
     async def sync_auto_responders(self, guild_id: int) -> dict[str, int]:
@@ -497,8 +519,7 @@ class Utilities(commands.Cog):
         guild_id = int(ctx.guild.id)
         controls = self.command_controls.get(guild_id)
         if controls is None:
-            controls = await get_command_controls(guild_id)
-            self.command_controls[guild_id] = controls
+            controls = await self._load_command_controls(guild_id)
         control = controls.get(ctx.command.qualified_name.lower())
         if not control:
             return True
@@ -552,8 +573,7 @@ class Utilities(commands.Cog):
         guild_id = int(interaction.guild.id)
         controls = self.command_controls.get(guild_id)
         if controls is None:
-            controls = await get_command_controls(guild_id)
-            self.command_controls[guild_id] = controls
+            controls = await self._load_command_controls(guild_id)
         command_name = interaction.command.qualified_name.lower()
         control = controls.get(command_name)
         if not control:
@@ -677,6 +697,8 @@ class Utilities(commands.Cog):
         if message.author.bot or message.guild is None:
             return
         guild_id = int(message.guild.id)
+        if await self._dispatch_policy_alias(message):
+            return
         if guild_id not in self.auto_responders:
             await self.sync_auto_responders(guild_id)
         content = str(message.content or "")
@@ -738,6 +760,235 @@ class Utilities(commands.Cog):
             responder["execution_count"] = await record_auto_responder_execution(
                 guild_id, int(responder["id"])
             )
+
+    async def _dispatch_policy_alias(self, message: discord.Message) -> bool:
+        """Execute a dashboard alias from the O(1) in-memory policy index."""
+        if message.guild is None or getattr(message.author, "bot", False):
+            return False
+        content = str(message.content or "").strip()
+        if not content or not getattr(message.channel, "send", None):
+            return False
+        parts = content.split(maxsplit=1)
+        token = parts[0].lstrip("!/")
+        if not token:
+            return False
+        guild_id = int(message.guild.id)
+        if guild_id not in self.command_aliases:
+            await self._load_command_controls(guild_id)
+        binding = self.command_aliases.get(guild_id, {}).get(token.casefold())
+        if binding is None:
+            return False
+        command_name, policy = binding
+        if not policy.get("enabled", True):
+            await self._send_alias_denial(
+                message,
+                "⚠️ هذا الأمر معطل حالياً من إعدادات السيرفر.",
+            )
+            return True
+
+        permissions = getattr(message.author, "guild_permissions", None)
+        is_admin = bool(permissions and getattr(permissions, "administrator", False))
+        allowed_channels = {str(item) for item in policy.get("allowed_channels", [])}
+        if allowed_channels and str(message.channel.id) not in allowed_channels and not is_admin:
+            await self._send_alias_denial(
+                message,
+                "⛔ هذا الاختصار غير مسموح في هذه القناة.",
+            )
+            return True
+        allowed_roles = {str(item) for item in policy.get("allowed_roles", [])}
+        member_roles = {
+            str(role.id) for role in getattr(message.author, "roles", [])
+        }
+        if allowed_roles and not is_admin and not member_roles.intersection(allowed_roles):
+            await self._send_alias_denial(
+                message,
+                "⛔ ليس لديك الصلاحية لاستخدام هذا الأمر.",
+            )
+            return True
+
+        arguments = parts[1] if len(parts) > 1 else ""
+        alias = parts[0].lstrip("!/")
+        succeeded = await self._execute_alias_command(
+            message,
+            command_name,
+            arguments,
+        )
+        if succeeded:
+            await self._send_alias_confirmation(message, alias, command_name)
+        return True
+
+    @staticmethod
+    async def _send_alias_denial(message: discord.Message, content: str) -> None:
+        try:
+            await message.channel.send(content, delete_after=7)
+        except (discord.Forbidden, discord.HTTPException):
+            LOGGER.debug("[COMMAND_ALIAS] تعذر إرسال الرفض", exc_info=True)
+
+    async def _execute_alias_command(
+        self,
+        message: discord.Message,
+        command_name: str,
+        arguments: str,
+    ) -> bool:
+        name = str(command_name).strip().lstrip("!/").split()[-1].lower()
+        args = str(arguments or "").strip()
+        if name in {"help", "مساعدة"}:
+            await self._send_command_help(message, f"/{name}")
+            return True
+
+        if name in {"clear", "purge"}:
+            amount = self._first_integer(args)
+            if amount is None or not 1 <= amount <= 100:
+                await message.channel.send("⚠️ الاستخدام: `الاختصار <1-100>`", delete_after=7)
+                return False
+            me = getattr(message.guild, "me", None)
+            if me is not None:
+                permissions = message.channel.permissions_for(me)
+                if not getattr(permissions, "manage_messages", False):
+                    await message.channel.send("❌ البوت لا يملك صلاحية إدارة الرسائل.", delete_after=7)
+                    return False
+            try:
+                deleted = await message.channel.purge(limit=amount)
+            except (discord.Forbidden, discord.HTTPException):
+                await message.channel.send("❌ تعذر حذف الرسائل؛ تحقق من صلاحيات البوت.", delete_after=7)
+                return False
+            return bool(await self._send_alias_action_note(
+                message,
+                f"تم حذف **{len(deleted)}** رسالة من القناة.",
+            ))
+
+        if name in {"lockdown", "unlock", "lock", "قفل"}:
+            lock = name not in {"unlock"} and not args.casefold().split(" ")[0:1] == ["فتح"]
+            if args.casefold() in {"unlock", "false", "0", "فتح"}:
+                lock = False
+            try:
+                overwrite = message.channel.overwrites_for(message.guild.default_role)
+                overwrite.send_messages = False if lock else None
+                overwrite.send_messages_in_threads = False if lock else None
+                await message.channel.set_permissions(
+                    message.guild.default_role,
+                    overwrite=overwrite,
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                await message.channel.send("❌ تعذر تعديل قفل القناة؛ تحقق من صلاحيات البوت.", delete_after=7)
+                return False
+            return await self._send_alias_action_note(
+                message,
+                "تم قفل القناة ومنع الأعضاء من الكتابة."
+                if lock else "تم فتح القناة والسماح بالكتابة.",
+            )
+
+        if name in {"slowmode"}:
+            seconds = self._first_integer(args)
+            if seconds is None or not 0 <= seconds <= 21600:
+                await message.channel.send("⚠️ الاستخدام: `الاختصار <0-21600>`", delete_after=7)
+                return False
+            try:
+                await message.channel.edit(slowmode_delay=seconds)
+            except (discord.Forbidden, discord.HTTPException):
+                await message.channel.send("❌ تعذر تعديل الوضع البطيء.", delete_after=7)
+                return False
+            return await self._send_alias_action_note(
+                message, f"تم ضبط الوضع البطيء إلى `{seconds}` ثانية."
+            )
+
+        if name in {"timeout", "untimeout", "mute", "unmute"}:
+            member = self._member_from_alias_args(message, args)
+            if member is None:
+                await message.channel.send("⚠️ الاستخدام: `الاختصار @العضو [الدقائق]`", delete_after=7)
+                return False
+            if not await self._target_is_actionable(message, member):
+                return False
+            try:
+                if name in {"untimeout", "unmute"}:
+                    await member.timeout(None)
+                    detail = f"تم فك التايم أوت عن {member.mention}."
+                else:
+                    minutes = self._first_integer(args)
+                    if minutes is None or not 1 <= minutes <= 40320:
+                        await message.channel.send("⚠️ الاستخدام: `الاختصار @العضو <الدقائق>`", delete_after=7)
+                        return False
+                    await member.timeout(
+                        discord.utils.utcnow() + __import__("datetime").timedelta(minutes=minutes),
+                        reason=f"Alias by {message.author} ({message.author.id})",
+                    )
+                    detail = f"تم تطبيق تايم أوت على {member.mention} لمدة {minutes} دقيقة."
+            except (discord.Forbidden, discord.HTTPException):
+                await message.channel.send("❌ تعذر تنفيذ التايم أوت؛ تحقق من الصلاحيات.", delete_after=7)
+                return False
+            return await self._send_alias_action_note(message, detail)
+
+        command = self._command_for_target(f"/{name}")
+        required = [
+            parameter
+            for parameter in getattr(command, "parameters", []) or []
+            if getattr(parameter, "required", False)
+        ] if command is not None else []
+        if required:
+            await self._send_command_help(message, f"/{name}")
+            return False
+        return await self._dispatch_command_shortcut(message, f"/{name}")
+
+    @staticmethod
+    def _first_integer(arguments: str) -> int | None:
+        match = re.search(r"\b(\d+)\b", str(arguments or ""))
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _member_from_alias_args(message: discord.Message, arguments: str):
+        mentions = getattr(message, "mentions", []) or []
+        if mentions:
+            return mentions[0]
+        match = re.search(r"\b(\d{15,22})\b", str(arguments or ""))
+        if match:
+            member = message.guild.get_member(int(match.group(1)))
+            if member is not None:
+                return member
+        query = str(arguments or "").strip().casefold()
+        if query:
+            query = re.sub(r"\b\d+\b", "", query).strip()
+            for member in getattr(message.guild, "members", []) or []:
+                if query in {
+                    str(getattr(member, "name", "")).casefold(),
+                    str(getattr(member, "display_name", "")).casefold(),
+                }:
+                    return member
+        return None
+
+    async def _target_is_actionable(self, message, member) -> bool:
+        me = getattr(message.guild, "me", None)
+        if me is not None and getattr(member, "top_role", None) >= getattr(me, "top_role", None):
+            await message.channel.send("❌ رتبة البوت يجب أن تكون أعلى من العضو المستهدف.", delete_after=7)
+            return False
+        if getattr(member, "id", None) == getattr(me, "id", None):
+            await message.channel.send("❌ لا يمكن للبوت تنفيذ هذا الإجراء على نفسه.", delete_after=7)
+            return False
+        return True
+
+    async def _send_alias_action_note(self, message, detail: str) -> bool:
+        # The note is deliberately short; the required tactical confirmation
+        # embed is sent by _send_alias_confirmation after this succeeds.
+        return bool(detail)
+
+    async def _send_alias_confirmation(
+        self,
+        message: discord.Message,
+        alias: str,
+        command_name: str,
+    ) -> None:
+        embed = discord.Embed(
+            title="⚡ تم تنفيذ الأمر بنجاح",
+            description=(
+                f"تم استخدام الاختصار: **{alias}** ➔ تنفيذ أمر "
+                f"**{command_name}** بنجاح بواسطة {message.author.mention}."
+            ),
+            color=0x10B981,
+            timestamp=discord.utils.utcnow(),
+        )
+        try:
+            await message.channel.send(embed=embed, reference=message)
+        except (discord.Forbidden, discord.HTTPException):
+            LOGGER.warning("[COMMAND_ALIAS] تعذر إرسال تأكيد التنفيذ", exc_info=True)
 
     @staticmethod
     def _matches(responder: dict[str, Any], content: str) -> bool:

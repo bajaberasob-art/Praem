@@ -710,6 +710,26 @@ def _command_channels(guild, channel_ids):
     return list(dict.fromkeys(clean)), None
 
 
+def _command_aliases(aliases):
+    if not isinstance(aliases, list) or len(aliases) > 20:
+        return None, "اختر من 0 إلى 20 اختصاراً"
+    clean = []
+    seen = set()
+    for raw in aliases:
+        alias = str(raw or "").strip().lstrip("!/")
+        if (
+            not alias
+            or len(alias) > 80
+            or any(char.isspace() for char in alias)
+        ):
+            return None, "كل اختصار يجب أن يكون كلمة واحدة من 1 إلى 80 حرفاً"
+        key = alias.casefold()
+        if key not in seen:
+            seen.add(key)
+            clean.append(alias)
+    return clean, None
+
+
 @routes.get('/api/guild/{guild_id}/commands')
 async def api_guild_commands(req):
     _, guild = await authorize(req)
@@ -755,8 +775,54 @@ async def api_guild_commands_toggle(req):
         body["enabled"],
         roles,
         channels,
+        body.get("aliases") if "aliases" in body else None,
     )
     return web.json_response({"command": result})
+
+
+@routes.post('/api/guild/{guild_id}/commands/{command_name}/policy')
+async def api_guild_command_policy(req):
+    _, guild = await authorize(req, write=True)
+    utilities = _utilities_cog()
+    if utilities is None:
+        return json_error(503, "utilities_unavailable")
+    if req.content_length and req.content_length > MAX_BODY:
+        return json_error(413, "too_large")
+    try:
+        body = await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    command_name = str(req.match_info.get("command_name", "")).strip().lower()
+    if not command_name or len(command_name) > 100 or any(
+        char.isspace() for char in command_name
+    ):
+        return json_error(400, "validation", fields={"command_name": "اسم الأمر غير صالح"})
+    is_enabled = body.get("is_enabled", body.get("enabled"))
+    if not isinstance(is_enabled, bool):
+        return json_error(400, "validation", fields={"is_enabled": "القيمة يجب أن تكون تشغيل/إيقاف"})
+    roles, role_error = _command_roles(guild, body.get("allowed_roles", []))
+    if role_error:
+        return json_error(400, "validation", fields={"allowed_roles": role_error})
+    channels, channel_error = _command_channels(guild, body.get("allowed_channels", []))
+    if channel_error:
+        return json_error(400, "validation", fields={"allowed_channels": channel_error})
+    aliases, alias_error = _command_aliases(body.get("aliases", []))
+    if alias_error:
+        return json_error(400, "validation", fields={"aliases": alias_error})
+    try:
+        result = await utilities.toggle_command(
+            guild.id,
+            command_name,
+            is_enabled,
+            roles,
+            channels,
+            aliases,
+        )
+    except ValueError as error:
+        return json_error(400, "validation", fields={"aliases": str(error)})
+    return web.json_response({"command": result, "policy": result})
 
 
 @routes.post('/api/guild/{guild_id}/shortcuts')

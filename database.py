@@ -458,6 +458,34 @@ async def init_db() -> None:
                     UNIQUE (guild_id, message_id)
                 );
             """)
+            async with db.execute("PRAGMA table_info(self_role_panels)") as cur:
+                self_role_panel_columns = {row[1] for row in await cur.fetchall()}
+            # The self-role studio predates level-gated panels. Extend its
+            # existing rows instead of replacing the live table or its
+            # role_specs payload.
+            if "min_level" not in self_role_panel_columns:
+                await db.execute(
+                    "ALTER TABLE self_role_panels ADD COLUMN min_level INTEGER NOT NULL DEFAULT 0"
+                )
+            if "color_hex" not in self_role_panel_columns:
+                await db.execute(
+                    "ALTER TABLE self_role_panels ADD COLUMN color_hex TEXT NOT NULL DEFAULT '#5865F2'"
+                )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS self_role_buttons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    panel_id INTEGER NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    emoji TEXT NOT NULL DEFAULT '',
+                    custom_min_level INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_self_role_buttons_panel "
+                "ON self_role_buttons(panel_id, id);"
+            )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_self_role_panels_guild "
                 "ON self_role_panels(guild_id);"
@@ -2314,7 +2342,7 @@ async def get_self_role_panels(guild_id: int) -> list[dict[str, Any]]:
         async with db.execute(
             """
             SELECT id, guild_id, channel_id, message_id, title, description,
-                   color, emoji, role_specs, created_at, updated_at
+                   color, color_hex, emoji, role_specs, min_level, created_at, updated_at
             FROM self_role_panels
             WHERE guild_id = ?
             ORDER BY id DESC
@@ -2330,6 +2358,156 @@ async def get_self_role_panels(guild_id: int) -> list[dict[str, Any]]:
                     item["role_specs"] = []
                 rows.append(item)
             return rows
+
+
+async def create_self_role_panel(
+    guild_id: int,
+    channel_id: int,
+    title: str,
+    description: str,
+    min_level: int = 0,
+    color_hex: str = "#5865F2",
+) -> dict[str, Any]:
+    """Create a level-gated panel before its Discord message is published."""
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO self_role_panels
+                (guild_id, channel_id, message_id, title, description,
+                 min_level, color, color_hex, emoji, role_specs)
+            VALUES (?, ?, 0, ?, ?, ?, ?, ?, '', '[]')
+            RETURNING id, guild_id, channel_id, message_id, title, description,
+                      min_level, color_hex, created_at
+            """,
+            (
+                int(guild_id),
+                int(channel_id),
+                str(title)[:256],
+                str(description)[:4000],
+                max(0, int(min_level)),
+                str(color_hex).upper(),
+                str(color_hex).upper(),
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+        return dict(row) if row else {}
+
+
+async def add_panel_button(
+    panel_id: int,
+    role_id: int,
+    label: str,
+    emoji: str = "",
+    custom_min_level: int = 0,
+) -> dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO self_role_buttons
+                (panel_id, role_id, label, emoji, custom_min_level)
+            VALUES (?, ?, ?, ?, ?)
+            RETURNING id, panel_id, role_id, label, emoji, custom_min_level
+            """,
+            (
+                int(panel_id),
+                int(role_id),
+                str(label)[:100],
+                str(emoji or "")[:100],
+                max(0, int(custom_min_level)),
+            ),
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+        return dict(row) if row else {}
+
+
+async def get_panel_with_buttons(panel_id: int) -> Optional[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, channel_id, message_id, title, description,
+                   min_level, color_hex, color, emoji, role_specs, created_at, updated_at
+            FROM self_role_panels
+            WHERE id = ?
+            """,
+            (int(panel_id),),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        panel = dict(row)
+        async with db.execute(
+            """
+            SELECT id, panel_id, role_id, label, emoji, custom_min_level
+            FROM self_role_buttons
+            WHERE panel_id = ?
+            ORDER BY id
+            """,
+            (int(panel_id),),
+        ) as cur:
+            buttons = [dict(item) for item in await cur.fetchall()]
+    # Preserve the old studio's role_specs panels while new buttons are
+    # introduced. This keeps existing deployed panels interactive.
+    if not buttons:
+        try:
+            legacy_specs = json.loads(panel.get("role_specs") or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            legacy_specs = []
+        buttons = [
+            {
+                "id": 0,
+                "panel_id": int(panel["id"]),
+                "role_id": int(spec["id"]),
+                "label": str(spec.get("label") or ""),
+                "emoji": str(spec.get("emoji") or ""),
+                "custom_min_level": 0,
+            }
+            for spec in legacy_specs
+            if isinstance(spec, dict) and str(spec.get("id", "")).isdigit()
+        ]
+    panel["buttons"] = buttons
+    panel["min_level"] = max(0, int(panel.get("min_level") or 0))
+    return panel
+
+
+async def get_guild_panels(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT id FROM self_role_panels WHERE guild_id = ? ORDER BY id DESC",
+            (int(guild_id),),
+        ) as cur:
+            ids = [int(row["id"]) for row in await cur.fetchall()]
+    panels = []
+    for panel_id in ids:
+        panel = await get_panel_with_buttons(panel_id)
+        if panel:
+            panels.append(panel)
+    return panels
+
+
+async def update_panel_message_id(panel_id: int, message_id: int) -> Optional[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            "UPDATE self_role_panels SET message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (int(message_id), int(panel_id)),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT id, guild_id, channel_id, message_id, title, description, "
+            "min_level, color_hex, created_at FROM self_role_panels WHERE id = ?",
+            (int(panel_id),),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def delete_panel(panel_id: int) -> bool:
+    async with connect() as db:
+        await db.execute("DELETE FROM self_role_buttons WHERE panel_id = ?", (int(panel_id),))
+        cursor = await db.execute("DELETE FROM self_role_panels WHERE id = ?", (int(panel_id),))
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 def _json_ids(value: Any) -> list[str]:

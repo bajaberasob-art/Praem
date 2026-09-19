@@ -66,6 +66,7 @@ CACHE_TTL = 60.0
 CACHE_MAX = 1024
 _settings_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict()
 _stats_cache: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = OrderedDict()
+COMMAND_CACHE: Dict[int, Dict[str, Dict[str, Any]]] = {}
 _guild_locks: Dict[int, asyncio.Lock] = {}
 _db_semaphore: Optional[asyncio.Semaphore] = None
 
@@ -451,6 +452,33 @@ async def init_db() -> None:
                 "ON guild_command_controls(guild_id);"
             )
             await db.execute("""
+                CREATE TABLE IF NOT EXISTS command_policies (
+                    guild_id INTEGER NOT NULL,
+                    command_name TEXT NOT NULL,
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    aliases TEXT NOT NULL DEFAULT '[]',
+                    allowed_roles TEXT NOT NULL DEFAULT '[]',
+                    allowed_channels TEXT NOT NULL DEFAULT '[]',
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, command_name)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_policies_guild "
+                "ON command_policies(guild_id);"
+            )
+            # Preserve policies created by older dashboard versions while
+            # making command_policies the canonical store for new writes.
+            await db.execute("""
+                INSERT INTO command_policies
+                    (guild_id, command_name, is_enabled, aliases,
+                     allowed_roles, allowed_channels, updated_at)
+                SELECT guild_id, command_name, enabled, '[]',
+                       allowed_roles, allowed_channels, updated_at
+                FROM guild_command_controls
+                ON CONFLICT(guild_id, command_name) DO NOTHING
+            """)
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS guild_auto_responders (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER NOT NULL,
@@ -664,6 +692,7 @@ async def init_db() -> None:
         raise
     _settings_cache.clear()
     _stats_cache.clear()
+    COMMAND_CACHE.clear()
 
 
 # -------------------------------------------------------------
@@ -1664,25 +1693,78 @@ def _json_ids(value: Any) -> list[str]:
     return [str(item) for item in value if str(item).isdigit()]
 
 
+def _json_aliases(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value = value.split(",")
+    if not isinstance(value, list):
+        return []
+    result = []
+    seen = set()
+    for item in value:
+        alias = str(item or "").strip().lstrip("!/")
+        if not alias or len(alias) > 80 or any(char.isspace() for char in alias):
+            continue
+        key = alias.casefold()
+        if key not in seen:
+            seen.add(key)
+            result.append(alias)
+    return result[:20]
+
+
 async def get_command_controls(guild_id: int) -> dict[str, dict[str, Any]]:
+    """Compatibility wrapper for the canonical command policy cache."""
+    return await get_command_policies(guild_id)
+
+
+async def get_command_policies(
+    guild_id: int,
+    *,
+    refresh: bool = False,
+) -> dict[str, dict[str, Any]]:
+    guild_id = int(guild_id)
+    if not refresh and guild_id in COMMAND_CACHE:
+        return {
+            name: {**policy, "allowed_roles": list(policy["allowed_roles"]),
+                   "allowed_channels": list(policy["allowed_channels"]),
+                   "aliases": list(policy["aliases"])}
+            for name, policy in COMMAND_CACHE[guild_id].items()
+        }
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
             """
-            SELECT command_name, enabled, allowed_roles, allowed_channels, updated_at
-            FROM guild_command_controls
+            SELECT command_name, is_enabled, aliases, allowed_roles,
+                   allowed_channels, updated_at
+            FROM command_policies
             WHERE guild_id = ?
             ORDER BY command_name
             """,
-            (int(guild_id),),
+            (guild_id,),
         ) as cur:
             result = {}
             for row in await cur.fetchall():
                 item = dict(row)
-                item["enabled"] = bool(item["enabled"])
+                item["enabled"] = bool(item.pop("is_enabled"))
+                item["aliases"] = _json_aliases(item.get("aliases"))
                 item["allowed_roles"] = _json_ids(item["allowed_roles"])
                 item["allowed_channels"] = _json_ids(item["allowed_channels"])
                 result[item["command_name"]] = item
-            return result
+    COMMAND_CACHE[guild_id] = result
+    return {
+        name: {**policy, "allowed_roles": list(policy["allowed_roles"]),
+               "allowed_channels": list(policy["allowed_channels"]),
+               "aliases": list(policy["aliases"])}
+        for name, policy in result.items()
+    }
+
+
+def invalidate_command_cache(guild_id: Optional[int] = None) -> None:
+    if guild_id is None:
+        COMMAND_CACHE.clear()
+    else:
+        COMMAND_CACHE.pop(int(guild_id), None)
 
 
 async def save_command_control(
@@ -1692,32 +1774,91 @@ async def save_command_control(
     allowed_roles: list[int | str] | None = None,
     allowed_channels: list[int | str] | None = None,
 ) -> dict[str, Any]:
+    """Compatibility wrapper that preserves aliases already on the policy."""
+    return await save_command_policy(
+        guild_id,
+        command_name,
+        enabled,
+        allowed_roles=allowed_roles,
+        allowed_channels=allowed_channels,
+    )
+
+
+async def save_command_policy(
+    guild_id: int,
+    command_name: str,
+    enabled: bool,
+    allowed_roles: list[int | str] | None = None,
+    allowed_channels: list[int | str] | None = None,
+    aliases: list[str] | None = None,
+) -> dict[str, Any]:
+    guild_id = int(guild_id)
+    name = str(command_name).strip().lower()
     roles = [str(role_id) for role_id in (allowed_roles or []) if str(role_id).isdigit()]
     channels = [str(channel_id) for channel_id in (allowed_channels or []) if str(channel_id).isdigit()]
+    if allowed_roles is None or allowed_channels is None or aliases is None:
+        async with connect(aiosqlite.Row) as db:
+            async with db.execute(
+                """
+                SELECT aliases, allowed_roles, allowed_channels
+                FROM command_policies
+                WHERE guild_id = ? AND command_name = ?
+                """,
+                (guild_id, name),
+            ) as cur:
+                existing = await cur.fetchone()
+        if existing:
+            if allowed_roles is None:
+                roles = _json_ids(existing["allowed_roles"])
+            if allowed_channels is None:
+                channels = _json_ids(existing["allowed_channels"])
+            if aliases is None:
+                aliases = _json_aliases(existing["aliases"])
+    normalized_aliases = _json_aliases(aliases or [])
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
-            INSERT INTO guild_command_controls
-                (guild_id, command_name, enabled, allowed_roles, allowed_channels, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO command_policies
+                (guild_id, command_name, is_enabled, aliases,
+                 allowed_roles, allowed_channels, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(guild_id, command_name) DO UPDATE SET
-                enabled = excluded.enabled,
+                is_enabled = excluded.is_enabled,
+                aliases = excluded.aliases,
                 allowed_roles = excluded.allowed_roles,
                 allowed_channels = excluded.allowed_channels,
                 updated_at = CURRENT_TIMESTAMP
+            RETURNING command_name, is_enabled, aliases, allowed_roles,
+                      allowed_channels, updated_at
             """,
             (
-                int(guild_id),
-                str(command_name).strip().lower(),
+                guild_id,
+                name,
                 int(bool(enabled)),
+                json.dumps(normalized_aliases, ensure_ascii=False),
                 json.dumps(roles, ensure_ascii=False),
                 json.dumps(channels, ensure_ascii=False),
             ),
         )
+        row = await cursor.fetchone()
         await db.commit()
-    return {
-        "command_name": str(command_name).strip().lower(),
+    item = dict(row) if row else {
+        "command_name": name,
+        "is_enabled": int(bool(enabled)),
+        "aliases": json.dumps(normalized_aliases, ensure_ascii=False),
+        "allowed_roles": json.dumps(roles),
+        "allowed_channels": json.dumps(channels),
+    }
+    result = {
+        "command_name": name,
         "enabled": bool(enabled),
+        "aliases": _json_aliases(item.get("aliases")),
+        "allowed_roles": _json_ids(item.get("allowed_roles")),
+        "allowed_channels": _json_ids(item.get("allowed_channels")),
+        "updated_at": item.get("updated_at"),
+    }
+    COMMAND_CACHE.setdefault(guild_id, {})[name] = result
+    return result
         "allowed_roles": roles,
         "allowed_channels": channels,
     }

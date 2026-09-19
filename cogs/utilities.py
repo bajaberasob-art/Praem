@@ -14,12 +14,14 @@ from discord.ext import commands
 from database import (
     get_auto_responders,
     get_command_controls,
+    get_command_policies,
     get_guild_settings,
     get_shortcuts,
     delete_auto_responder,
     record_auto_responder_execution,
     save_auto_responder,
     save_command_control,
+    save_command_policy,
     save_shortcut,
 )
 from interaction_runtime import InteractionProxy, defer_if_needed
@@ -336,6 +338,7 @@ class Utilities(commands.Cog):
         enabled: bool,
         allowed_roles: list[int | str] | None = None,
         allowed_channels: list[int | str] | None = None,
+        aliases: list[str] | None = None,
     ) -> dict[str, Any]:
         """Persist and publish a command's enabled/role policy."""
         name = str(command_name).strip().lower()
@@ -347,7 +350,25 @@ class Utilities(commands.Cog):
         channels = [str(channel_id) for channel_id in (allowed_channels or []) if str(channel_id).isdigit()]
         if len(channels) > 25:
             raise ValueError("allowed_channels cannot contain more than 25 channels")
-        result = await save_command_control(guild_id, name, bool(enabled), roles, channels)
+        if aliases is not None:
+            aliases = [
+                str(alias).strip().lstrip("!/")
+                for alias in aliases
+                if str(alias).strip()
+            ]
+            if len(aliases) > 20 or any(
+                len(alias) > 80 or any(char.isspace() for char in alias)
+                for alias in aliases
+            ):
+                raise ValueError("aliases must contain up to 20 single words")
+        result = await save_command_policy(
+            guild_id,
+            name,
+            bool(enabled),
+            allowed_roles=roles,
+            allowed_channels=channels,
+            aliases=aliases,
+        )
         self.command_controls.setdefault(int(guild_id), {})[name] = result
         return result
 

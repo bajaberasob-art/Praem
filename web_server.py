@@ -49,6 +49,7 @@ DASHBOARD_BASE_PATH = os.getenv("DASHBOARD_BASE_PATH", "/").rstrip("/") + "/"
 DISCORD_API = "https://discord.com/api/v10"
 ADMIN_BIT = 0x8
 BOT_INVITE_PERMISSIONS = os.getenv("BOT_INVITE_PERMISSIONS", "8")
+DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
 SESSIONS: dict[str, dict] = {}
 STATES: dict[str, float] = {}
 STATE_TTL, SESSION_TTL = 300, 604800
@@ -82,7 +83,7 @@ def bot_invite_url() -> str | None:
     if not C_ID:
         return None
     return (
-        f"{DISCORD_API}/oauth2/authorize?"
+        f"{DISCORD_AUTHORIZE}?"
         f"{urlencode({'client_id': C_ID, 'scope': 'bot applications.commands', 'permissions': BOT_INVITE_PERMISSIONS})}"
     )
 
@@ -115,7 +116,7 @@ async def login(req):
         "response_type": "code", "scope": "identify guilds",
         "state": state, "prompt": "none",
     })
-    response = web.HTTPFound(f"{DISCORD_API}/oauth2/authorize?{query}")
+    response = web.HTTPFound(f"{DISCORD_AUTHORIZE}?{query}")
     response.set_cookie(
         "oauth_state", state, max_age=STATE_TTL, httponly=True,
         secure=True, samesite="Lax", path="/",

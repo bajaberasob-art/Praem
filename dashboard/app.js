@@ -2973,6 +2973,79 @@
       ),
     );
     commandPanel.id = "command-panel";
+    const responderRoles = state.autoResponderMeta?.roles || studio.roles || [];
+    const responderEmojis = state.autoResponderMeta?.emojis || [];
+    const targetScope = el(
+      "div",
+      { class: "auto-target-panel" },
+      el("label", { text: "نطاق الاستهداف (Target Scope)" }),
+      el(
+        "select",
+        { name: "target_type", class: "studio-input" },
+        el("option", { value: "everyone" }, "الجميع (Everyone)"),
+        el("option", { value: "role" }, "رتبة مخصصة (By Role)"),
+        el("option", { value: "user" }, "عضو محدد (Specific Member)"),
+      ),
+      el(
+        "label",
+        { class: "auto-role-target", hidden: true },
+        "الرتبة المستهدفة",
+        el(
+          "select",
+          { name: "target_role_id", class: "studio-input" },
+          el("option", { value: "" }, "اختر رتبة"),
+          responderRoles.map((role) => el("option", { value: role.id }, `@${role.name}`)),
+        ),
+      ),
+      el(
+        "label",
+        { class: "auto-user-target", hidden: true },
+        "معرف العضو",
+        el("input", {
+          name: "target_user_id",
+          class: "studio-input",
+          inputmode: "numeric",
+          placeholder: "مثال: 123456789012345678",
+        }),
+      ),
+    );
+    const reactionInput = el("input", {
+      name: "reaction_emoji",
+      class: "studio-input",
+      maxlength: "100",
+      placeholder: "اكتب إيموجي عادي مثل 👍 أو اختر من إيموجيات السيرفر",
+    });
+    const reactionPicker = el(
+      "div",
+      { class: "auto-reaction-panel" },
+      el("label", { text: "إيموجي التفاعل (Reaction Emoji)" }),
+      reactionInput,
+      el(
+        "div",
+        { class: "emoji-picker-chips", "aria-label": "إيموجيات السيرفر" },
+        responderEmojis.length
+          ? responderEmojis.map((emoji) => {
+              const token = emoji.token || `<${emoji.animated ? "a" : ""}:${emoji.name}:${emoji.id}>`;
+              return el(
+                "button",
+                {
+                  class: "emoji-picker-chip",
+                  type: "button",
+                  "data-reaction-chip": token,
+                  title: emoji.name,
+                  onClick: (event) => {
+                    reactionInput.value = token;
+                    reactionPicker.querySelectorAll("[data-reaction-chip]").forEach((item) => item.classList.remove("active"));
+                    event.currentTarget.classList.add("active");
+                  },
+                },
+                el("img", { src: emoji.url, alt: emoji.name }),
+                el("span", { text: emoji.name }),
+              );
+            })
+          : [el("small", { class: "hint", text: "لا توجد إيموجيات مخصصة متاحة" })],
+      ),
+    );
     const form = el("form", { id: "auto-responder-form", class: "auto-form" },
       el("div", { class: "auto-form-heading" },
         el("div", { class: "eyebrow", text: "TRIGGER ENGINE" }),
@@ -3021,6 +3094,8 @@
           ),
         ),
       ),
+      targetScope,
+      reactionPicker,
       el("div", { class: "auto-form-actions" },
         el("button", { class: "btn primary", type: "submit", text: "حفظ القاعدة" }),
         el("button", { class: "btn ghost", type: "button", text: "مسح", onClick: () => setRuleForm() }),
@@ -3046,6 +3121,11 @@
     };
     form.elements.trigger.oninput = updateAutoPreview;
     form.elements.response.oninput = updateAutoPreview;
+    form.elements.target_type.onchange = () => updateAutoTargetFields(form);
+    reactionInput.oninput = () => reactionPicker.querySelectorAll("[data-reaction-chip]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.reactionChip === reactionInput.value.trim());
+    });
+    updateAutoTargetFields(form);
     updateAutoPreview();
     form.elements.cooldown_seconds.oninput = () => {
       form.querySelector(".range-output").textContent = `${form.elements.cooldown_seconds.value}s`;

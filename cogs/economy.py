@@ -259,6 +259,7 @@ class Economy(commands.Cog):
         if self.check_cd(f"xp_{msg.author.id}", 60) > 0:
             return
 
+        before = await get_or_create_user(msg.author.id, msg.guild.id)
         leveled_up, level = await add_xp(
             msg.author.id,
             msg.guild.id,
@@ -266,6 +267,9 @@ class Economy(commands.Cog):
         )
         await self._leaderboard_changed(msg.guild.id)
         if leveled_up:
+            await self._apply_level_rewards(
+                msg.author, int(before["level"]), int(level)
+            )
             await msg.channel.send(
                 f"🎊 مبارك {msg.author.mention}! ارتقيت إلى المستوى "
                 f"**{level}**! 🚀",
@@ -477,6 +481,110 @@ class Economy(commands.Cog):
         await send(embed=embed)
         await self._leaderboard_changed(guild.id)
 
+    @app_commands.command(name="give_points", description="إضافة نقاط إلى محفظة عضو")
+    async def give_points(
+        self,
+        itx: discord.Interaction,
+        member: discord.Member,
+        amount: int,
+    ):
+        if not await self._admin_check(itx):
+            return
+        await self._admin_balance_action(
+            itx.guild, itx.user, member, amount, True, itx.response.send_message
+        )
+
+    @app_commands.command(name="take_points", description="خصم نقاط من محفظة عضو")
+    async def take_points(
+        self,
+        itx: discord.Interaction,
+        member: discord.Member,
+        amount: int,
+    ):
+        if not await self._admin_check(itx):
+            return
+        await self._admin_balance_action(
+            itx.guild, itx.user, member, amount, False, itx.response.send_message
+        )
+
+    @app_commands.command(name="give_level", description="ترقية مستوى عضو")
+    async def give_level(
+        self,
+        itx: discord.Interaction,
+        member: discord.Member,
+        levels: int,
+    ):
+        if not await self._admin_check(itx):
+            return
+        await self._admin_level_action(
+            itx.guild, itx.user, member, levels, True, itx.response.send_message
+        )
+
+    @app_commands.command(name="take_level", description="تنزيل مستوى عضو")
+    async def take_level(
+        self,
+        itx: discord.Interaction,
+        member: discord.Member,
+        levels: int,
+    ):
+        if not await self._admin_check(itx):
+            return
+        await self._admin_level_action(
+            itx.guild, itx.user, member, levels, False, itx.response.send_message
+        )
+
+    @commands.command(name="اعطاء_نقاط", aliases=["give-points"])
+    async def give_points_text(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        amount: int,
+    ):
+        if not ctx.guild or not await self._is_economy_support(ctx.author):
+            return await ctx.send("⛔ هذا الإجراء متاح للإدارة أو أدوار دعم الاقتصاد فقط.")
+        await self._admin_balance_action(
+            ctx.guild, ctx.author, member, amount, True, ctx.send
+        )
+
+    @commands.command(name="سحب_نقاط", aliases=["take-points"])
+    async def take_points_text(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        amount: int,
+    ):
+        if not ctx.guild or not await self._is_economy_support(ctx.author):
+            return await ctx.send("⛔ هذا الإجراء متاح للإدارة أو أدوار دعم الاقتصاد فقط.")
+        await self._admin_balance_action(
+            ctx.guild, ctx.author, member, amount, False, ctx.send
+        )
+
+    @commands.command(name="ترقية_مستوى", aliases=["give-level"])
+    async def give_level_text(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        levels: int,
+    ):
+        if not ctx.guild or not await self._is_economy_support(ctx.author):
+            return await ctx.send("⛔ هذا الإجراء متاح للإدارة أو أدوار دعم الاقتصاد فقط.")
+        await self._admin_level_action(
+            ctx.guild, ctx.author, member, levels, True, ctx.send
+        )
+
+    @commands.command(name="تنزيل_مستوى", aliases=["take-level"])
+    async def take_level_text(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        levels: int,
+    ):
+        if not ctx.guild or not await self._is_economy_support(ctx.author):
+            return await ctx.send("⛔ هذا الإجراء متاح للإدارة أو أدوار دعم الاقتصاد فقط.")
+        await self._admin_level_action(
+            ctx.guild, ctx.author, member, levels, False, ctx.send
+        )
+
     @app_commands.command(name="work", description="العمل وكسب المال")
     async def work(self, itx: discord.Interaction):
         left = self.check_cd(f"work_{itx.user.id}", 300)
@@ -493,6 +601,7 @@ class Economy(commands.Cog):
             earned,
             "balance",
         )
+        await self._leaderboard_changed(itx.guild.id)
         await itx.response.send_message(
             f"💼 أتممت عملاً شاقاً وحصلت على **{earned:,}** عملة نقدية."
         )
@@ -517,6 +626,7 @@ class Economy(commands.Cog):
         await itx.response.send_message(
             f"💸 تم تحويل **{amount:,}** عملة إلى {target.mention}.",
         )
+        await self._leaderboard_changed(itx.guild.id)
 
     @app_commands.command(name="leaderboard", description="عرض المتصدرين في اقتصاد السيرفر")
     async def leaderboard(self, itx: discord.Interaction):
@@ -565,6 +675,7 @@ class Economy(commands.Cog):
         await itx.response.send_message(
             f"🏦 تم إيداع **{amount:,}** عملة في البنك بأمان."
         )
+        await self._leaderboard_changed(itx.guild.id)
 
     @app_commands.command(name="withdraw", description="سحب أموال من البنك")
     async def withdraw(self, itx: discord.Interaction, amount: int):
@@ -587,6 +698,7 @@ class Economy(commands.Cog):
         await itx.response.send_message(
             f"💵 تم سحب **{amount:,}** عملة كاش إلى محفظتك."
         )
+        await self._leaderboard_changed(itx.guild.id)
 
     @app_commands.command(
         name="rob",
@@ -628,6 +740,7 @@ class Economy(commands.Cog):
                 f"🥷 نجحت بالسطو على {target.mention} وسرقت "
                 f"**{stolen:,}** عملة!"
             )
+            await self._leaderboard_changed(itx.guild.id)
         else:
             robber = await get_or_create_user(itx.user.id, itx.guild.id)
             penalty = min(200, robber["balance"])
@@ -640,6 +753,7 @@ class Economy(commands.Cog):
             await itx.response.send_message(
                 f"🚔 كشفتك الشرطة! تم تغريمك **{penalty:,}** عملة كاش وتعويضها."
             )
+            await self._leaderboard_changed(itx.guild.id)
 
     @app_commands.command(
         name="giveaway",

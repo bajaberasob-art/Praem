@@ -50,3 +50,15 @@ DASHBOARD_PORT = "8099"
 CLIENT_ID = "1550042204091715634"
 REDIRECT_URI = "https://606ace4b-80f4-436d-a16c-4b91959eec01-00-1btltnca2drwt.pike.replit.dev/api/dashboard/api/auth/callback"
 DASHBOARD_BASE_PATH = "/api/dashboard/"
+
+[[ports]]
+localPort = 8080
+externalPort = 80
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 8099
+externalPort = 8099

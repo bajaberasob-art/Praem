@@ -21,12 +21,29 @@ from database import (
 logger = logging.getLogger("AnalyticsCog")
 
 COLORS = {
+    "log_sanctions": (0xDC2626, "⚔️ سجل العقوبات"),
+    "log_violations": (0xEAB308, "⚠️ سجل المخالفات"),
+    "log_automod": (0xF97316, "🛡️ سجل Auto-Mod"),
+    "log_ticket": (0x14B8A6, "🎫 سجل التذاكر"),
+    "log_channel": (0x10B981, "📁 سجل القنوات"),
+    "log_server": (0x3B82F6, "🏰 سجل السيرفر"),
+    "log_member": (0x22C55E, "👤 سجل الأعضاء"),
+    "log_message": (0xEF4444, "💬 سجل الرسائل"),
+    "log_react": (0xEC4899, "👍 سجل التفاعلات"),
+    "log_roles": (0x8B5CF6, "🎭 سجل الرتب والصلاحيات"),
+    "log_voice": (0x06B6D4, "🎙️ سجل النشاط الصوتي"),
+    # Legacy names remain valid for existing listeners and integrations.
     "log_messages": (0xEF4444, "🗑️ حذف رسالة"),
-    "log_roles": (0x8B5CF6, "🛡️ تغيير رتبة أو صلاحية"),
     "log_channels": (0x10B981, "📁 نشاط القنوات"),
     "log_moderation": (0xDC2626, "⚔️ إجراء إداري"),
     "log_warnings": (0xEAB308, "⚠️ إنذار إداري"),
-    "log_voice": (0x06B6D4, "🎙️ نشاط صوتي"),
+}
+
+CATEGORY_ALIASES = {
+    "log_messages": "log_message",
+    "log_channels": "log_channel",
+    "log_moderation": "log_sanctions",
+    "log_warnings": "log_violations",
 }
 
 
@@ -103,7 +120,9 @@ class Analytics(commands.Cog):
         *,
         strict: bool = False,
     ) -> bool:
-        route = (await self._routing(guild)).get(category, 0)
+        canonical = CATEGORY_ALIASES.get(category, category)
+        routing = await self._routing(guild)
+        route = routing.get(canonical, routing.get(category, 0))
         channel = guild.get_channel(int(route)) if route else None
         if channel is None or not hasattr(channel, "send"):
             return False
@@ -447,6 +466,99 @@ class Analytics(commands.Cog):
                 ("📊 الإجمالي الحالي", str(total), True),
                 ("🧾 المنفذ", getattr(moderator, "mention", "غير معروف"), True),
                 ("📌 السبب", reason, False),
+            ],
+        )
+
+    async def log_automod(self, guild, title, description, *, actor=None, fields=None, color=None):
+        """Additive bridge for the existing Auto-Mod logger."""
+        await self._log(
+            guild,
+            "log_automod",
+            title,
+            description,
+            author=actor or guild.me,
+            fields=fields,
+            color=color or COLORS["log_automod"][0],
+        )
+
+    async def log_ticket_event(self, guild, title, description, *, actor=None, fields=None, color=None):
+        """Additive bridge used by ticket operations without replacing ticket storage."""
+        await self._log(
+            guild,
+            "log_ticket",
+            title,
+            description,
+            author=actor or guild.me,
+            fields=fields,
+            color=color or COLORS["log_ticket"][0],
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_update_audit(self, before: discord.Guild, after: discord.Guild):
+        changes = []
+        for label, old, new in (
+            ("الاسم", before.name, after.name),
+            ("الوصف", getattr(before, "description", None), getattr(after, "description", None)),
+            ("مستوى التحقق", getattr(before, "verification_level", None), getattr(after, "verification_level", None)),
+        ):
+            if old != new:
+                changes.append(f"{label}: `{old}` → `{new}`")
+        if changes:
+            entry = await self._audit(after, discord.AuditLogAction.guild_update)
+            await self._log(
+                after,
+                "log_server",
+                "🏰 تعديل إعدادات السيرفر",
+                "تم تحديث إعدادات السيرفر.",
+                author=getattr(entry, "user", None) or after.me,
+                fields=[
+                    ("📝 التغييرات", "\n".join(changes), False),
+                    ("🧾 المنفذ", getattr(getattr(entry, "user", None), "mention", "غير معروف"), True),
+                ],
+            )
+
+    @commands.Cog.listener()
+    async def on_member_join_audit(self, member: discord.Member):
+        await self._log(
+            member.guild,
+            "log_member",
+            "🟢 انضمام عضو",
+            "انضم عضو جديد إلى السيرفر.",
+            author=member,
+            thumbnail=_avatar(member),
+            fields=[("👤 العضو", f"{member.mention} (`{member.id}`)", True)],
+        )
+
+    @commands.Cog.listener()
+    async def on_member_remove_audit(self, member: discord.Member):
+        await self._log(
+            member.guild,
+            "log_member",
+            "🔴 مغادرة عضو",
+            "غادر عضو السيرفر أو تمت إزالته.",
+            author=member,
+            thumbnail=_avatar(member),
+            fields=[("👤 العضو", f"{member.mention} (`{member.id}`)", True)],
+        )
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add_audit(self, payload: discord.RawReactionActionEvent):
+        if not payload.guild_id or payload.user_id == getattr(self.bot.user, "id", None):
+            return
+        guild = self.bot.get_guild(payload.guild_id)
+        member = guild.get_member(payload.user_id) if guild else None
+        if guild is None:
+            return
+        await self._log(
+            guild,
+            "log_react",
+            "👍 إضافة تفاعل",
+            "أضاف عضو تفاعلاً إلى رسالة.",
+            author=member or guild.me,
+            fields=[
+                ("👤 العضو", f"<@{payload.user_id}> (`{payload.user_id}`)", True),
+                ("💬 الرسالة", f"`{payload.message_id}`", True),
+                ("😀 التفاعل", str(payload.emoji), True),
             ],
         )
 

@@ -102,7 +102,7 @@ def create_elite_log_embed(
 
 
 class Analytics(commands.Cog):
-    """Enterprise audit dispatcher with six independent channel routes."""
+    """Enterprise audit dispatcher with eleven independent channel routes."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -128,8 +128,10 @@ class Analytics(commands.Cog):
             return False
         try:
             me = guild.me
-            if me and not channel.permissions_for(me).send_messages:
-                return False
+            if me:
+                permissions = channel.permissions_for(me)
+                if not permissions.send_messages or not permissions.embed_links:
+                    return False
             await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
             return True
         except (discord.Forbidden, discord.HTTPException):

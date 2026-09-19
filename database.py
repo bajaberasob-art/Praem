@@ -696,6 +696,41 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_reminders_due "
                 "ON reminders(status, due_at);"
             )
+            # Gaming & esports additions are intentionally isolated from the
+            # existing tournament, giveaway, and ticket tables.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS scrim_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER,
+                    channel_id INTEGER,
+                    title TEXT,
+                    game_type TEXT,
+                    team_size INTEGER,
+                    max_slots INTEGER,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS scrim_registrations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scrim_id INTEGER,
+                    slot_number INTEGER,
+                    team_name TEXT,
+                    leader_id INTEGER,
+                    members_json TEXT,
+                    checked_in INTEGER DEFAULT 0,
+                    UNIQUE(scrim_id, slot_number)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scrim_configs_guild_active "
+                "ON scrim_configs(guild_id, is_active);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scrim_registrations_scrim "
+                "ON scrim_registrations(scrim_id, slot_number);"
+            )
             await _ensure_canonical_views(db)
 
             await db.commit()
@@ -1444,6 +1479,256 @@ async def get_open_tournaments() -> list[Dict[str, Any]]:
             """
         ) as cur:
             return [dict(row) for row in await cur.fetchall()]
+
+
+async def create_scrim_config(
+    guild_id: int,
+    channel_id: int,
+    title: str,
+    game_type: str,
+    team_size: int,
+    max_slots: int,
+) -> Dict[str, Any]:
+    """Create an independent scrim lobby configuration."""
+    team_size = max(1, min(int(team_size), 16))
+    max_slots = max(1, min(int(max_slots), 128))
+    async with connect(aiosqlite.Row) as db:
+        cur = await db.execute(
+            """
+            INSERT INTO scrim_configs
+                (guild_id, channel_id, title, game_type, team_size, max_slots)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                int(channel_id),
+                str(title).strip()[:150],
+                str(game_type).strip()[:80],
+                team_size,
+                max_slots,
+            ),
+        )
+        scrim_id = int(cur.lastrowid)
+        await db.commit()
+        async with db.execute(
+            "SELECT * FROM scrim_configs WHERE id = ?", (scrim_id,)
+        ) as row_cursor:
+            row = await row_cursor.fetchone()
+    return dict(row)
+
+
+async def get_active_scrims(guild_id: int) -> list[Dict[str, Any]]:
+    """Return active scrims with occupancy and roster data for the dashboard."""
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT c.*,
+                   COUNT(r.id) AS occupied_slots,
+                   COALESCE(
+                     json_group_array(
+                       CASE WHEN r.id IS NULL THEN NULL ELSE json_object(
+                         'id', r.id,
+                         'slot_number', r.slot_number,
+                         'team_name', r.team_name,
+                         'leader_id', r.leader_id,
+                         'members_json', r.members_json,
+                         'checked_in', r.checked_in
+                       ) END
+                     ),
+                     '[]'
+                   ) AS registrations_json
+            FROM scrim_configs AS c
+            LEFT JOIN scrim_registrations AS r ON r.scrim_id = c.id
+            WHERE c.guild_id = ? AND c.is_active = 1
+            GROUP BY c.id
+            ORDER BY c.created_at DESC, c.id DESC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            rows = [dict(row) for row in await cur.fetchall()]
+    for row in rows:
+        registrations = []
+        try:
+            raw = json.loads(row.pop("registrations_json") or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raw = []
+        for item in raw if isinstance(raw, list) else []:
+            if not isinstance(item, dict) or item.get("id") is None:
+                continue
+            try:
+                item["members"] = json.loads(item.pop("members_json") or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                item["members"] = []
+            item["checked_in"] = bool(item.get("checked_in"))
+            registrations.append(item)
+        row["occupied_slots"] = int(row.get("occupied_slots") or 0)
+        row["registrations"] = registrations
+    return rows
+
+
+async def get_scrims(guild_id: int) -> list[Dict[str, Any]]:
+    """Return active and closed scrims using the same dashboard payload shape."""
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT id FROM scrim_configs WHERE guild_id = ? ORDER BY id DESC",
+            (int(guild_id),),
+        ) as cur:
+            ids = [int(row[0]) for row in await cur.fetchall()]
+    # Keep one response contract and avoid duplicating roster decoding logic.
+    result = []
+    for scrim_id in ids:
+        async with connect(aiosqlite.Row) as db:
+            async with db.execute(
+                """
+                SELECT c.*, COUNT(r.id) AS occupied_slots
+                FROM scrim_configs c
+                LEFT JOIN scrim_registrations r ON r.scrim_id = c.id
+                WHERE c.id = ? GROUP BY c.id
+                """,
+                (scrim_id,),
+            ) as cur:
+                row = await cur.fetchone()
+            if row is None:
+                continue
+            item = dict(row)
+            async with db.execute(
+                """
+                SELECT id, slot_number, team_name, leader_id,
+                       members_json, checked_in
+                FROM scrim_registrations
+                WHERE scrim_id = ? ORDER BY slot_number ASC
+                """,
+                (scrim_id,),
+            ) as cur:
+                registrations = []
+                for registration in await cur.fetchall():
+                    value = dict(registration)
+                    try:
+                        value["members"] = json.loads(value.pop("members_json") or "[]")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        value["members"] = []
+                    value["checked_in"] = bool(value.get("checked_in"))
+                    registrations.append(value)
+            item["occupied_slots"] = int(item.get("occupied_slots") or 0)
+            item["registrations"] = registrations
+            result.append(item)
+    return result
+
+
+async def reserve_scrim_slot(
+    scrim_id: int,
+    team_name: str,
+    leader_id: int,
+    members_json: str | list[int] | None = None,
+) -> Optional[Dict[str, Any]]:
+    """Atomically reserve the first free slot, or return None if unavailable."""
+    if isinstance(members_json, list):
+        members_json = json.dumps(
+            [int(member_id) for member_id in members_json if str(member_id).isdigit()]
+        )
+    members_json = str(members_json or "[]")
+    async with connect(aiosqlite.Row) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(
+            "SELECT max_slots, is_active FROM scrim_configs WHERE id = ?",
+            (int(scrim_id),),
+        ) as cur:
+            scrim = await cur.fetchone()
+        if scrim is None or not bool(scrim["is_active"]):
+            return None
+        async with db.execute(
+            "SELECT slot_number FROM scrim_registrations WHERE scrim_id = ?",
+            (int(scrim_id),),
+        ) as cur:
+            used = {int(row[0]) for row in await cur.fetchall()}
+        slot = next(
+            (candidate for candidate in range(1, int(scrim["max_slots"]) + 1)
+             if candidate not in used),
+            None,
+        )
+        if slot is None:
+            return None
+        cur = await db.execute(
+            """
+            INSERT INTO scrim_registrations
+                (scrim_id, slot_number, team_name, leader_id, members_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (int(scrim_id), slot, str(team_name).strip()[:100], int(leader_id), members_json),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT * FROM scrim_registrations WHERE id = ?", (int(cur.lastrowid),)
+        ) as row_cursor:
+            row = await row_cursor.fetchone()
+    result = dict(row)
+    try:
+        result["members"] = json.loads(result.pop("members_json") or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        result["members"] = []
+    result["checked_in"] = bool(result.get("checked_in"))
+    return result
+
+
+async def cancel_scrim_slot(scrim_id: int, *, leader_id: int | None = None, slot_number: int | None = None) -> bool:
+    """Release a reservation, scoped to its leader unless an admin caller bypasses it."""
+    if leader_id is None and slot_number is None:
+        return False
+    async with connect() as db:
+        conditions = ["scrim_id = ?"]
+        params: list[Any] = [int(scrim_id)]
+        if slot_number is not None:
+            conditions.append("slot_number = ?")
+            params.append(int(slot_number))
+        if leader_id is not None:
+            conditions.append("leader_id = ?")
+            params.append(int(leader_id))
+        cur = await db.execute(
+            f"DELETE FROM scrim_registrations WHERE {' AND '.join(conditions)}",
+            tuple(params),
+        )
+        await db.commit()
+    return cur.rowcount > 0
+
+
+async def toggle_scrim_checkin(
+    scrim_id: int,
+    *,
+    leader_id: int | None = None,
+    slot_number: int | None = None,
+    checked_in: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Toggle check-in for one reservation and return the updated row."""
+    if leader_id is None and slot_number is None:
+        return None
+    async with connect(aiosqlite.Row) as db:
+        conditions = ["scrim_id = ?"]
+        params: list[Any] = [int(scrim_id)]
+        if slot_number is not None:
+            conditions.append("slot_number = ?")
+            params.append(int(slot_number))
+        if leader_id is not None:
+            conditions.append("leader_id = ?")
+            params.append(int(leader_id))
+        await db.execute(
+            f"UPDATE scrim_registrations SET checked_in = ? WHERE {' AND '.join(conditions)}",
+            (int(bool(checked_in)), *params),
+        )
+        await db.commit()
+        async with db.execute(
+            f"SELECT * FROM scrim_registrations WHERE {' AND '.join(conditions)}",
+            tuple(params),
+        ) as cur:
+            row = await cur.fetchone()
+    if row is None:
+        return None
+    result = dict(row)
+    try:
+        result["members"] = json.loads(result.pop("members_json") or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        result["members"] = []
+    result["checked_in"] = bool(result.get("checked_in"))
+    return result
 
 
 async def get_tournament_entries(tournament_id: int) -> list[int]:

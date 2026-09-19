@@ -412,7 +412,7 @@ class Engagement(commands.Cog):
             "revision": snapshot["revision"],
             "updated_at": snapshot["updated_at"],
             "settings": fields,
-            "self_roles": await get_self_role_panels(guild_id),
+            "self_roles": await get_guild_panels(guild_id),
         }
 
     @staticmethod

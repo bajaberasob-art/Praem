@@ -27,6 +27,8 @@ from database import (
     get_role_multipliers,
     get_scrims,
     get_guild_settings,
+    delete_panel,
+    get_guild_panels,
     delete_shortcut,
     save_shortcut,
     update_guild_settings,
@@ -1912,6 +1914,101 @@ async def api_deploy_self_roles(req):
         )
     logger.info("Self-role panel deployed in guild %s by user %s", guild.id, session["id"])
     return web.json_response(result)
+
+
+@routes.get('/api/guild/{guild_id}/self-roles/panels')
+async def api_get_self_role_panels(req):
+    _, guild = await authorize(req)
+    panels = await get_guild_panels(guild.id)
+    return web.json_response({"panels": panels})
+
+
+@routes.post('/api/guild/{guild_id}/self-roles/deploy')
+async def api_deploy_level_self_roles(req):
+    session, guild = await authorize(req, write=True)
+    engagement = bot_ref.get_cog("Engagement") if bot_ref else None
+    if engagement is None:
+        return json_error(503, "engagement_unavailable")
+    body = await read_json_body(req)
+    channel_id = body.get("channel_id", body.get("target_channel_id"))
+    if isinstance(channel_id, bool) or not str(channel_id or "").isdigit():
+        return json_error(400, "validation", fields={"channel_id": "معرف القناة غير صالح"})
+    channel = await resolve_text_channel(guild, int(channel_id))
+    if channel is None:
+        return json_error(400, "validation", fields={"channel_id": "القناة غير موجودة"})
+    buttons = body.get("buttons", [])
+    if not isinstance(buttons, list) or not 1 <= len(buttons) <= 25:
+        return json_error(400, "validation", fields={"buttons": "اختر من 1 إلى 25 رتبة"})
+    clean_buttons = []
+    for item in buttons:
+        if not isinstance(item, dict):
+            return json_error(400, "validation", fields={"buttons": "بيانات الأزرار غير صالحة"})
+        role_id = item.get("role_id", item.get("id"))
+        if isinstance(role_id, bool) or not str(role_id or "").isdigit():
+            return json_error(400, "validation", fields={"buttons": "معرف رتبة غير صالح"})
+        clean_buttons.append({
+            "role_id": int(role_id),
+            "label": str(item.get("label") or "")[:100],
+            "emoji": str(item.get("emoji") or "")[:100],
+            "custom_min_level": item.get("custom_min_level", 0),
+        })
+    try:
+        min_level = max(0, int(body.get("min_level", 0)))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"min_level": "المستوى غير صالح"})
+    color = str(body.get("color_hex", body.get("color", "#5865F2")) or "#5865F2")
+    result = await engagement.deploy_level_role_panel(
+        guild.id,
+        int(channel_id),
+        str(body.get("title") or "اختر رتبتك")[:256],
+        str(body.get("description") or "اختر الرتب المناسبة لك:")[:4000],
+        min_level,
+        color[:20],
+        clean_buttons,
+    )
+    if not result.get("ok"):
+        status = 400 if result.get("error") in {
+            "buttons_invalid", "role_not_assignable", "min_level_invalid"
+        } else 404
+        return json_error(status, result.get("error", "self_role_deploy_failed"))
+    logger.info(
+        "Level-gated self-role panel deployed in guild %s by user %s",
+        guild.id,
+        session["id"],
+    )
+    return web.json_response(result)
+
+
+@routes.delete('/api/guild/{guild_id}/self-roles/panels/{panel_id}')
+async def api_delete_level_self_role_panel(req):
+    session, guild = await authorize(req, write=True)
+    try:
+        panel_id = int(req.match_info["panel_id"])
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"panel_id": "معرف اللوحة غير صالح"})
+    panel = next(
+        (item for item in await get_guild_panels(guild.id) if int(item["id"]) == panel_id),
+        None,
+    )
+    if panel is None:
+        return json_error(404, "panel_not_found")
+    deleted_message = False
+    channel = guild.get_channel(int(panel["channel_id"]))
+    if channel and int(panel.get("message_id") or 0):
+        try:
+            message = await channel.fetch_message(int(panel["message_id"]))
+            await message.delete()
+            deleted_message = True
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            logger.info("Self-role message %s was already unavailable", panel["message_id"])
+    deleted = await delete_panel(panel_id)
+    logger.info(
+        "Level-gated self-role panel %s deleted in guild %s by user %s",
+        panel_id,
+        guild.id,
+        session["id"],
+    )
+    return web.json_response({"ok": deleted, "deleted_message": deleted_message})
 
 
 @routes.get('/api/guild/{guild_id}/settings')

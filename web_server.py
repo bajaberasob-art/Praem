@@ -2430,6 +2430,59 @@ async def api_guild_events(req):
     return response
 
 
+@routes.get('/manifest.json')
+async def pwa_manifest(req):
+    manifest = {
+        "name": "PR1ME Studio Dashboard",
+        "short_name": "PR1ME Bot",
+        "theme_color": "#000000",
+        "background_color": "#000000",
+        "display": "standalone",
+        "orientation": "portrait",
+        "start_url": "./",
+        "scope": "./",
+        "icons": [
+            {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+            {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+        ],
+    }
+    return web.Response(
+        text=json.dumps(manifest, ensure_ascii=False),
+        content_type="application/manifest+json",
+    )
+
+
+@routes.get('/sw.js')
+async def pwa_service_worker(req):
+    return web.Response(text=service_worker_source(), content_type="application/javascript")
+
+
+@routes.get('/icon.svg')
+async def pwa_svg_icon(req):
+    return web.Response(text=pwa_svg(), content_type="image/svg+xml")
+
+
+@routes.get('/icon-192.png')
+async def pwa_192_icon(req):
+    return web.Response(body=pwa_png(192), content_type="image/png")
+
+
+@routes.get('/icon-512.png')
+async def pwa_512_icon(req):
+    return web.Response(body=pwa_png(512), content_type="image/png")
+
+
+@routes.get('/healthz')
+async def healthz(req):
+    return web.json_response(await health_payload())
+
+
+@routes.get('/api/status')
+async def api_status(req):
+    return web.json_response(await health_payload())
+
+
 @routes.get('/static/{name}')
 async def static_asset(req):
     name = req.match_info["name"]

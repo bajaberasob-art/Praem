@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import os
 import random
@@ -886,11 +887,7 @@ class Utilities(commands.Cog):
             )
             return False
         if not hasattr(command, "_check_can_run"):
-            # Keep prefix shortcut behavior, but never invent a second command
-            # runtime for typed application-command arguments.
-            return await self._dispatch_command_shortcut(
-                message, f"/{getattr(command, 'qualified_name', requested)}"
-            )
+            return await self._execute_prefix_alias(message, command, arguments, requested)
 
         values, error = await self._parse_alias_arguments(
             message, command, arguments, requested
@@ -952,6 +949,70 @@ class Utilities(commands.Cog):
                 requested,
                 "⚠️ تعذر تنفيذ الاختصار. تم تسجيل الخطأ للمراجعة.",
                 command=command,
+            )
+        return False
+
+    async def _execute_prefix_alias(self, message, command, arguments, requested):
+        """Use the normal Context/check pipeline for legacy prefix commands."""
+        get_context = getattr(self.bot, "get_context", None)
+        if get_context is None:
+            return await self._dispatch_command_shortcut(
+                message, f"/{getattr(command, 'qualified_name', requested)}"
+            )
+        parameters = []
+        for name, parameter in (getattr(command, "clean_params", {}) or {}).items():
+            annotation = getattr(parameter, "annotation", str)
+            annotation_name = str(getattr(annotation, "__name__", annotation)).casefold()
+            kind = {
+                "int": 4,
+                "integer": 4,
+                "float": 10,
+                "bool": 5,
+                "member": 6,
+                "user": 6,
+                "role": 8,
+                "textchannel": 7,
+                "voicechannel": 7,
+                "categorychannel": 7,
+            }.get(annotation_name, 3)
+            parameters.append(
+                SimpleNamespace(
+                    name=name,
+                    type=kind,
+                    required=parameter.default is inspect.Parameter.empty,
+                )
+            )
+        values, error = await self._parse_alias_arguments(
+            message, SimpleNamespace(parameters=parameters), arguments, requested
+        )
+        if error:
+            await self._send_alias_error(message, requested, error)
+            return False
+        ctx = await get_context(message)
+        ctx.command = command
+        try:
+            can_run = getattr(command, "can_run", None)
+            if can_run is not None and not await can_run(ctx):
+                raise commands.CheckFailure()
+            await ctx.invoke(command, **values)
+            return True
+        except discord.Forbidden:
+            LOGGER.exception("[COMMAND_ALIAS] Discord رفض تنفيذ prefix %s", requested)
+            await self._send_alias_error(
+                message, requested, "❌ رفض Discord العملية؛ تحقق من صلاحيات البوت."
+            )
+        except discord.HTTPException:
+            LOGGER.exception("[COMMAND_ALIAS] طلب Discord فشل أثناء prefix %s", requested)
+            await self._send_alias_error(
+                message, requested, "❌ تعذر إكمال العملية بسبب خطأ من Discord."
+            )
+        except commands.CheckFailure:
+            LOGGER.exception("[COMMAND_ALIAS] فشل فحص prefix %s", requested)
+            await self._send_alias_error(message, requested, "❌ لا تملك صلاحية تنفيذ هذا الأمر.")
+        except Exception:
+            LOGGER.exception("[COMMAND_ALIAS] خطأ غير متوقع أثناء prefix %s", requested)
+            await self._send_alias_error(
+                message, requested, "⚠️ تعذر تنفيذ الاختصار. تم تسجيل الخطأ للمراجعة."
             )
         return False
 
@@ -1183,199 +1244,6 @@ class Utilities(commands.Cog):
             await message.channel.send(detail, embed=embed, delete_after=7)
         except (discord.Forbidden, discord.HTTPException):
             LOGGER.exception("[COMMAND_ALIAS] تعذر إرسال خطأ الاختصار")
-
-    async def _execute_alias_command_legacy(
-        self,
-        message: discord.Message,
-        command_name: str,
-        arguments: str,
-    ) -> bool:
-        name = str(command_name).strip().lstrip("!/").split()[-1].lower()
-        args = str(arguments or "").strip()
-        if name in {"help", "مساعدة"}:
-            await self._send_command_help(message, f"/{name}")
-            return True
-
-        if name in {"clear", "purge"}:
-            amount = self._first_integer(args)
-            if amount is None or not 1 <= amount <= 100:
-                await message.channel.send("⚠️ الاستخدام: `الاختصار <1-100>`", delete_after=7)
-                return False
-            me = getattr(message.guild, "me", None)
-            if me is not None:
-                permissions = message.channel.permissions_for(me)
-                if not getattr(permissions, "manage_messages", False):
-                    await message.channel.send("❌ البوت لا يملك صلاحية إدارة الرسائل.", delete_after=7)
-                    return False
-            try:
-                deleted = await message.channel.purge(limit=amount)
-            except (discord.Forbidden, discord.HTTPException):
-                await message.channel.send("❌ تعذر حذف الرسائل؛ تحقق من صلاحيات البوت.", delete_after=7)
-                return False
-            return bool(await self._send_alias_action_note(
-                message,
-                f"تم حذف **{len(deleted)}** رسالة من القناة.",
-            ))
-
-        if name in {"lockdown", "unlock", "lock", "قفل"}:
-            lock = name not in {"unlock"} and not args.casefold().split(" ")[0:1] == ["فتح"]
-            if args.casefold() in {"unlock", "false", "0", "فتح"}:
-                lock = False
-            try:
-                overwrite = message.channel.overwrites_for(message.guild.default_role)
-                overwrite.send_messages = False if lock else None
-                overwrite.send_messages_in_threads = False if lock else None
-                await message.channel.set_permissions(
-                    message.guild.default_role,
-                    overwrite=overwrite,
-                )
-            except (discord.Forbidden, discord.HTTPException):
-                await message.channel.send("❌ تعذر تعديل قفل القناة؛ تحقق من صلاحيات البوت.", delete_after=7)
-                return False
-            return await self._send_alias_action_note(
-                message,
-                "تم قفل القناة ومنع الأعضاء من الكتابة."
-                if lock else "تم فتح القناة والسماح بالكتابة.",
-            )
-
-        if name in {"slowmode"}:
-            seconds = self._first_integer(args)
-            if seconds is None or not 0 <= seconds <= 21600:
-                await message.channel.send("⚠️ الاستخدام: `الاختصار <0-21600>`", delete_after=7)
-                return False
-            try:
-                await message.channel.edit(slowmode_delay=seconds)
-            except (discord.Forbidden, discord.HTTPException):
-                await message.channel.send("❌ تعذر تعديل الوضع البطيء.", delete_after=7)
-                return False
-            return await self._send_alias_action_note(
-                message, f"تم ضبط الوضع البطيء إلى `{seconds}` ثانية."
-            )
-
-        if name == "warn":
-            member = self._member_from_alias_args(message, args)
-            if member is None:
-                await message.channel.send(
-                    "⚠️ الاستخدام: `الاختصار @العضو <السبب>`",
-                    delete_after=7,
-                )
-                return False
-            if getattr(member, "bot", False):
-                await message.channel.send(
-                    "❌ لا يمكن تحذير هذا الحساب.",
-                    delete_after=7,
-                )
-                return False
-            if not await self._target_is_actionable(message, member):
-                return False
-            reason = str(args or "").strip()
-            mention = str(getattr(member, "mention", "") or "")
-            if mention:
-                reason = reason.replace(mention, "", 1).strip()
-            reason = re.sub(
-                rf"<@!?{re.escape(str(getattr(member, 'id', '')))}>",
-                "",
-                reason,
-                count=1,
-            ).strip()
-            if reason.isdigit() and str(getattr(member, "id", "")) == reason:
-                reason = ""
-            if not reason:
-                await message.channel.send(
-                    "⚠️ الاستخدام: `الاختصار @العضو <السبب>`",
-                    delete_after=7,
-                )
-                return False
-            await add_warning(
-                int(member.id),
-                int(message.guild.id),
-                int(message.author.id),
-                reason,
-            )
-            return await self._send_alias_action_note(
-                message,
-                f"تم تسجيل تحذير على {member.mention} بسبب: {reason}",
-            )
-
-        if name in {"timeout", "untimeout", "mute", "unmute"}:
-            member = self._member_from_alias_args(message, args)
-            if member is None:
-                await message.channel.send("⚠️ الاستخدام: `الاختصار @العضو [الدقائق]`", delete_after=7)
-                return False
-            if not await self._target_is_actionable(message, member):
-                return False
-            try:
-                if name in {"untimeout", "unmute"}:
-                    await member.timeout(None)
-                    detail = f"تم فك التايم أوت عن {member.mention}."
-                else:
-                    minutes = self._first_integer(args)
-                    if minutes is None or not 1 <= minutes <= 40320:
-                        await message.channel.send("⚠️ الاستخدام: `الاختصار @العضو <الدقائق>`", delete_after=7)
-                        return False
-                    await member.timeout(
-                        discord.utils.utcnow() + __import__("datetime").timedelta(minutes=minutes),
-                        reason=f"Alias by {message.author} ({message.author.id})",
-                    )
-                    detail = f"تم تطبيق تايم أوت على {member.mention} لمدة {minutes} دقيقة."
-            except (discord.Forbidden, discord.HTTPException):
-                await message.channel.send("❌ تعذر تنفيذ التايم أوت؛ تحقق من الصلاحيات.", delete_after=7)
-                return False
-            return await self._send_alias_action_note(message, detail)
-
-        command = self._command_for_target(f"/{name}")
-        required = [
-            parameter
-            for parameter in getattr(command, "parameters", []) or []
-            if getattr(parameter, "required", False)
-        ] if command is not None else []
-        if required:
-            await self._send_command_help(message, f"/{name}")
-            return False
-        return await self._dispatch_command_shortcut(message, f"/{name}")
-
-    @staticmethod
-    def _first_integer(arguments: str) -> int | None:
-        match = re.search(r"\b(\d+)\b", str(arguments or ""))
-        return int(match.group(1)) if match else None
-
-    @staticmethod
-    def _member_from_alias_args(message: discord.Message, arguments: str):
-        mentions = getattr(message, "mentions", []) or []
-        if mentions:
-            return mentions[0]
-        match = re.search(r"\b(\d{15,22})\b", str(arguments or ""))
-        if match:
-            member = message.guild.get_member(int(match.group(1)))
-            if member is not None:
-                return member
-        query = str(arguments or "").strip().casefold()
-        if query:
-            query = re.sub(r"\b\d+\b", "", query).strip()
-            for member in getattr(message.guild, "members", []) or []:
-                if query in {
-                    str(getattr(member, "name", "")).casefold(),
-                    str(getattr(member, "display_name", "")).casefold(),
-                }:
-                    return member
-        return None
-
-    async def _target_is_actionable(self, message, member) -> bool:
-        me = getattr(message.guild, "me", None)
-        member_top = getattr(member, "top_role", None)
-        bot_top = getattr(me, "top_role", None) if me is not None else None
-        if member_top is not None and bot_top is not None and member_top >= bot_top:
-            await message.channel.send("❌ رتبة البوت يجب أن تكون أعلى من العضو المستهدف.", delete_after=7)
-            return False
-        if me is not None and getattr(member, "id", None) == getattr(me, "id", None):
-            await message.channel.send("❌ لا يمكن للبوت تنفيذ هذا الإجراء على نفسه.", delete_after=7)
-            return False
-        return True
-
-    async def _send_alias_action_note(self, message, detail: str) -> bool:
-        # The note is deliberately short; the required tactical confirmation
-        # embed is sent by _send_alias_confirmation after this succeeds.
-        return bool(detail)
 
     async def _send_alias_confirmation(
         self,

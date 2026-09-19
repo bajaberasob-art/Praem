@@ -3878,6 +3878,92 @@
       if (error.message !== "unauth") toast("تعذر تحديث مركز الاقتصاد");
     }
   }
+  function analyticsView() {
+    const categories = [
+      ["log_messages", "💬", "سجل الرسائل", "حذف وتعديل الرسائل", "#EF4444"],
+      ["log_roles", "🎭", "سجل الرتب والصلاحيات", "إضافة الرتب وتعديلها", "#8B5CF6"],
+      ["log_channels", "📁", "سجل القنوات", "إنشاء وتعديل وحذف القنوات", "#10B981"],
+      ["log_moderation", "⚔️", "سجل العقوبات", "الباند والطرد والكتم", "#DC2626"],
+      ["log_warnings", "⚠️", "سجل الإنذارات", "المخالفات والتحذيرات", "#EAB308"],
+      ["log_voice", "🎙️", "سجل النشاط الصوتي", "الدخول والخروج والتنقل", "#06B6D4"],
+    ];
+    const channels = (state.meta?.channels || []).filter((item) => item.type === "text" || !item.type);
+    const routeState = state.logRouting?.channels || {};
+    const cards = categories.map(([key, icon, title, hint, accent]) => {
+      const select = el(
+        "select",
+        { class: "analytics-channel-select", "aria-label": title },
+        el("option", { value: "0" }, "✕ غير مفعّلة"),
+        ...channels.map((channel) => el("option", { value: String(channel.id) }, `#${channel.name}`)),
+      );
+      select.value = String(routeState[key] || "0");
+      select.onchange = () => { state.logRouting.channels[key] = select.value; };
+      return el(
+        "article",
+        { class: "analytics-route-card", style: `--route-accent:${accent}` },
+        el("div", { class: "analytics-route-head" },
+          el("span", { class: "analytics-route-icon", text: icon }),
+          el("div", {}, el("strong", { text: title }), el("small", { text: hint })),
+          el("span", { class: "analytics-route-accent", text: "LIVE" }),
+        ),
+        select,
+        el("div", { class: "analytics-route-actions" },
+          el("button", {
+            class: "btn analytics-test-button", type: "button", text: "🧪 تجربة الإمبد",
+            onClick: async (event) => {
+              pulse();
+              const button = event.currentTarget;
+              button.disabled = true;
+              try {
+                const response = await api(`api/guild/${state.guild.id}/logs/test/${key}`, { method: "POST" });
+                const data = await response.json().catch(() => ({}));
+                toast(response.ok ? "تم إرسال تجربة الإمبد إلى Discord" : (data.error === "category_unassigned" ? "عيّن قناة لهذا التصنيف أولاً" : "تعذر إرسال التجربة"), response.ok ? "success" : "warn");
+              } finally {
+                button.disabled = false;
+              }
+            },
+          }),
+          el("button", {
+            class: "icon-action danger", type: "button", title: "تعطيل", text: "✕ تعطيل",
+            onClick: () => { select.value = "0"; state.logRouting.channels[key] = "0"; },
+          }),
+        ),
+      );
+    });
+    return el("section", { id: "view-analytics", class: "analytics-view" },
+      el("div", { class: "studio-hero analytics-hero" },
+        el("div", { class: "eyebrow", text: `${state.guild.name} / ANALYTICS CONTROL` }),
+        el("h2", { text: "موزع السجلات الاحترافي" }),
+        el("p", { text: "وجّه كل فئة إلى قناتها الخاصة وراجع شكل الإمبد الحقيقي قبل تفعيل السجل." }),
+        el("button", {
+          class: "btn analytics-save-button", type: "button", text: "💾 حفظ توزيع قنوات السجلات",
+          onClick: async (event) => {
+            pulse();
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+              const response = await api(`api/guild/${state.guild.id}/logs/channels`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ channels: state.logRouting.channels }),
+              });
+              const data = await response.json().catch(() => ({}));
+              if (response.ok) {
+                state.logRouting = data;
+                toast("تم حفظ توزيع السجلات وتحديث الذاكرة مباشرة", "success");
+                renderPage();
+              } else {
+                toast(Object.values(data.fields || {})[0] || "تعذر حفظ توزيع السجلات", "warn");
+              }
+            } finally {
+              button.disabled = false;
+            }
+          },
+        }),
+      ),
+      el("div", { class: "analytics-route-grid" }, cards),
+    );
+  }
   function renderPage() {
     const main = $("#main");
     main.replaceChildren();
@@ -3906,6 +3992,7 @@
     else if (view === "gaming") main.append(gamingView());
     else if (view === "onboarding") main.append(onboardingView());
     else if (view === "security") main.append(securityView());
+    else if (view === "analytics") main.append(analyticsView());
     else if (view === "economy") main.append(economyView());
     else if (["moderation", "community", "ai", "system"].includes(view)) main.append(operationsView(view));
     else main.append(settingsView());

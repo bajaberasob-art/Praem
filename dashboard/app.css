@@ -218,6 +218,91 @@ a {
   color: var(--muted);
   margin: 0;
 }
+.analytics-view {
+  display: grid;
+  gap: 18px;
+}
+.analytics-hero {
+  position: relative;
+  overflow: hidden;
+}
+.analytics-hero::after {
+  content: "";
+  position: absolute;
+  inset: auto -8% -70% 35%;
+  height: 210px;
+  background: radial-gradient(circle, #06b6d433, transparent 68%);
+  pointer-events: none;
+}
+.analytics-hero .btn {
+  position: relative;
+  z-index: 1;
+  margin-top: 14px;
+}
+.analytics-route-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.analytics-route-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #1e293b;
+  border-top: 2px solid var(--route-accent);
+  border-radius: 16px;
+  background: linear-gradient(145deg, #0d1422, #070b12);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--route-accent) 10%, transparent);
+}
+.analytics-route-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.analytics-route-head > div {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+}
+.analytics-route-head small {
+  color: var(--muted);
+}
+.analytics-route-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--route-accent) 18%, #0b1220);
+  font-size: 19px;
+}
+.analytics-route-accent {
+  color: var(--route-accent);
+  font: 10px "IBM Plex Mono", monospace;
+  letter-spacing: .12em;
+}
+.analytics-channel-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #26344d;
+  border-radius: 10px;
+  background: #080d17;
+  color: var(--text);
+}
+.analytics-route-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.analytics-route-actions .btn {
+  flex: 1;
+}
+@media (max-width: 720px) {
+  .analytics-route-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .grid {
   display: grid;
   gap: 18px;

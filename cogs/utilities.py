@@ -872,6 +872,319 @@ class Utilities(commands.Cog):
         command_name: str,
         arguments: str,
     ) -> bool:
+        """Resolve and invoke a registered Slash command from message text."""
+        requested = str(command_name).strip().lstrip("!/").split()[-1].casefold()
+        command = self._registered_command(requested)
+        if command is None:
+            await self._send_alias_error(
+                message, requested, "الأمر المطلوب غير موجود حالياً أو لم تتم مزامنته."
+            )
+            return False
+        if not hasattr(command, "_check_can_run"):
+            # Keep prefix shortcut behavior, but never invent a second command
+            # runtime for typed application-command arguments.
+            return await self._dispatch_command_shortcut(
+                message, f"/{getattr(command, 'qualified_name', requested)}"
+            )
+
+        values, error = await self._parse_alias_arguments(
+            message, command, arguments, requested
+        )
+        if error:
+            await self._send_alias_error(message, requested, error, command=command)
+            return False
+
+        interaction = ShortcutInteraction(message, command)
+        for name, value in values.items():
+            setattr(interaction.namespace, name, value)
+        try:
+            if not await self.app_command_interceptor(interaction):
+                return False
+            if not await command._check_can_run(interaction):
+                raise app_commands.CheckFailure()
+            callback = getattr(command, "callback", None)
+            if callback is None:
+                raise RuntimeError(f"Slash command /{requested} has no callback")
+            binding = getattr(command, "binding", None)
+            if binding is not None:
+                await callback(binding, interaction, **values)
+            else:
+                await callback(interaction, **values)
+            if interaction.response_error:
+                await self._send_alias_error(
+                    message,
+                    requested,
+                    "⚠️ أبلغ الأمر عن تعذر تنفيذ العملية.",
+                    command=command,
+                )
+                return False
+            return True
+        except discord.Forbidden:
+            LOGGER.exception("[COMMAND_ALIAS] Discord رفض تنفيذ /%s", requested)
+            await self._send_alias_error(
+                message,
+                requested,
+                "❌ رفض Discord العملية؛ تحقق من صلاحيات البوت ورتبته.",
+                command=command,
+            )
+        except discord.HTTPException:
+            LOGGER.exception("[COMMAND_ALIAS] طلب Discord فشل أثناء تنفيذ /%s", requested)
+            await self._send_alias_error(
+                message,
+                requested,
+                "❌ تعذر إكمال العملية بسبب خطأ من Discord.",
+                command=command,
+            )
+        except app_commands.CheckFailure:
+            LOGGER.exception("[COMMAND_ALIAS] فشل فحص الأمر /%s", requested)
+            await self._send_alias_error(
+                message, requested, "❌ لا تملك صلاحية تنفيذ هذا الأمر.", command=command
+            )
+        except Exception:
+            LOGGER.exception("[COMMAND_ALIAS] خطأ غير متوقع أثناء تنفيذ /%s", requested)
+            await self._send_alias_error(
+                message,
+                requested,
+                "⚠️ تعذر تنفيذ الاختصار. تم تسجيل الخطأ للمراجعة.",
+                command=command,
+            )
+        return False
+
+    def _registered_command(self, requested: str):
+        """Find a loaded leaf command rather than maintaining a second registry."""
+        normalized = str(requested or "").strip().lstrip("!/").casefold()
+        synonyms = {
+            "purge": "clear",
+            "mute": "timeout",
+            "unmute": "untimeout",
+            "lock": "lockdown",
+            "unlock": "lockdown",
+            "قفل": "lockdown",
+        }
+        wanted = {normalized, synonyms.get(normalized, normalized)}
+        tree = getattr(self.bot, "tree", None)
+        if tree is not None:
+            getter = getattr(tree, "get_command", None)
+            if getter is not None:
+                for name in wanted:
+                    try:
+                        command = getter(name)
+                    except (AttributeError, TypeError):
+                        command = None
+                    if command is not None:
+                        return command
+            walker = getattr(tree, "walk_commands", None)
+            if walker is not None:
+                try:
+                    candidates = list(walker())
+                except (AttributeError, TypeError):
+                    candidates = []
+                for command in candidates:
+                    names = {
+                        str(getattr(command, "name", "")).casefold(),
+                        str(getattr(command, "qualified_name", "")).casefold(),
+                    }
+                    if wanted.intersection(names):
+                        return command
+        for command in getattr(self.bot, "commands", []) or []:
+            names = {
+                str(getattr(command, "name", "")).casefold(),
+                str(getattr(command, "qualified_name", "")).casefold(),
+            }
+            if wanted.intersection(names):
+                return command
+        return None
+
+    @staticmethod
+    def _parameter_kind(parameter) -> str:
+        value = getattr(getattr(parameter, "type", None), "value", getattr(parameter, "type", None))
+        return {
+            3: "string",
+            4: "integer",
+            5: "boolean",
+            6: "member",
+            7: "channel",
+            8: "role",
+            10: "number",
+        }.get(value, "string")
+
+    async def _parse_alias_arguments(self, message, command, arguments, requested):
+        try:
+            tokens = shlex.split(str(arguments or ""))
+        except ValueError:
+            return {}, "⚠️ تعذر قراءة الوسائط؛ استخدم علامات اقتباس متوازنة."
+        values, index = {}, 0
+        parameters = list(getattr(command, "parameters", []) or [])
+        for position, parameter in enumerate(parameters):
+            name = str(getattr(parameter, "name", "") or "").strip()
+            if not name:
+                continue
+            required = bool(getattr(parameter, "required", False))
+            kind = self._parameter_kind(parameter)
+            remaining = tokens[index:]
+            if kind == "string":
+                value = " ".join(remaining).strip()
+                if value:
+                    values[name], index = value, len(tokens)
+                elif required:
+                    return {}, self._alias_usage(command, requested)
+                continue
+            if not remaining:
+                if required and kind == "boolean" and name.casefold() == "lock":
+                    values[name] = requested not in {"unlock"}
+                elif required:
+                    return {}, self._alias_usage(command, requested)
+                continue
+            token = remaining[0]
+            if kind == "boolean":
+                parsed = self._parse_boolean(token)
+                if parsed is None:
+                    if required:
+                        return {}, f"⚠️ قيمة `{name}` يجب أن تكون نعم/لا أو true/false."
+                    continue
+                values[name], index = parsed, index + 1
+                continue
+            if kind in {"integer", "number"}:
+                parsed = self._parse_numeric(token, name, kind)
+                if parsed is None:
+                    if required:
+                        return {}, f"⚠️ قيمة `{name}` يجب أن تكون رقماً صالحاً."
+                    continue
+                values[name], index = parsed, index + 1
+                continue
+            resolver = {
+                "member": self._resolve_alias_member,
+                "role": self._resolve_alias_role,
+                "channel": self._resolve_alias_channel,
+            }.get(kind)
+            entity = resolver(message, token) if resolver else None
+            if entity is None:
+                if required:
+                    label = COMMAND_PARAMETER_LABELS.get(name, name)
+                    return {}, f"⚠️ لم أجد {label}: `{token}`."
+                continue
+            values[name], index = entity, index + 1
+        if index < len(tokens):
+            return {}, self._alias_usage(command, requested)
+        return values, None
+
+    @staticmethod
+    def _parse_boolean(value):
+        value = str(value).strip().casefold()
+        if value in {"true", "1", "yes", "y", "on", "نعم", "صح", "قفل"}:
+            return True
+        if value in {"false", "0", "no", "n", "off", "لا", "خطأ", "فتح"}:
+            return False
+        return None
+
+    @staticmethod
+    def _parse_numeric(value, name, kind):
+        match = re.fullmatch(
+            r"(\d+(?:\.\d+)?)(s|sec|m|min|h|d)?",
+            str(value).strip().casefold(),
+        )
+        if not match:
+            return None
+        number = float(match.group(1))
+        unit = match.group(2)
+        if unit:
+            multiplier = {"s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600, "d": 86400}[unit]
+            if name.casefold() in {"minutes", "minute", "duration"}:
+                number = number * multiplier / 60
+            elif name.casefold() in {"seconds", "second", "slowmode"}:
+                number *= multiplier
+        if kind == "integer":
+            return int(number) if number.is_integer() else None
+        return number
+
+    @staticmethod
+    def _entity_id(value, pattern):
+        match = re.fullmatch(pattern, str(value).strip())
+        if match:
+            return int(match.group(1))
+        return int(value) if str(value).isdigit() else None
+
+    @staticmethod
+    def _resolve_alias_member(message, value):
+        guild = message.guild
+        member_id = Utilities._entity_id(value, r"<@!?(\d+)>")
+        getter = getattr(guild, "get_member", None)
+        if member_id is not None and getter:
+            member = getter(member_id)
+            if member is not None:
+                return member
+        query = str(value).casefold()
+        for member in getattr(message, "mentions", []) or []:
+            if query in {str(getattr(member, "mention", "")).casefold(), str(getattr(member, "id", "")).casefold()}:
+                return member
+        return next(
+            (
+                member for member in getattr(guild, "members", []) or []
+                if query in {
+                    str(getattr(member, "name", "")).casefold(),
+                    str(getattr(member, "display_name", "")).casefold(),
+                    str(getattr(member, "global_name", "")).casefold(),
+                }
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _resolve_alias_role(message, value):
+        guild = message.guild
+        role_id = Utilities._entity_id(value, r"<@&(\d+)>")
+        getter = getattr(guild, "get_role", None)
+        if role_id is not None and getter:
+            role = getter(role_id)
+            if role is not None:
+                return role
+        query = str(value).lstrip("#").casefold()
+        return next(
+            (role for role in getattr(guild, "roles", []) or [] if str(getattr(role, "name", "")).casefold() == query),
+            None,
+        )
+
+    @staticmethod
+    def _resolve_alias_channel(message, value):
+        guild = message.guild
+        channel_id = Utilities._entity_id(value, r"<#(\d+)>")
+        getter = getattr(guild, "get_channel", None)
+        if channel_id is not None and getter:
+            channel = getter(channel_id)
+            if channel is not None:
+                return channel
+        query = str(value).lstrip("#").casefold()
+        return next(
+            (channel for channel in getattr(guild, "channels", []) or [] if str(getattr(channel, "name", "")).casefold() == query),
+            None,
+        )
+
+    @staticmethod
+    def _alias_usage(command, requested):
+        syntax = Utilities._command_argument_text(command)
+        return f"⚠️ الاستخدام: `{requested}{(' ' + syntax) if syntax else ''}`"
+
+    async def _send_alias_error(self, message, command_name, detail, *, command=None):
+        embed = discord.Embed(
+            title="تعذر تنفيذ الاختصار",
+            description=detail,
+            color=0xEF4444,
+            timestamp=discord.utils.utcnow(),
+        )
+        syntax = self._command_argument_text(command) if command is not None else ""
+        if syntax:
+            embed.add_field(name="الصيغة", value=f"`{command_name} {syntax}`", inline=False)
+        try:
+            await message.channel.send(detail, embed=embed, delete_after=7)
+        except (discord.Forbidden, discord.HTTPException):
+            LOGGER.exception("[COMMAND_ALIAS] تعذر إرسال خطأ الاختصار")
+
+    async def _execute_alias_command_legacy(
+        self,
+        message: discord.Message,
+        command_name: str,
+        arguments: str,
+    ) -> bool:
         name = str(command_name).strip().lstrip("!/").split()[-1].lower()
         args = str(arguments or "").strip()
         if name in {"help", "مساعدة"}:

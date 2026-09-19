@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 import sys
 import time
 from collections import deque
@@ -10,7 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from database import init_db
+from database import checkpoint_wal, init_db, wal_checkpoint_loop
 from cogs.utilities import dynamic_prefix
 from interaction_runtime import (
     install_ui_guards,
@@ -73,6 +75,8 @@ class EnterpriseBot(commands.Bot):
         self.sync_guild = configured_sync_guild()
         self.metrics: deque[dict[str, int | float | str | None]] = deque(maxlen=600)
         self._gateway_watchdog_task: asyncio.Task | None = None
+        self._wal_checkpoint_task: asyncio.Task | None = None
+        self.started_at = time.monotonic()
 
     async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):
         options = {"override": override}
@@ -111,6 +115,7 @@ class EnterpriseBot(commands.Bot):
         try:
             await init_db()
             logger.info("📦 تم التحقق من سلامة قاعدة البيانات بنجاح.")
+            self._wal_checkpoint_task = asyncio.create_task(wal_checkpoint_loop())
         except Exception as error:
             await self.session.close()
             self.session = None
@@ -175,6 +180,13 @@ class EnterpriseBot(commands.Bot):
         if self._gateway_watchdog_task:
             self._gateway_watchdog_task.cancel()
             self._gateway_watchdog_task = None
+        if self._wal_checkpoint_task:
+            self._wal_checkpoint_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._wal_checkpoint_task
+            self._wal_checkpoint_task = None
+        with contextlib.suppress(Exception):
+            await checkpoint_wal()
         if self.dashboard_runner:
             await self.dashboard_runner.cleanup()
             self.dashboard_runner = None
@@ -364,6 +376,20 @@ async def on_app_command_error(
 
 
 async def main():
+    loop = asyncio.get_running_loop()
+
+    def request_shutdown(received_signal):
+        logger.info("🛑 Received %s; beginning graceful shutdown.", received_signal.name)
+        if not bot.is_closed():
+            asyncio.create_task(bot.close())
+
+    for received_signal in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(
+                received_signal,
+                request_shutdown,
+                received_signal,
+            )
     async with bot:
         retry_delay = 5
         while not bot.is_closed():

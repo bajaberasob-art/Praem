@@ -1538,7 +1538,10 @@ class Utilities(commands.Cog):
         ]
         aliases.extend(str(item) for item in getattr(command, "aliases", []) if item)
         permission = COMMAND_PERMISSION_LABELS.get(command_name, "صلاحيات Discord الخاصة بالأمر")
-        dashboard_path = os.getenv("DASHBOARD_BASE_PATH", "/").rstrip("/") + "/?view=commands"
+        dashboard_path = (
+            (os.getenv("DASHBOARD_BASE_PATH") or "/").strip().rstrip("/")
+            + "/?view=commands"
+        )
 
         embed = discord.Embed(
             title=f"{label} 📖",

@@ -29,13 +29,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger("CoreRunner")
 
-TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("DISCORD_BOT_TOKEN")
+TOKEN = (os.getenv("DISCORD_TOKEN") or "").strip() or (
+    os.getenv("DISCORD_BOT_TOKEN") or ""
+).strip()
 if not TOKEN:
     logger.critical(
         "⚠️ مفتاح DISCORD_TOKEN أو DISCORD_BOT_TOKEN مفقود "
         "تماماً داخل Replit Secrets!"
     )
     sys.exit(1)
+
+
+def configured_port_text() -> str:
+    """Return a whitespace-free port value for logs and presence text."""
+    return (
+        (os.getenv("PORT") or "").strip()
+        or (os.getenv("DASHBOARD_PORT") or "").strip()
+        or "8080"
+    )
+
 
 intents = discord.Intents.all()
 intents.members = True
@@ -228,7 +240,7 @@ class EnterpriseBot(commands.Bot):
             self.dashboard_runner = await start_web_server(self)
             logger.info(
                 "🌐 لوحة التحكم (Web Dashboard) نشطة على المنفذ %s.",
-                os.environ.get("PORT", os.environ.get("DASHBOARD_PORT", "8080")),
+                configured_port_text(),
             )
         except Exception as error:
             await self.session.close()
@@ -412,7 +424,7 @@ class EnterpriseBot(commands.Bot):
             ),
             (
                 discord.ActivityType.listening,
-                f"لوحة التحكم | Port {os.environ.get('PORT', os.environ.get('DASHBOARD_PORT', '8080'))} ⚡",
+                f"لوحة التحكم | Port {configured_port_text()} ⚡",
             ),
         ]
 

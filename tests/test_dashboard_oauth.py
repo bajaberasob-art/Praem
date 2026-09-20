@@ -71,6 +71,19 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(dashboard, "C_SEC", None):
             self.assertEqual((await dashboard.login(request())).status, 503)
 
+    async def test_login_strips_redirect_uri_before_encoding(self):
+        with patch.object(
+            dashboard,
+            "R_URI",
+            "https://example.test/api/auth/callback\r\n",
+        ):
+            response = await dashboard.login(request())
+        query = parse_qs(urlsplit(response.location).query)
+        self.assertEqual(
+            query["redirect_uri"],
+            ["https://example.test/api/auth/callback"],
+        )
+
     async def test_bot_invite_url_uses_public_install_scopes(self):
         url = dashboard.bot_invite_url()
         query = parse_qs(urlsplit(url).query)

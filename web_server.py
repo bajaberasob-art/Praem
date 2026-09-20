@@ -54,18 +54,18 @@ routes = web.RouteTableDef()
 PROJECT_DIR = Path(__file__).parent.resolve()
 DASHBOARD_DIR = (PROJECT_DIR / "dashboard").resolve()
 HOST = "0.0.0.0"
-PORT = int(os.environ.get("PORT", "8080"))
+PORT = int((os.environ.get("PORT") or "8080").strip())
 bot_ref: discord.Client = None
 
-C_ID = os.getenv("CLIENT_ID")
-C_SEC = os.getenv("CLIENT_SECRET")
-R_URI = os.getenv("REDIRECT_URI")
-DASHBOARD_BASE_PATH = os.getenv("DASHBOARD_BASE_PATH", "/").rstrip("/") + "/"
+C_ID = (os.getenv("CLIENT_ID") or "").strip()
+C_SEC = (os.getenv("CLIENT_SECRET") or "").strip()
+R_URI = (os.getenv("REDIRECT_URI") or "").strip()
+DASHBOARD_BASE_PATH = (os.getenv("DASHBOARD_BASE_PATH") or "/").strip().rstrip("/") + "/"
 DISCORD_API = "https://discord.com/api/v10"
 ADMIN_BIT = 0x8
 MANAGE_GUILD_BIT = 0x20
 DASHBOARD_PERMISSION_BITS = ADMIN_BIT | MANAGE_GUILD_BIT
-BOT_INVITE_PERMISSIONS = os.getenv("BOT_INVITE_PERMISSIONS", "8")
+BOT_INVITE_PERMISSIONS = (os.getenv("BOT_INVITE_PERMISSIONS") or "8").strip()
 DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
 SESSIONS: dict[str, dict] = {}
 STATES: dict[str, float] = {}
@@ -177,8 +177,9 @@ async def login(req):
     STATES.pop(req.cookies.get("oauth_state"), None)
     state = secrets.token_urlsafe(32)
     STATES[state] = time.time()
+    redirect_uri = R_URI.strip()
     query = urlencode({
-        "client_id": C_ID, "redirect_uri": R_URI,
+        "client_id": C_ID, "redirect_uri": redirect_uri,
         "response_type": "code", "scope": "identify guilds",
         "state": state, "prompt": "none",
     })
@@ -222,10 +223,11 @@ async def callback(req):
             session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
         if getattr(session, "closed", False):
             return web.Response(text="خدمة الاتصال غير جاهزة.", status=503)
+        redirect_uri = R_URI.strip()
         data = {
             "client_id": C_ID, "client_secret": C_SEC,
             "grant_type": "authorization_code", "code": code,
-            "redirect_uri": R_URI,
+            "redirect_uri": redirect_uri,
         }
         async with session.post(f"{DISCORD_API}/oauth2/token", data=data) as response:
             if response.status != 200:
@@ -3216,7 +3218,13 @@ async def start_web_server(bot):
     try:
         # Koyeb supplies PORT. DASHBOARD_PORT remains a local-only fallback
         # for the existing Replit workflow.
-        port = int(os.environ.get("PORT", os.environ.get("DASHBOARD_PORT", str(PORT))))
+        port = int(
+            (
+                os.environ.get("PORT")
+                or os.environ.get("DASHBOARD_PORT")
+                or str(PORT)
+            ).strip()
+        )
         await web.TCPSite(runner, HOST, port).start()
     except Exception:
         await runner.cleanup()

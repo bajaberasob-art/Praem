@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 # Koyeb can mount a persistent volume anywhere through DB_PATH. Keep the
 # legacy filename as a local-development fallback when it already exists so
 # an upgrade never silently starts with an empty database.
-DB_PATH = os.environ.get("DB_PATH", "data/bot.db")
+DB_PATH = (os.environ.get("DB_PATH") or "").strip() or "data/bot.db"
 DB_NAME = (
     "bot_database.db"
     if "DB_PATH" not in os.environ

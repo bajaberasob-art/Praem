@@ -14,7 +14,9 @@ from aiohttp import web
 import database
 import web_server as ws
 
-database.DB_NAME = os.getenv("HARNESS_DB", "/tmp/harness_dashboard.db")
+database.DB_NAME = (
+    (os.getenv("HARNESS_DB") or "").strip() or "/tmp/harness_dashboard.db"
+)
 
 
 class Role:
@@ -348,7 +350,11 @@ async def main():
     app.router.add_get("/__test_revoke", test_revoke)
     runner = web.AppRunner(app)
     await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", int(os.getenv("HARNESS_PORT", "8098"))).start()
+    await web.TCPSite(
+        runner,
+        "0.0.0.0",
+        int((os.getenv("HARNESS_PORT") or "8098").strip()),
+    ).start()
     print("harness ready", flush=True)
     await asyncio.Event().wait()
 

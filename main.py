@@ -186,6 +186,8 @@ class EnterpriseBot(commands.Bot):
         self.metrics: deque[dict[str, int | float | str | None]] = deque(maxlen=600)
         self._gateway_watchdog_task: asyncio.Task | None = None
         self._wal_checkpoint_task: asyncio.Task | None = None
+        self._is_initialized = False
+        self._retry_delay = 5
         self.started_at = time.monotonic()
         self._active_cog_name: str | None = None
 
@@ -221,7 +223,41 @@ class EnterpriseBot(commands.Bot):
             logger.info("🛡️ تم تأمين %d أمر Slash بطبقة ACK والأخطاء الموحدة.", wrapped)
         return wrapped
 
+    async def _cleanup_failed_setup(self, loaded_modules: list[str] | None = None) -> None:
+        """Release resources when one-time startup fails partway through."""
+        for module in reversed(loaded_modules or []):
+            with contextlib.suppress(Exception):
+                await self.unload_extension(module)
+        for attribute in ("_gateway_watchdog_task", "_wal_checkpoint_task"):
+            task = getattr(self, attribute, None)
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                setattr(self, attribute, None)
+        if self.dashboard_runner:
+            with contextlib.suppress(Exception):
+                await self.dashboard_runner.cleanup()
+            self.dashboard_runner = None
+        if self.session and not self.session.closed:
+            with contextlib.suppress(Exception):
+                await self.session.close()
+        self.session = None
+
+    async def _reset_http_session_for_retry(self) -> None:
+        """Replace the shared HTTP session without re-running bot setup."""
+        old_session = self.session
+        self.session = None
+        if old_session and not old_session.closed:
+            with contextlib.suppress(Exception):
+                await old_session.close()
+        if self._is_initialized and not self.is_closed():
+            self.session = aiohttp.ClientSession()
+
     async def setup_hook(self):
+        if self._is_initialized:
+            return
+
         self.session = aiohttp.ClientSession()
         self._gateway_watchdog_task = asyncio.create_task(
             self._gateway_startup_watchdog()
@@ -232,8 +268,7 @@ class EnterpriseBot(commands.Bot):
             logger.info("📦 تم التحقق من سلامة قاعدة البيانات بنجاح.")
             self._wal_checkpoint_task = asyncio.create_task(wal_checkpoint_loop())
         except Exception as error:
-            await self.session.close()
-            self.session = None
+            await self._cleanup_failed_setup()
             raise RuntimeError("قاعدة البيانات غير جاهزة؛ أوقف الإقلاع لحماية البيانات.") from error
 
         try:
@@ -243,8 +278,7 @@ class EnterpriseBot(commands.Bot):
                 configured_port_text(),
             )
         except Exception as error:
-            await self.session.close()
-            self.session = None
+            await self._cleanup_failed_setup()
             raise RuntimeError("تعذر تشغيل لوحة التحكم؛ أوقف الإقلاع بدلاً من تشغيل نسخة ناقصة.") from error
 
         modules = [
@@ -266,32 +300,44 @@ class EnterpriseBot(commands.Bot):
             "cogs.ai_tools",
         ]
 
+        loaded_modules: list[str] = []
         for module in modules:
             try:
                 await self.load_extension(module)
+                loaded_modules.append(module)
                 logger.info(f"✅ تم تحميل الوحدة بنجاح: {module}")
             except commands.ExtensionAlreadyLoaded:
                 logger.debug("الوحدة محملة مسبقاً: %s", module)
             except Exception as error:
+                await self._cleanup_failed_setup(loaded_modules)
                 raise RuntimeError(f"فشل تحميل الوحدة {module}; أوقف الإقلاع.") from error
 
         self.install_interaction_guards()
-        try:
-            if self.sync_guild is not None:
-                self.tree.copy_global_to(guild=self.sync_guild)
-                synced = await self.tree.sync(guild=self.sync_guild)
-                logger.info(
-                    "✨ تمت مزامنة %d أمر Slash مع سيرفر التطوير %s.",
-                    len(synced),
-                    self.sync_guild.id,
-                )
-            else:
-                synced = await self.tree.sync()
-                logger.info("✨ تمت مزامنة %d أمر Slash عالمياً بنجاح.", len(synced))
-        except discord.HTTPException as error:
-            logger.error("⚠️ فشل مزامنة أوامر Slash: %s", error)
+        if os.getenv("SYNC_COMMANDS", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            try:
+                if self.sync_guild is not None:
+                    self.tree.copy_global_to(guild=self.sync_guild)
+                    synced = await self.tree.sync(guild=self.sync_guild)
+                    logger.info(
+                        "✨ تمت مزامنة %d أمر Slash مع سيرفر التطوير %s.",
+                        len(synced),
+                        self.sync_guild.id,
+                    )
+                else:
+                    synced = await self.tree.sync()
+                    logger.info("✨ تمت مزامنة %d أمر Slash عالمياً بنجاح.", len(synced))
+            except discord.HTTPException as error:
+                logger.error("⚠️ فشل مزامنة أوامر Slash: %s", error)
+        else:
+            logger.info("⏭️ تم تخطي مزامنة أوامر Slash؛ فعّل SYNC_COMMANDS=true عند الحاجة.")
 
         self.rotate_status.start()
+        self._is_initialized = True
 
     async def close(self):
         logger.info("🛑 جاري إنهاء الجلسات وإيقاف البوت بأمان...")
@@ -326,6 +372,7 @@ class EnterpriseBot(commands.Bot):
         )
 
     async def on_connect(self):
+        self._retry_delay = 5
         logger.info(
             "[GATEWAY] Session connected: guilds=%d, cached_members=%d",
             len(self.guilds),
@@ -510,7 +557,6 @@ async def main():
                 received_signal,
             )
     async with bot:
-        retry_delay = 5
         while not bot.is_closed():
             try:
                 await bot.start(TOKEN)
@@ -531,14 +577,17 @@ async def main():
                 discord.ConnectionClosed,
                 aiohttp.ClientConnectorError,
             ) as error:
+                await bot._reset_http_session_for_retry()
+                retry_delay = bot._retry_delay
                 logger.warning(
                     "⚠️ فقدان مؤقت للاتصال بخوادم ديسكورد "
                     f"({error}). إعادة المحاولة خلال "
                     f"{retry_delay} ثوانٍ..."
                 )
                 await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 60)
+                bot._retry_delay = min(retry_delay * 2, 60)
             except Exception as error:
+                await bot._reset_http_session_for_retry()
                 logger.critical(
                     f"❌ انقطاع غير معالج في الحلقة التشغيلية: {error}"
                 )

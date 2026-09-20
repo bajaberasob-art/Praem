@@ -45,7 +45,7 @@ def configured_port_text() -> str:
     return (
         (os.getenv("PORT") or "").strip()
         or (os.getenv("DASHBOARD_PORT") or "").strip()
-        or "8080"
+        or "10000"
     )
 
 

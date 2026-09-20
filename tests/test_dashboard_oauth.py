@@ -1,3 +1,4 @@
+import json
 import time
 import unittest
 from types import SimpleNamespace
@@ -67,6 +68,22 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("GET", "/callback"), routes)
         self.assertIn(("GET", "/callback/"), routes)
         self.assertIn(("GET", "/api/auth/callback"), routes)
+
+    def test_health_route_aliases_are_registered(self):
+        routes = {
+            (route.method, route.path)
+            for route in dashboard.routes._items
+        }
+        self.assertIn(("GET", "/healthz"), routes)
+        self.assertIn(("GET", "/health"), routes)
+
+    async def test_liveness_payload_is_render_keep_alive_safe(self):
+        response = await dashboard.healthz(request("/healthz"))
+        self.assertEqual(response.status, 200)
+        payload = json.loads(response.text)
+        self.assertEqual(payload["status"], "healthy")
+        self.assertEqual(payload["bot"], "online")
+        self.assertIsInstance(payload["uptime"], int)
 
     async def test_login_and_missing_config(self):
         response = await dashboard.login(request())

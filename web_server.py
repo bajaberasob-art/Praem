@@ -54,7 +54,7 @@ routes = web.RouteTableDef()
 PROJECT_DIR = Path(__file__).parent.resolve()
 DASHBOARD_DIR = (PROJECT_DIR / "dashboard").resolve()
 HOST = "0.0.0.0"
-PORT = int((os.environ.get("PORT") or "8080").strip())
+PORT = int((os.environ.get("PORT") or "10000").strip())
 bot_ref: discord.Client = None
 
 C_ID = (os.getenv("CLIENT_ID") or "").strip()
@@ -2599,6 +2599,7 @@ async def pwa_512_icon(req):
 
 
 @routes.get('/healthz')
+@routes.get('/health')
 async def healthz(req):
     return web.json_response(liveness_payload())
 
@@ -3228,7 +3229,7 @@ async def start_web_server(bot):
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     try:
-        # Koyeb supplies PORT. DASHBOARD_PORT remains a local-only fallback
+        # Render supplies PORT. DASHBOARD_PORT remains a local-only fallback
         # for the existing Replit workflow.
         port = int(
             (

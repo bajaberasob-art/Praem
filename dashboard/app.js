@@ -4761,8 +4761,8 @@
     if (state.guild?.id !== id) return;
     try {
       const r = await api(`api/guild/${id}/security/incidents`);
-      if (!r.ok) return;
-      const data = await r.json();
+      const data = await readJson(r, {});
+      if (!r.ok || !data) return;
       if (state.guild?.id !== id) return;
       const lockChanged = state.lockdown !== Boolean(data.locked);
       state.incidents = data.incidents || [];
@@ -4782,14 +4782,18 @@
   }
   async function refreshDashboardStats(id, redraw = false) {
     if (state.guild?.id !== id) return;
+    const results = await Promise.allSettled([
+      optionalJson(`api/guild/${id}/stats`, { counts: {}, series: [] }),
+      optionalJson(`api/guild/${id}/actions`, { actions: [] }),
+    ]);
     try {
-      const [statsResponse, actionsResponse] = await Promise.all([
-        api(`api/guild/${id}/stats`),
-        api(`api/guild/${id}/actions`),
-      ]);
+      const authFailure = results.find(
+        (result) => result.status === "rejected" && result.reason?.message === "unauth",
+      );
+      if (authFailure) throw authFailure.reason;
       if (state.guild?.id !== id) return;
-      if (statsResponse.ok) state.stats = await statsResponse.json();
-      if (actionsResponse.ok) state.actions = (await actionsResponse.json()).actions || [];
+      if (results[0].status === "fulfilled") state.stats = results[0].value;
+      if (results[1].status === "fulfilled") state.actions = results[1].value.actions || [];
       if (redraw && state.activeView !== "settings") renderPage();
     } catch (error) {
       if (error.message !== "unauth") updatePing("wait");
@@ -4800,9 +4804,15 @@
     state.incidentTimer = setInterval(() => refreshIncidents(id, true), 15000);
   }
   async function fetchGuildMeta(id) {
-    const response = await api(`api/guild/${id}/meta`);
-    if (!response.ok) throw new Error("meta_unavailable");
-    const meta = await response.json();
+    const meta = await optionalJson(`api/guild/${id}/meta`, {
+      guild: state.guild || { id, name: "السيرفر" },
+      channels: [],
+      categories: [],
+      roles: [],
+      members: [],
+      stickers: [],
+      emojis: [],
+    });
     if (state.guild?.id !== id) return meta;
     state.meta = meta;
     state.commandStudio = {
@@ -4842,43 +4852,84 @@
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or, cr, registryResponse, ar, ta, tv, tk, tc, str, acr, gr, er, lr] = await Promise.all([
-        fetchGuildMeta(id),
-        api(`api/guild/${id}/settings`),
-        api(`api/guild/${id}/security/incidents`),
-        api(`api/guild/${id}/onboarding`),
-        api(`api/guild/${id}/commands`),
-        api(`api/guild/${id}/commands/registry`),
-        api(`api/guild/${id}/auto-responses`),
-        api(`api/guild/${id}/tickets/active`),
-        api(`api/guild/${id}/tickets/archive`),
-        api(`api/guild/${id}/tickets/kpis`),
-        api(`api/guild/${id}/tickets/canned`),
-        api(`api/guild/${id}/stats`),
-        api(`api/guild/${id}/actions`),
-        api(`api/guild/${id}/gaming`),
-        api(`api/guild/${id}/economy`),
-        api(`api/guild/${id}/logs/channels`),
-      ]);
+      const fallbacks = [
+        {
+          guild: state.guild,
+          channels: [],
+          categories: [],
+          roles: [],
+          members: [],
+          stickers: [],
+          emojis: [],
+        },
+        { revision: 0, updated_at: null, settings: {} },
+        { incidents: [], whitelist: [], locked: false },
+        { revision: 0, updated_at: null, settings: {} },
+        { commands: [], roles: [], channels: [] },
+        { categories: [], commands: [], policies: {} },
+        { rules: [], channels: [], roles: [], emojis: [], members: [] },
+        { tickets: [] },
+        { tickets: [] },
+        { kpis: [] },
+        { responses: [] },
+        { counts: {}, series: [] },
+        { actions: [] },
+        { scrims: [] },
+        { wealth: [], levels: [], settings: { settings: {} }, multipliers: {} },
+        { channels: {} },
+      ];
+      const urls = [
+        null,
+        `api/guild/${id}/settings`,
+        `api/guild/${id}/security/incidents`,
+        `api/guild/${id}/onboarding`,
+        `api/guild/${id}/commands`,
+        `api/guild/${id}/commands/registry`,
+        `api/guild/${id}/auto-responses`,
+        `api/guild/${id}/tickets/active`,
+        `api/guild/${id}/tickets/archive`,
+        `api/guild/${id}/tickets/kpis`,
+        `api/guild/${id}/tickets/canned`,
+        `api/guild/${id}/stats`,
+        `api/guild/${id}/actions`,
+        `api/guild/${id}/gaming`,
+        `api/guild/${id}/economy`,
+        `api/guild/${id}/logs/channels`,
+      ];
+      const results = await Promise.allSettled(
+        urls.map((url, index) =>
+          index === 0
+            ? fetchGuildMeta(id)
+            : optionalJson(url, fallbacks[index]),
+        ),
+      );
+      const authFailure = results.find(
+        (result) => result.status === "rejected" && result.reason?.message === "unauth",
+      );
+      if (authFailure) throw authFailure.reason;
+      const payload = (index) =>
+        results[index].status === "fulfilled"
+          ? results[index].value
+          : fallbacks[index];
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding, commands, registry, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming, economy, logRouting] = await Promise.all([
-        Promise.resolve(mr),
-        sr.json(),
-        ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
-        or.json(),
-        cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [] }),
-        registryResponse.ok ? registryResponse.json() : Promise.resolve({ categories: [], commands: [], policies: {} }),
-        ar.ok ? ar.json() : Promise.resolve({ rules: [], channels: [] }),
-        ta.ok ? ta.json() : Promise.resolve({ tickets: [] }),
-        tv.ok ? tv.json() : Promise.resolve({ tickets: [] }),
-        tk.ok ? tk.json() : Promise.resolve({ kpis: [] }),
-        tc.ok ? tc.json() : Promise.resolve({ responses: [] }),
-        str.ok ? str.json() : Promise.resolve({ counts: {}, series: [] }),
-        acr.ok ? acr.json() : Promise.resolve({ actions: [] }),
-        gr.ok ? gr.json() : Promise.resolve({ scrims: [] }),
-        er.ok ? er.json() : Promise.resolve({ wealth: [], levels: [], settings: { settings: {} }, multipliers: {} }),
-        lr.ok ? lr.json() : Promise.resolve({ channels: {} }),
-      ]);
+      const [
+        meta,
+        settings,
+        incidents,
+        onboarding,
+        commands,
+        registry,
+        autoResponses,
+        activeTickets,
+        archiveTickets,
+        ticketKpis,
+        canned,
+        stats,
+        actions,
+        gaming,
+        economy,
+        logRouting,
+      ] = urls.map((_, index) => payload(index));
       if (state.guild.id !== id) return;
       state.meta = meta;
       state.commandStudio = {
@@ -4929,13 +4980,13 @@
       state.draft = clone(state.baseline);
       state.revision = onboarding.revision ?? settings.revision;
       state.updated = onboarding.updated_at ?? settings.updated_at;
-      const ticketConfigResponse = await api(`api/guild/${id}/tickets/config`);
-      if (ticketConfigResponse.ok) {
-        const ticketConfigData = await ticketConfigResponse.json();
-        state.ticketConfig = { ...state.ticketConfig, ...(ticketConfigData.config || {}) };
-        if (Array.isArray(ticketConfigData.categories) && ticketConfigData.categories.length) {
-          state.ticketCategories = ticketConfigData.categories;
-        }
+      const ticketConfigData = await optionalJson(
+        `api/guild/${id}/tickets/config`,
+        { config: {}, categories: [] },
+      );
+      state.ticketConfig = { ...state.ticketConfig, ...(ticketConfigData.config || {}) };
+      if (Array.isArray(ticketConfigData.categories) && ticketConfigData.categories.length) {
+        state.ticketCategories = ticketConfigData.categories;
       }
       renderPage();
       openSSE(id);

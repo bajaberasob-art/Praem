@@ -228,7 +228,7 @@ class EnterpriseBot(commands.Bot):
             self.dashboard_runner = await start_web_server(self)
             logger.info(
                 "🌐 لوحة التحكم (Web Dashboard) نشطة على المنفذ %s.",
-                os.getenv("DASHBOARD_PORT", "8080"),
+                os.environ.get("PORT", os.environ.get("DASHBOARD_PORT", "8080")),
             )
         except Exception as error:
             await self.session.close()

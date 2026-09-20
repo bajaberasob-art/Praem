@@ -2,15 +2,27 @@ import aiosqlite
 import asyncio
 import json
 import logging
+import os
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-DB_NAME = "bot_database.db"
+# Koyeb can mount a persistent volume anywhere through DB_PATH. Keep the
+# legacy filename as a local-development fallback when it already exists so
+# an upgrade never silently starts with an empty database.
+DB_PATH = os.environ.get("DB_PATH", "data/bot.db")
+DB_NAME = (
+    "bot_database.db"
+    if "DB_PATH" not in os.environ
+    and DB_PATH == "data/bot.db"
+    and os.path.exists("bot_database.db")
+    and not os.path.exists(DB_PATH)
+    else DB_PATH
+)
 logger = logging.getLogger("DatabaseEngine")
-DB_TIMEOUT = 20.0
+DB_TIMEOUT = 30.0
 WAL_CHECKPOINT_INTERVAL = 30 * 60
 
 # -------------------------------------------------------------
@@ -138,6 +150,15 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def ensure_db_directory(path: str | None = None) -> str:
+    """Create the SQLite parent directory before the first connection opens."""
+    target = os.path.abspath(path or DB_NAME)
+    db_dir = os.path.dirname(target)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+    return target
+
+
 async def _configure(db: aiosqlite.Connection) -> None:
     """تطبيق إعدادات الأداء والسلامة على كل اتصال."""
     await db.execute("PRAGMA foreign_keys = ON;")
@@ -161,7 +182,10 @@ class _Connection:
             _db_semaphore = asyncio.Semaphore(8)
         await _db_semaphore.acquire()
         try:
-            self._db = await aiosqlite.connect(DB_NAME, timeout=DB_TIMEOUT)
+            self._db = await aiosqlite.connect(
+                ensure_db_directory(),
+                timeout=DB_TIMEOUT,
+            )
             if self._row_factory:
                 self._db.row_factory = self._row_factory
             await _configure(self._db)

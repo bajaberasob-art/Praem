@@ -51,7 +51,10 @@ from cogs.command_meta import (
 )
 
 routes = web.RouteTableDef()
-DASHBOARD_DIR = Path(__file__).parent / "dashboard"
+PROJECT_DIR = Path(__file__).parent.resolve()
+DASHBOARD_DIR = (PROJECT_DIR / "dashboard").resolve()
+HOST = "0.0.0.0"
+PORT = int(os.environ.get("PORT", "8080"))
 bot_ref: discord.Client = None
 
 C_ID = os.getenv("CLIENT_ID")
@@ -426,6 +429,16 @@ async def health_payload() -> dict:
         "guilds_count": len(getattr(bot, "guilds", ())) if bot else 0,
         "database_status": database_status,
         "system_memory_mb": _process_memory_mb(),
+    }
+
+
+def liveness_payload() -> dict:
+    """Return a dependency-free probe payload for container health checks."""
+    started_at = getattr(bot_ref, "started_at", PROCESS_STARTED_AT) if bot_ref else PROCESS_STARTED_AT
+    return {
+        "status": "healthy",
+        "uptime_seconds": max(0, int(time.monotonic() - started_at)),
+        "bot": "online",
     }
 
 
@@ -2573,7 +2586,7 @@ async def pwa_512_icon(req):
 
 @routes.get('/healthz')
 async def healthz(req):
-    return web.json_response(await health_payload())
+    return web.json_response(liveness_payload())
 
 
 @routes.get('/api/status')
@@ -3201,8 +3214,10 @@ async def start_web_server(bot):
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     try:
-        port = int(os.getenv("DASHBOARD_PORT", "8099"))
-        await web.TCPSite(runner, '0.0.0.0', port).start()
+        # Koyeb supplies PORT. DASHBOARD_PORT remains a local-only fallback
+        # for the existing Replit workflow.
+        port = int(os.environ.get("PORT", os.environ.get("DASHBOARD_PORT", str(PORT))))
+        await web.TCPSite(runner, HOST, port).start()
     except Exception:
         await runner.cleanup()
         raise

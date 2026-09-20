@@ -102,7 +102,8 @@ class AutoModTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.actions[0][1]["action"], "timeout")
 
     async def test_ignored_role_bypasses_spam_rule(self):
-        self.mod.moderation_settings = lambda _guild_id: {
+        async def ignored_config(_guild_id):
+            return {
             **{
                 "anti_invites": True,
                 "anti_links": True,
@@ -118,6 +119,7 @@ class AutoModTests(unittest.IsolatedAsyncioTestCase):
             "anti_spam_ignored_role_ids": ["777"],
             "anti_spam_ignored_channel_ids": [],
         }
+        self.mod.moderation_settings = ignored_config
         for index in range(3):
             await self.mod.on_message(
                 FakeMessage(f"message {index}", roles=[SimpleNamespace(id=777)])

@@ -399,10 +399,13 @@ class Moderation(commands.Cog):
                     MENTION_TARGET_WINDOW,
                 )
                 for target in msg.mentions:
+                    target_id = getattr(target, "id", None)
+                    if target_id is None:
+                        continue
                     if self._target_mention_triggered(
                         msg.guild.id,
                         msg.author.id,
-                        target.id,
+                        target_id,
                         limit=target_limit,
                         window_seconds=target_window,
                     ):

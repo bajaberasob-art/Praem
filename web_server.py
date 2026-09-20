@@ -1444,6 +1444,13 @@ async def api_guild_command_policy(req):
                 "validation",
                 fields={"response_template": "القالب يتجاوز 2000 حرف"},
             )
+    policy_args = {"aliases": aliases}
+    if auto_delete_seconds is not None:
+        policy_args["auto_delete_seconds"] = auto_delete_seconds
+    if response_style is not None:
+        policy_args["response_style"] = response_style
+    if response_template is not None:
+        policy_args["response_template"] = response_template
     try:
         result = await utilities.toggle_command(
             guild.id,
@@ -1451,10 +1458,7 @@ async def api_guild_command_policy(req):
             is_enabled,
             roles,
             channels,
-            aliases,
-            auto_delete_seconds,
-            response_style,
-            response_template,
+            **policy_args,
         )
     except ValueError as error:
         return json_error(400, "validation", fields={"aliases": str(error)})

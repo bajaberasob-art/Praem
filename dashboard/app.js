@@ -2051,9 +2051,20 @@
   function openCommandDetail(command) {
     closeCommandDetail();
     state.commandDetail = command;
+    const commandKey = String(command.command_name || "").toLowerCase().split(/\s+/).pop();
+    const registryMeta = state.commandRegistry?.byKey?.[commandKey] || {};
+    const registryPolicy = state.commandRegistry?.policies?.[commandKey] || {};
+    const effectivePolicy = {
+      ...command,
+      ...registryPolicy,
+      custom_aliases: registryPolicy.aliases || command.custom_aliases || command.aliases || [],
+      allowed_roles: registryPolicy.allowed_roles || command.allowed_roles || [],
+      allowed_channels: registryPolicy.allowed_channels || command.allowed_channels || [],
+    };
     const warnings = commandPermissionWarnings(command);
     const visual = commandVisual(command);
-    let detailEnabled = command.enabled !== false;
+    let detailEnabled = effectivePolicy.enabled !== false;
+    let activeTab = "general";
     const back = el("div", { class: "modal-back command-detail-back", role: "dialog", "aria-modal": "true" });
     const input = el("input", {
       class: "studio-input command-simulator-input",
@@ -2080,34 +2091,39 @@
           el("p", { text: warnings.join("، ") }),
         )
       : el("div", { class: "permission-ok", text: "لا توجد تحذيرات صلاحيات من البيانات الحالية" });
-    const roles = [...commandRoles(command)].map((id) => (state.commandStudio.roles || []).find((role) => String(role.id) === id)?.name || id);
-    const shortcuts = commandShortcuts(command);
-    const shortcutInput = el("textarea", {
+    const aliasInput = el("textarea", {
       class: "studio-textarea command-alias-input",
       rows: "2",
       placeholder: "مثال: عيب، تحذير، انذار",
       "aria-label": "اختصارات الأمر",
-      text: shortcuts.map((item) => item.trigger).join("، "),
     });
-    const shortcutChips = el("div", { class: "command-alias-chips" },
-      shortcuts.length
-        ? shortcuts.map((item) => el("code", { class: "command-alias-chip", text: item.trigger }))
-        : el("span", { class: "hint", text: "لا توجد اختصارات مخصصة لهذا الأمر بعد" }),
-    );
-    const shortcutSection = el("section", { class: "command-aliases" },
+    aliasInput.value = effectivePolicy.custom_aliases.join("، ");
+    const aliasChips = el("div", { class: "command-alias-chips" });
+    const renderAliases = () => {
+      const aliases = String(aliasInput.value || "")
+        .split(/[,،\n]+/)
+        .map((value) => value.trim().replace(/^[/!]/, ""))
+        .filter(Boolean);
+      const nodes = aliases.length
+        ? aliases.map((alias) => el("code", { class: "command-alias-chip", text: alias }))
+        : [el("span", { class: "hint", text: "لا توجد اختصارات مخصصة لهذا الأمر بعد" })];
+      aliasChips.replaceChildren(...nodes);
+    };
+    aliasInput.oninput = renderAliases;
+    renderAliases();
+    const aliasesSection = el("section", { class: "command-aliases" },
       el("div", { class: "section-heading compact" },
-        el("div", {}, el("div", { class: "eyebrow", text: "COMMAND ALIASES" }), el("h3", { text: "اختصارات الأمر" })),
-        el("span", { class: "alias-count", text: `${shortcuts.length}/20` }),
+        el("div", {}, el("div", { class: "eyebrow", text: "CUSTOM ALIASES" }), el("h3", { text: "الأسماء البديلة" })),
+        el("span", { class: "alias-count", text: "20 كحد أقصى" }),
       ),
-      el("p", { class: "hint", text: "اكتب أكثر من اختصار وافصل بينها بفاصلة. مثال: بدال /warn اكتب عيب أو تحذير." }),
-      shortcutInput,
-      shortcutChips,
-      el("button", { class: "btn ghost alias-save-button", type: "button", text: "حفظ الاختصارات", onClick: () => saveCommandShortcuts(command, shortcutInput) }),
+      el("p", { class: "hint", text: "اكتب أسماء بديلة وافصل بينها بفاصلة. ستعمل كاختصارات مباشرة للأمر." }),
+      aliasInput,
+      aliasChips,
     );
     const rolesEditor = commandChoiceEditor(
       "الرتب المسموحة",
       state.commandStudio.roles || [],
-      command.allowed_roles || [],
+      effectivePolicy.allowed_roles,
       "ابحث عن رتبة...",
       "♟",
       (item) => `@${item.name || item.id}`,
@@ -2115,10 +2131,77 @@
     const channelsEditor = commandChoiceEditor(
       "القنوات المسموحة",
       state.commandStudio.channels || [],
-      command.allowed_channels || [],
+      effectivePolicy.allowed_channels,
       "ابحث عن قناة...",
       "#",
       (item) => `#${item.name || item.id}`,
+    );
+    const autoDeleteValue = Number(effectivePolicy.auto_delete_seconds || 0);
+    const autoDeleteButtons = el("div", { class: "command-choice-buttons" });
+    let selectedAutoDelete = [0, 5, 10, 30, 60, 300].includes(autoDeleteValue) ? autoDeleteValue : 0;
+    const renderAutoDelete = () => {
+      const nodes = [0, 5, 10, 30, 60, 300].map((seconds) => {
+        const label = seconds === 0 ? "لا تحذف" : `${seconds} ث`;
+        return el("button", {
+          class: `command-choice-button${selectedAutoDelete === seconds ? " selected" : ""}`,
+          type: "button",
+          text: label,
+          onClick: () => {
+            selectedAutoDelete = seconds;
+            renderAutoDelete();
+          },
+        });
+      });
+      autoDeleteButtons.replaceChildren(...nodes);
+    };
+    renderAutoDelete();
+    const autoDeleteSection = el("section", { class: "command-detail-policy command-detail-subsection" },
+      el("div", { class: "command-detail-policy-heading" },
+        el("span", { class: "command-policy-icon", text: "⌫" }),
+        el("div", {}, el("strong", { text: "الحذف التلقائي" }), el("small", { text: "حذف رد البوت بعد المدة المحددة" })),
+      ),
+      autoDeleteButtons,
+    );
+    const responseStyleSelect = el("select", { class: "studio-input command-response-select", "aria-label": "نمط الرد" },
+      [
+        ["default", "افتراضي"],
+        ["embed", "Embed منسق"],
+        ["compact", "مختصر"],
+        ["silent", "صامت"],
+      ].map(([value, label]) => el("option", { value, text: label })),
+    );
+    responseStyleSelect.value = effectivePolicy.response_style || "default";
+    const responseTemplate = el("textarea", {
+      class: "studio-textarea command-response-template",
+      rows: "5",
+      placeholder: "اختياري: اكتب قالب الرد المخصص (حتى 2000 حرف)…",
+      "aria-label": "قالب الرد المخصص",
+    });
+    responseTemplate.value = effectivePolicy.response_template || "";
+    const responsePanel = el("section", { class: "command-detail-policy command-response-panel" },
+      el("div", { class: "command-detail-policy-heading" },
+        el("span", { class: "command-policy-icon", text: "↗" }),
+        el("div", {}, el("strong", { text: "شكل رد البوت" }), el("small", { text: "تخصيص طريقة عرض رد هذا الأمر" })),
+      ),
+      responseStyleSelect,
+      el("label", { class: "command-field-label", text: "القالب المخصص" }),
+      responseTemplate,
+      el("small", { class: "hint", text: "يمكن استخدام القالب مع الأوامر التي تدعم تخصيص الردود." }),
+    );
+    const syntaxCode = el("code", { text: registryMeta.syntax || `!${commandKey}` });
+    const exampleCode = el("code", { text: registryMeta.example || `!${commandKey}` });
+    const registryAliases = Array.isArray(registryMeta.default_aliases) ? registryMeta.default_aliases : [];
+    const usagePanel = el("section", { class: "command-detail-policy command-usage-panel" },
+      el("div", { class: "command-detail-policy-heading" },
+        el("span", { class: "command-policy-icon", text: "?" }),
+        el("div", {}, el("strong", { text: "طريقة الاستخدام" }), el("small", { text: "المعلومات الرسمية لهذا الأمر" })),
+      ),
+      el("dl", { class: "command-detail-list command-usage-list" },
+        el("div", {}, el("dt", { text: "الصياغة" }), el("dd", {}, syntaxCode)),
+        el("div", {}, el("dt", { text: "مثال" }), el("dd", {}, exampleCode)),
+        el("div", {}, el("dt", { text: "الصلاحية المطلوبة" }), el("dd", { text: registryMeta.required_permission || "send_messages" })),
+        el("div", {}, el("dt", { text: "الأسماء الرسمية" }), el("dd", { text: registryAliases.length ? registryAliases.join("، ") : "لا توجد" })),
+      ),
     );
     const statusSwitch = el("button", {
       class: `studio-switch command-detail-switch${detailEnabled ? " on" : ""}`,
@@ -2136,8 +2219,50 @@
       statusSwitch.classList.toggle("on", detailEnabled);
       statusSwitch.setAttribute("aria-checked", String(detailEnabled));
     };
+    const generalPanel = el("div", { class: "command-detail-tab-panel", "data-detail-panel": "general" },
+      permissionBox,
+      el("section", { class: "command-detail-policy" },
+        el("div", { class: "command-detail-policy-heading" },
+          el("span", { class: "command-policy-icon", text: "◉" }),
+          el("div", {}, el("strong", { text: "حالة الأمر" }), el("small", { text: "هذه القيمة تُحفظ وتُطبق على Discord" })),
+        ),
+        el("div", { class: "command-detail-status-editor" }, statusCopy, statusSwitch),
+      ),
+      aliasesSection,
+      rolesEditor.root,
+      channelsEditor.root,
+      autoDeleteSection,
+    );
+    const tabPanels = el("div", { class: "command-detail-tab-panels" }, generalPanel, responsePanel, usagePanel);
+    const tabs = el("nav", { class: "command-detail-tabs", "aria-label": "إعدادات الأمر" });
+    const tabDefinitions = [
+      ["general", "عام", generalPanel],
+      ["response", "رد البوت", responsePanel],
+      ["usage", "طريقة الاستخدام", usagePanel],
+    ];
+    const setActiveTab = (key) => {
+      activeTab = key;
+      tabs.querySelectorAll(".command-detail-tab").forEach((tab) => {
+        const selected = tab.dataset.tab === key;
+        tab.classList.toggle("active", selected);
+        tab.setAttribute("aria-selected", String(selected));
+      });
+      tabDefinitions.forEach(([panelKey, , panel]) => {
+        panel.hidden = panelKey !== key;
+      });
+    };
+    tabDefinitions.forEach(([key, label]) => tabs.append(el("button", {
+      class: `command-detail-tab${key === activeTab ? " active" : ""}`,
+      type: "button",
+      role: "tab",
+      "aria-selected": String(key === activeTab),
+      "data-tab": key,
+      text: label,
+      onClick: () => setActiveTab(key),
+    })));
+    setActiveTab(activeTab);
     const saveDetails = async () => {
-      const aliases = parseCommandAliases(shortcutInput);
+      const aliases = parseCommandAliases(aliasInput);
       if (aliases === null) return;
       const policySaved = await saveCommandPolicy(
         command,
@@ -2145,6 +2270,11 @@
         rolesEditor.values(),
         channelsEditor.values(),
         aliases,
+        {
+          auto_delete_seconds: selectedAutoDelete,
+          response_style: responseStyleSelect.value,
+          response_template: responseTemplate.value,
+        },
       );
       if (!policySaved) return;
       pulse();
@@ -2162,24 +2292,8 @@
         el("span", { class: "detail-meta", text: command.configured ? "سياسة مخصصة" : "إعداد افتراضي" }),
       ),
       el("p", { class: "command-detail-description", text: visual.description }),
-      permissionBox,
-      shortcutSection,
-      el("section", { class: "command-detail-policy" },
-        el("div", { class: "command-detail-policy-heading" },
-          el("span", { class: "command-policy-icon", text: "◉" }),
-          el("div", {}, el("strong", { text: "حالة الأمر" }), el("small", { text: "هذه القيمة تُحفظ وتُطبق على Discord" })),
-        ),
-        el("div", { class: "command-detail-status-editor" }, statusCopy, statusSwitch),
-      ),
-      rolesEditor.root,
-      channelsEditor.root,
-      el("dl", { class: "command-detail-list" },
-        el("div", {}, el("dt", { text: "الـ Cog" }), el("dd", { text: command.cog || "Commands" })),
-        el("div", {}, el("dt", { text: "الرتب الحالية" }), el("dd", { text: roles.length ? roles.join("، ") : "كل الرتب" })),
-        el("div", {}, el("dt", { text: "القنوات الحالية" }), el("dd", { text: (command.allowed_channels || []).length ? (command.allowed_channels || []).join("، ") : "كل القنوات" })),
-        el("div", {}, el("dt", { text: "اختصارات Discord" }), el("dd", { text: command.aliases?.length ? command.aliases.join("، ") : "لا توجد" })),
-        el("div", {}, el("dt", { text: "آخر استخدام" }), el("dd", { text: command.last_used_at ? new Date(command.last_used_at).toLocaleString("ar") : "لا توجد بيانات" })),
-      ),
+      tabs,
+      tabPanels,
       el("section", { class: "command-simulator" },
         el("div", { class: "section-heading compact" }, el("div", {}, el("div", { class: "eyebrow", text: "SAFE SIMULATOR" }), el("h3", { text: "اختبر شكل التنفيذ" }))),
         input,

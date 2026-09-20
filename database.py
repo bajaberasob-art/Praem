@@ -891,6 +891,34 @@ async def init_db() -> None:
                 );
             """)
             await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_config (
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER,
+                    message_id INTEGER,
+                    embed_title TEXT NOT NULL DEFAULT 'الدعم الفني',
+                    embed_description TEXT NOT NULL DEFAULT '',
+                    embed_color INTEGER NOT NULL DEFAULT 5793266,
+                    footer_text TEXT NOT NULL DEFAULT 'PR1ME TEAM Support',
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_options (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    emoji TEXT NOT NULL DEFAULT '🎫',
+                    role_id INTEGER DEFAULT NULL,
+                    category_id INTEGER DEFAULT NULL,
+                    welcome_msg TEXT NOT NULL DEFAULT ''
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticket_options_guild "
+                "ON ticket_options(guild_id, id);"
+            )
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS tickets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER NOT NULL,
@@ -3840,6 +3868,171 @@ async def get_ticket_panels() -> list[dict[str, Any]]:
                     item["categories"] = []
                 rows.append(item)
             return rows
+
+
+def _ticket_config_row(row) -> dict[str, Any] | None:
+    if not row:
+        return None
+    item = dict(row)
+    item["guild_id"] = int(item["guild_id"])
+    for key in ("channel_id", "message_id"):
+        if item.get(key) is not None:
+            item[key] = int(item[key])
+    item["embed_color"] = int(item.get("embed_color") or 0x5865F2)
+    item["embed_title"] = str(item.get("embed_title") or "الدعم الفني")
+    item["embed_description"] = str(item.get("embed_description") or "")
+    item["footer_text"] = str(item.get("footer_text") or "PR1ME TEAM Support")
+    return item
+
+
+def _ticket_option_row(row) -> dict[str, Any]:
+    item = dict(row)
+    for key in ("id", "guild_id", "role_id", "category_id"):
+        if item.get(key) is not None:
+            item[key] = int(item[key])
+    for key, default in (
+        ("label", ""),
+        ("description", ""),
+        ("emoji", "🎫"),
+        ("welcome_msg", ""),
+    ):
+        item[key] = str(item.get(key) or default)
+    return item
+
+
+async def get_ticket_config(guild_id: int) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT * FROM ticket_config WHERE guild_id = ?",
+            (int(guild_id),),
+        ) as cur:
+            row = await cur.fetchone()
+    return _ticket_config_row(row)
+
+
+async def get_ticket_configs() -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT * FROM ticket_config ORDER BY guild_id"
+        ) as cur:
+            return [
+                _ticket_config_row(row)
+                for row in await cur.fetchall()
+            ]
+
+
+async def save_ticket_config(
+    guild_id: int,
+    channel_id: int | None,
+    message_id: int | None,
+    embed_title: str = "الدعم الفني",
+    embed_description: str = "",
+    embed_color: int = 0x5865F2,
+    footer_text: str = "PR1ME TEAM Support",
+) -> dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            INSERT INTO ticket_config
+                (guild_id, channel_id, message_id, embed_title,
+                 embed_description, embed_color, footer_text, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                message_id = excluded.message_id,
+                embed_title = excluded.embed_title,
+                embed_description = excluded.embed_description,
+                embed_color = excluded.embed_color,
+                footer_text = excluded.footer_text,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                int(guild_id),
+                int(channel_id) if channel_id is not None else None,
+                int(message_id) if message_id is not None else None,
+                str(embed_title)[:256],
+                str(embed_description)[:4000],
+                int(embed_color),
+                str(footer_text)[:2048],
+            ),
+        )
+        await db.commit()
+        async with db.execute(
+            "SELECT * FROM ticket_config WHERE guild_id = ?",
+            (int(guild_id),),
+        ) as cur:
+            row = await cur.fetchone()
+    return _ticket_config_row(row)
+
+
+async def get_ticket_options(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, label, description, emoji, role_id,
+                   category_id, welcome_msg
+            FROM ticket_options
+            WHERE guild_id = ?
+            ORDER BY id
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [_ticket_option_row(row) for row in await cur.fetchall()]
+
+
+async def replace_ticket_options(
+    guild_id: int,
+    options: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            "DELETE FROM ticket_options WHERE guild_id = ?",
+            (int(guild_id),),
+        )
+        for option in options[:25]:
+            await db.execute(
+                """
+                INSERT INTO ticket_options
+                    (guild_id, label, description, emoji, role_id,
+                     category_id, welcome_msg)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(guild_id),
+                    str(option.get("label") or "قسم دعم")[:100],
+                    str(option.get("description") or "")[:100],
+                    str(option.get("emoji") or "🎫")[:2],
+                    int(option["role_id"])
+                    if option.get("role_id") not in (None, "")
+                    else None,
+                    int(option["category_id"])
+                    if option.get("category_id") not in (None, "")
+                    else None,
+                    str(option.get("welcome_msg") or "")[:2000],
+                ),
+            )
+        await db.commit()
+    return await get_ticket_options(guild_id)
+
+
+async def get_active_ticket_for_user_category(
+    guild_id: int,
+    user_id: int,
+    category_key: str,
+) -> dict[str, Any] | None:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT * FROM tickets
+            WHERE guild_id = ? AND user_id = ? AND category_key = ?
+              AND status != 'closed'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (int(guild_id), int(user_id), str(category_key)[:80]),
+        ) as cur:
+            row = await cur.fetchone()
+    return _ticket_row(dict(row)) if row else None
 
 
 async def create_ticket(

@@ -1825,7 +1825,14 @@
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم");
     }
   }
-  async function saveCommandPolicy(command, enabled, allowedRoles, allowedChannels, aliases = command.aliases || []) {
+  async function saveCommandPolicy(
+    command,
+    enabled,
+    allowedRoles,
+    allowedChannels,
+    aliases = command.custom_aliases || command.aliases || [],
+    policyExtras = {},
+  ) {
     try {
       const r = await api(`api/guild/${state.guild.id}/commands/${encodeURIComponent(command.command_name)}/policy`, {
         method: "POST",
@@ -1836,6 +1843,9 @@
           aliases,
           allowed_roles: allowedRoles,
           allowed_channels: allowedChannels,
+          auto_delete_seconds: policyExtras.auto_delete_seconds,
+          response_style: policyExtras.response_style,
+          response_template: policyExtras.response_template,
         }),
       });
       const data = await r.json();
@@ -4478,6 +4488,7 @@
     state.drawerOpen = false;
     state.onboarding = null;
     state.commandStudio = { commands: [], roles: [], channels: [], shortcuts: [] };
+    state.commandRegistry = { categories: [], commands: [], policies: {}, byKey: {} };
     state.shortcutCommandId = "";
     state.shortcutInputText = null;
     state.autoResponses = [];
@@ -4493,12 +4504,13 @@
     closeSSE();
     stopIncidentRefresh();
     try {
-      const [mr, sr, ir, or, cr, ar, ta, tv, tk, tc, str, acr, gr, er, lr] = await Promise.all([
+      const [mr, sr, ir, or, cr, registryResponse, ar, ta, tv, tk, tc, str, acr, gr, er, lr] = await Promise.all([
         fetchGuildMeta(id),
         api(`api/guild/${id}/settings`),
         api(`api/guild/${id}/security/incidents`),
         api(`api/guild/${id}/onboarding`),
         api(`api/guild/${id}/commands`),
+        api(`api/guild/${id}/commands/registry`),
         api(`api/guild/${id}/auto-responses`),
         api(`api/guild/${id}/tickets/active`),
         api(`api/guild/${id}/tickets/archive`),
@@ -4511,12 +4523,13 @@
         api(`api/guild/${id}/logs/channels`),
       ]);
       if (state.guild.id !== id) return;
-      const [meta, settings, incidents, onboarding, commands, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming, economy, logRouting] = await Promise.all([
+      const [meta, settings, incidents, onboarding, commands, registry, autoResponses, activeTickets, archiveTickets, ticketKpis, canned, stats, actions, gaming, economy, logRouting] = await Promise.all([
         Promise.resolve(mr),
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
         or.json(),
         cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [], shortcuts: [] }),
+        registryResponse.ok ? registryResponse.json() : Promise.resolve({ categories: [], commands: [], policies: {} }),
         ar.ok ? ar.json() : Promise.resolve({ rules: [], channels: [] }),
         ta.ok ? ta.json() : Promise.resolve({ tickets: [] }),
         tv.ok ? tv.json() : Promise.resolve({ tickets: [] }),
@@ -4535,6 +4548,12 @@
         roles: commands.roles || meta.roles || [],
         channels: commands.channels || meta.channels || [],
         shortcuts: commands.shortcuts || [],
+      };
+      state.commandRegistry = {
+        categories: registry.categories || [],
+        commands: registry.commands || [],
+        policies: registry.policies || {},
+        byKey: Object.fromEntries((registry.commands || []).map((item) => [String(item.key).toLowerCase(), item])),
       };
       state.selectedCommandIds = [];
       state.commandSearch = "";

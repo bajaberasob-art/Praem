@@ -274,36 +274,56 @@
     }
     return r;
   }
+  async function readJson(response, fallback = {}) {
+    if (!response?.ok) return fallback;
+    const contentType = response.headers?.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) return fallback;
+    try {
+      return await response.json();
+    } catch (_) {
+      return fallback;
+    }
+  }
+  async function optionalJson(url, fallback = {}) {
+    try {
+      return await readJson(await api(url), fallback);
+    } catch (error) {
+      if (error.message === "unauth") throw error;
+      return fallback;
+    }
+  }
   async function refreshSession() {
     const r = await api("api/me", { cache: "no-store" });
-    const data = await r.json();
+    const data = await readJson(r, {});
     if (!data.auth || !data.session) return false;
     state.session = data.session;
     return true;
   }
   async function writeApi(url, body, retry = true) {
-    const options = {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": state.session.csrf,
-      },
-      body: JSON.stringify(body),
-    };
-    let response = await api(url, options);
-    if (response.status === 403 && retry) {
-      let data = {};
-      try {
-        data = await response.clone().json();
-      } catch (_) {
-        data = {};
+    try {
+      const options = {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": state.session.csrf,
+        },
+        body: JSON.stringify(body),
+      };
+      let response = await api(url, options);
+      if (response.status === 403 && retry) {
+        const data = await readJson(response, {});
+        if (data.error === "csrf" && await refreshSession()) {
+          options.headers["X-CSRF-Token"] = state.session.csrf;
+          response = await api(url, options);
+        }
       }
-      if (data.error === "csrf" && await refreshSession()) {
-        options.headers["X-CSRF-Token"] = state.session.csrf;
-        response = await api(url, options);
+      return response;
+    } catch (error) {
+      if (error.message !== "unauth") {
+        toast("تعذر الاتصال بالخادم. تحقق من الاتصال وحاول مجدداً", "warn");
       }
+      throw error;
     }
-    return response;
   }
   // Shared components
   function avatar(src, name) {

@@ -44,6 +44,40 @@ intents.guilds = True
 intents.emojis_and_stickers = True
 
 
+# Discord allows at most 100 top-level application commands. The project has
+# more leaf commands than that, so these newer command families are grouped
+# without deleting any callback or changing its behavior.
+SLASH_COMMAND_GROUPS = {
+    "ChatJailCog": {
+        "chat": {
+            "clear_user", "cleanup", "nuke", "lock", "unlock", "lockall",
+            "unlockall", "hide", "show", "hideall", "showall", "emergency",
+            "thread_lock", "thread_unlock", "clean_commands", "clean_bots",
+            "delete_after", "delete_before", "block_write", "unblock_write",
+            "hide_member", "show_member", "open_chat_member",
+            "remove_chat_member",
+        },
+        "jail": {"jail", "solo_jail", "unjail"},
+    },
+    "AdminAdvancedCog": {
+        "admin": {
+            "setnick", "summon", "delwarn", "clearwarns", "give_role",
+            "take_role", "strip_roles", "role_color", "dossier", "note",
+            "notes", "delnote", "event_points", "reset_points", "roleall",
+            "removeroleall", "massrole", "temprole", "role_icon",
+            "sync_perms", "role_members", "no_role", "bot_list",
+            "member_stats", "reset_nicks",
+        },
+    },
+}
+
+SLASH_GROUP_DESCRIPTIONS = {
+    "chat": "إدارة الشات والقنوات",
+    "jail": "السجن والعزل",
+    "admin": "الإدارة المتقدمة",
+}
+
+
 def configured_sync_guild() -> discord.Object | None:
     """Return the optional guild used for fast slash-command synchronization."""
     guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
@@ -77,6 +111,7 @@ class EnterpriseBot(commands.Bot):
         self._gateway_watchdog_task: asyncio.Task | None = None
         self._wal_checkpoint_task: asyncio.Task | None = None
         self.started_at = time.monotonic()
+        self._slash_groups: dict[str, app_commands.Group] = {}
 
     async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):
         options = {"override": override}
@@ -84,7 +119,47 @@ class EnterpriseBot(commands.Bot):
             options["guild"] = guild
         if guilds is not None:
             options["guilds"] = guilds
-        result = await super().add_cog(cog, **options)
+        cog_groups = SLASH_COMMAND_GROUPS.get(cog.__class__.__name__, {})
+        original_add = self.tree.add_command
+
+        def routed_add(
+            command,
+            *,
+            override=False,
+            guild=None,
+            guilds=None,
+        ):
+            group_name = next(
+                (
+                    name
+                    for name, command_names in cog_groups.items()
+                    if getattr(command, "name", None) in command_names
+                ),
+                None,
+            )
+            if group_name and guild is None and guilds is None:
+                group = self._slash_groups.get(group_name)
+                if group is None:
+                    group = app_commands.Group(
+                        name=group_name,
+                        description=SLASH_GROUP_DESCRIPTIONS[group_name],
+                    )
+                    self._slash_groups[group_name] = group
+                    original_add(group, override=override)
+                group.add_command(command, override=override)
+                return
+            return original_add(
+                command,
+                override=override,
+                guild=guild,
+                guilds=guilds,
+            )
+
+        self.tree.add_command = routed_add
+        try:
+            result = await super().add_cog(cog, **options)
+        finally:
+            self.tree.add_command = original_add
         self.install_interaction_guards()
         return result
 

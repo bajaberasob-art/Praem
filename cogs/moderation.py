@@ -396,6 +396,12 @@ class Moderation(commands.Cog):
                 ephemeral=True,
             )
         cnt = await add_warning(member.id, itx.guild.id, itx.user.id, reason)
+        # Preserve the legacy warning count/API while mirroring the same
+        # action into Step 4's additive administrative warning table.
+        try:
+            await add_member_warning(itx.guild.id, member.id, itx.user.id, reason)
+        except Exception:
+            logger.exception("[MODERATION] تعذر مزامنة تحذير Step 4")
         emb = discord.Embed(
             title="⚠️ تحذير",
             description=(

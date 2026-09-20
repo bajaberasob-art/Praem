@@ -25,6 +25,16 @@ token exchange when the client secret is the wrong credential.
 **How to apply:** Store the client secret only as a Replit Secret and restart
 the bot after replacing it so the process reloads the value.
 
+OAuth environment values must be stripped at process startup, and the redirect
+URI must be stripped again when building both the authorization URL and token
+exchange payload.
+
+**Why:** A secret-store newline in `REDIRECT_URI` becomes `%0A` during URL
+encoding and Discord rejects the callback as an unregistered redirect URI.
+
+**How to apply:** Keep OAuth values private, normalize them before use, and
+never log the resulting client secret or token.
+
 After OAuth succeeds, redirect the callback to the mounted dashboard base path
 rather than `/`; otherwise the public artifact router returns a 404 even though
 authentication completed.

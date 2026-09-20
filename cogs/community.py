@@ -1527,18 +1527,6 @@ class Community(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="remind",
-        description="ضبط منبه تذكير بالدقائق",
-    )
-    @app_commands.checks.bot_has_permissions(
-        view_channel=True,
-        send_messages=True,
-    )
-    @app_commands.describe(
-        minutes="المدة بالدقائق",
-        reminder="الرسالة المطلوب التذكير بها",
-    )
     async def remind(
         self,
         itx: discord.Interaction,

@@ -1734,10 +1734,6 @@ class Utilities(commands.Cog):
         embed.add_field(name="الأوامر", value=f"`{len(list(self.bot.tree.walk_commands()))}` أمر Slash", inline=True)
         await itx.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="ping",
-        description="فحص سرعة استجابة البوت والاتصال",
-    )
     async def ping(self, itx: discord.Interaction):
         started_at = time.perf_counter()
         await itx.response.defer()
@@ -1824,10 +1820,6 @@ class Utilities(commands.Cog):
             ephemeral=True,
         )
 
-    @app_commands.command(
-        name="serverinfo",
-        description="عرض بيانات وإحصائيات السيرفر الكاملة",
-    )
     async def serverinfo(self, itx: discord.Interaction):
         guild = itx.guild
         embed = discord.Embed(
@@ -1871,10 +1863,6 @@ class Utilities(commands.Cog):
         )
         await itx.response.send_message(embed=embed)
 
-    @app_commands.command(
-        name="avatar",
-        description="عرض الصورة الشخصية لأي عضو",
-    )
     async def avatar(
         self,
         itx: discord.Interaction,

@@ -69,12 +69,29 @@ SLASH_COMMAND_GROUPS = {
             "member_stats", "reset_nicks",
         },
     },
+    "ToolsChannelsCog": {
+        "tools": {
+            "avatar", "banner", "userinfo", "serverinfo", "roleinfo", "ping",
+            "serverheader", "roles", "emojis", "joinposition", "mutual",
+            "whois", "channelinfo", "rolemembers", "snipe", "editsnipe",
+            "firstmsg", "steal_emoji", "enlarge_emoji", "remind",
+            "countdown", "color", "encode", "decode", "quote",
+        },
+        "channels": {
+            "timestamp", "steal_sticker", "create_channel", "delete_channel",
+            "rename_channel", "move_channel", "set_topic", "clone_channel",
+            "create_voice", "delete_voice", "rename_voice", "move_voice",
+            "mod_stats", "undo_action", "security_report",
+        },
+    },
 }
 
 SLASH_GROUP_DESCRIPTIONS = {
     "chat": "إدارة الشات والقنوات",
     "jail": "السجن والعزل",
     "admin": "الإدارة المتقدمة",
+    "tools": "معلومات وأدوات الأعضاء",
+    "channels": "إدارة القنوات والإحصائيات",
 }
 
 
@@ -227,6 +244,7 @@ class EnterpriseBot(commands.Bot):
             "cogs.sanctions_voice",
             "cogs.chat_jail",
             "cogs.admin_advanced",
+            "cogs.tools_channels",
             "cogs.engagement",
             "cogs.economy",
             "cogs.utilities",

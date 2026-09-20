@@ -142,7 +142,7 @@ class ToolsChannelsCog(commands.Cog):
         for row in await get_due_user_reminders():
             guild = self.bot.get_guild(int(row["guild_id"]))
             channel = guild.get_channel(int(row["channel_id"])) if guild else None
-            content = f"<@{int(row['user_id'])}> ⏰ {_safe(row['reminder_text'], 1800)}"
+            content = f"<@{int(row['user_id'])}> ⏰ {_safe(row['text'], 1800)}"
             delivered = False
             try:
                 if channel and hasattr(channel, "send"):
@@ -327,7 +327,13 @@ class ToolsChannelsCog(commands.Cog):
         if delta is None:
             return await self._error(interaction, "remind", "استخدم مدة مثل 10m أو 2h أو 1d.")
         due = discord.utils.utcnow() + delta
-        reminder_id = await add_reminder(interaction.guild.id, interaction.user.id, interaction.channel.id, text, due)
+        reminder_id = await add_reminder(
+            interaction.guild.id,
+            interaction.user.id,
+            interaction.channel.id,
+            text,
+            due.strftime("%Y-%m-%d %H:%M:%S"),
+        )
         return await self._reply(interaction, "remind", "⏰ تم حفظ التذكير", f"سيظهر <t:{int(due.timestamp())}:R> (رقم `{reminder_id}`).")
 
     @app_commands.command(name="countdown", description="عرض عد تنازلي")

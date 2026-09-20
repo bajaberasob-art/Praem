@@ -53,6 +53,7 @@ from cogs.command_meta import (
     RESPONSE_STYLES,
     grouped_command_registry,
 )
+from cogs.community import normalize_ticket_categories
 
 routes = web.RouteTableDef()
 PROJECT_DIR = Path(__file__).parent.resolve()
@@ -2018,6 +2019,89 @@ def _ticket_role_ids(guild, categories):
     return clean, None
 
 
+def _ticket_embed_config(body: dict, existing: dict | None = None):
+    existing = existing or {}
+    title = str(body.get("embed_title", existing.get("embed_title") or "🎫 مركز الدعم والتذاكر")).strip()
+    description = str(body.get("embed_description", existing.get("embed_description") or "")).strip()
+    footer = str(body.get("footer_text", existing.get("footer_text") or "Help Desk • اختر تصنيفاً لبدء المحادثة")).strip()
+    if not title or len(title) > 256:
+        return None, {"embed_title": "عنوان اللوحة يجب أن يكون بين 1 و256 حرفاً"}
+    if len(description) > 4096:
+        return None, {"embed_description": "وصف اللوحة يجب ألا يتجاوز 4096 حرفاً"}
+    if len(footer) > 2048:
+        return None, {"footer_text": "التذييل يجب ألا يتجاوز 2048 حرفاً"}
+    raw_color = body.get("embed_color", existing.get("embed_color", 0x5865F2))
+    try:
+        if isinstance(raw_color, str):
+            raw_color = raw_color.strip().lstrip("#")
+            color = int(raw_color, 16) if raw_color else 0x5865F2
+        else:
+            color = int(raw_color)
+    except (TypeError, ValueError):
+        return None, {"embed_color": "لون اللوحة غير صالح"}
+    if color < 0 or color > 0xFFFFFF:
+        return None, {"embed_color": "لون اللوحة يجب أن يكون HEX صالحاً"}
+    return {
+        "embed_title": title,
+        "embed_description": description,
+        "embed_color": color,
+        "footer_text": footer,
+    }, None
+
+
+@routes.get('/api/guild/{guild_id}/tickets/config')
+async def api_guild_tickets_config_get(req):
+    _, guild = await authorize(req)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    config = await get_ticket_config(guild.id)
+    options = await get_ticket_options(guild.id)
+    if not options:
+        options = normalize_ticket_categories(None)
+    else:
+        options = normalize_ticket_categories(options)
+    return web.json_response({
+        "config": config or {
+            "guild_id": guild.id,
+            "channel_id": None,
+            "message_id": None,
+            "embed_title": "🎫 مركز الدعم والتذاكر",
+            "embed_description": "",
+            "embed_color": 0x5865F2,
+            "footer_text": "Help Desk • اختر تصنيفاً لبدء المحادثة",
+        },
+        "categories": options,
+        "options": options,
+    })
+
+
+@routes.post('/api/guild/{guild_id}/tickets/config')
+async def api_guild_tickets_config_save(req):
+    _, guild = await authorize(req, write=True)
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    categories, category_error = _ticket_role_ids(guild, body.get("categories", body.get("options")))
+    if category_error:
+        return json_error(400, "validation", fields={"categories": category_error})
+    current = await get_ticket_config(guild.id) or {}
+    embed_config, embed_error = _ticket_embed_config(body, current)
+    if embed_error:
+        return json_error(400, "validation", fields=embed_error)
+    saved = await save_ticket_config(
+        guild.id,
+        current.get("channel_id"),
+        current.get("message_id"),
+        **embed_config,
+    )
+    options = await replace_ticket_options(guild.id, categories)
+    return web.json_response({"config": saved, "categories": options, "options": options})
+
+
 @routes.post('/api/guild/{guild_id}/tickets/deploy')
 async def api_guild_tickets_deploy(req):
     session, guild = await authorize(req, write=True)
@@ -2030,17 +2114,23 @@ async def api_guild_tickets_deploy(req):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
         return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
-    channel_id = body.get("target_channel_id")
+    channel_id = body.get("target_channel_id", body.get("channel_id"))
     if isinstance(channel_id, bool) or not str(channel_id).isdigit():
         return json_error(400, "validation", fields={"target_channel_id": "معرف القناة غير صالح"})
     channel = guild.get_channel(int(channel_id))
     if not isinstance(channel, discord.TextChannel):
         return json_error(400, "validation", fields={"target_channel_id": "القناة النصية غير موجودة"})
-    categories, category_error = _ticket_role_ids(guild, body.get("categories"))
+    categories, category_error = _ticket_role_ids(guild, body.get("categories", body.get("options")))
     if category_error:
         return json_error(400, "validation", fields={"categories": category_error})
+    embed_config, embed_error = _ticket_embed_config(
+        body,
+        await get_ticket_config(guild.id),
+    )
+    if embed_error:
+        return json_error(400, "validation", fields=embed_error)
     try:
-        result = await community.deploy_ticket_panel(channel.id, categories)
+        result = await community.deploy_ticket_panel(channel.id, categories, embed_config)
     except (ValueError, discord.Forbidden, discord.HTTPException) as error:
         logger.warning("Ticket panel deployment failed: %s", error)
         return json_error(400, "ticket_panel_deploy_failed")

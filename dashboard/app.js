@@ -2566,11 +2566,12 @@
   async function refreshTickets() {
     const id = state.guild.id;
     try {
-      const [active, archive, kpis, canned] = await Promise.all([
+      const [active, archive, kpis, canned, configResponse] = await Promise.all([
         api(`api/guild/${id}/tickets/active`),
         api(`api/guild/${id}/tickets/archive?q=${encodeURIComponent(state.ticketSearch)}`),
         api(`api/guild/${id}/tickets/kpis`),
         api(`api/guild/${id}/tickets/canned`),
+        api(`api/guild/${id}/tickets/config`),
       ]);
       state.tickets = {
         active: active.ok ? (await active.json()).tickets || [] : state.tickets.active,
@@ -2578,6 +2579,13 @@
         kpis: kpis.ok ? (await kpis.json()).kpis || [] : state.tickets.kpis,
         canned: canned.ok ? (await canned.json()).responses || [] : state.tickets.canned,
       };
+      if (configResponse.ok) {
+        const configData = await configResponse.json();
+        state.ticketConfig = { ...state.ticketConfig, ...(configData.config || {}) };
+        if (Array.isArray(configData.categories) && configData.categories.length) {
+          state.ticketCategories = configData.categories;
+        }
+      }
       renderPage();
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر تحديث مركز التذاكر");

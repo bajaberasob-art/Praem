@@ -14,3 +14,5 @@ description: Non-obvious decisions behind the guild-settings persistence, dashbo
 - To test the dashboard in a browser without OAuth, use the harness under `tests/` that fakes the bot and seeds a session; the workspace bot is in zero guilds and OAuth env vars are not configured.
 - After a command-policy save, update both the command row and the in-memory registry policy before rerendering the drawer.
   **Why:** rerendering from a stale registry snapshot makes a successful save appear to revert aliases and policy controls.
+- Chip editors must include valid text still pending in the input when the save button is clicked, and successful saves should keep the detail drawer open.
+  **Why:** mobile users commonly save without pressing Enter, and closing/reloading the drawer made a successful mutation look like a reset.

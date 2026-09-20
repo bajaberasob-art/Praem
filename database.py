@@ -3373,6 +3373,8 @@ async def get_command_policies(
                     item["auto_delete_seconds"] = 0
                 item["response_style"] = str(item.get("response_style") or "default")
                 item["response_template"] = str(item.get("response_template") or "")[:2000]
+                item["response_mode"] = item["response_style"]
+                item["custom_template"] = item["response_template"]
                 result[item["command_name"]] = item
     COMMAND_CACHE[guild_id] = result
     return {
@@ -3519,6 +3521,8 @@ async def save_command_policy(
         "auto_delete_seconds": max(0, int(item.get("auto_delete_seconds") or 0)),
         "response_style": str(item.get("response_style") or "default"),
         "response_template": str(item.get("response_template") or "")[:2000],
+        "response_mode": str(item.get("response_style") or "default"),
+        "custom_template": str(item.get("response_template") or "")[:2000],
         "updated_at": item.get("updated_at"),
     }
     COMMAND_CACHE.setdefault(guild_id, {})[name] = result

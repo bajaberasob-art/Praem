@@ -1352,8 +1352,8 @@ async def api_guild_commands_registry(req):
                 "allowed_roles": list(policy.get("allowed_roles", [])),
                 "allowed_channels": list(policy.get("allowed_channels", [])),
                 "auto_delete_seconds": int(policy.get("auto_delete_seconds") or 0),
-                "response_style": str(policy.get("response_style") or "default"),
-                "response_template": str(policy.get("response_template") or ""),
+                "response_mode": str(policy.get("response_mode") or policy.get("response_style") or "default"),
+                "custom_template": str(policy.get("custom_template") or policy.get("response_template") or ""),
                 "configured": metadata["key"] in policies,
                 "updated_at": policy.get("updated_at"),
             },
@@ -1451,31 +1451,31 @@ async def api_guild_command_policy(req):
                 "validation",
                 fields={"auto_delete_seconds": "اختر مدة حذف تلقائي معتمدة"},
             )
-    response_style = body.get("response_style")
-    if response_style is not None:
-        response_style = str(response_style).strip().lower()
-        if response_style not in RESPONSE_STYLES:
+    response_mode = body.get("response_mode", body.get("response_style"))
+    if response_mode is not None:
+        response_mode = str(response_mode).strip().lower()
+        if response_mode not in RESPONSE_STYLES:
             return json_error(
                 400,
                 "validation",
-                fields={"response_style": "نمط الرد غير صالح"},
+                fields={"response_mode": "نمط الرد غير صالح"},
             )
-    response_template = body.get("response_template")
-    if response_template is not None:
-        response_template = str(response_template)
-        if len(response_template) > 2000:
+    custom_template = body.get("custom_template", body.get("response_template"))
+    if custom_template is not None:
+        custom_template = str(custom_template)
+        if len(custom_template) > 2000:
             return json_error(
                 400,
                 "validation",
-                fields={"response_template": "القالب يتجاوز 2000 حرف"},
+                fields={"custom_template": "القالب يتجاوز 2000 حرف"},
             )
     policy_args = {"aliases": aliases}
     if auto_delete_seconds is not None:
         policy_args["auto_delete_seconds"] = auto_delete_seconds
-    if response_style is not None:
-        policy_args["response_style"] = response_style
-    if response_template is not None:
-        policy_args["response_template"] = response_template
+    if response_mode is not None:
+        policy_args["response_style"] = response_mode
+    if custom_template is not None:
+        policy_args["response_template"] = custom_template
     try:
         result = await utilities.toggle_command(
             guild.id,

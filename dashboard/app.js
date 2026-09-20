@@ -1841,7 +1841,33 @@
         toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ إعدادات الأمر", "warn");
         return false;
       }
-      Object.assign(command, data.command);
+      const saved = data.command;
+      const savedAliases = Array.isArray(saved.aliases)
+        ? [...saved.aliases]
+        : [...(aliases || [])];
+      Object.assign(command, saved, {
+        aliases: savedAliases,
+        custom_aliases: savedAliases,
+      });
+      const policyStore = state.commandRegistry?.policies || {};
+      const policyKeys = [
+        String(command.command_name || "").toLowerCase(),
+        String(command.command_name || "").toLowerCase().split(/\s+/).pop(),
+      ];
+      policyKeys.forEach((key) => {
+        const policy = policyStore[key];
+        if (policy) {
+          Object.assign(policy, {
+            enabled: command.enabled,
+            aliases: [...savedAliases],
+            allowed_roles: [...(command.allowed_roles || [])],
+            allowed_channels: [...(command.allowed_channels || [])],
+            auto_delete_seconds: Number(command.auto_delete_seconds || 0),
+            response_mode: command.response_mode || command.response_style || "default",
+            custom_template: command.custom_template || command.response_template || "",
+          });
+        }
+      });
       return true;
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");

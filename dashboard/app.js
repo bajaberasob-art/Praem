@@ -2120,7 +2120,7 @@
       aliasInput,
       aliasChips,
     );
-    const shortcuts = commandShortcuts(command);
+    const shortcuts = commandShortcuts(command).filter((item) => !item.policyAlias);
     const shortcutInput = el("textarea", {
       class: "studio-textarea command-alias-input",
       rows: "2",

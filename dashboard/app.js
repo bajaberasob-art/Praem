@@ -1844,8 +1844,8 @@
           allowed_roles: allowedRoles,
           allowed_channels: allowedChannels,
           auto_delete_seconds: policyExtras.auto_delete_seconds,
-          response_style: policyExtras.response_style,
-          response_template: policyExtras.response_template,
+          response_mode: policyExtras.response_mode,
+          custom_template: policyExtras.custom_template,
         }),
       });
       const data = await r.json();
@@ -1862,8 +1862,8 @@
   }
   function parseCommandAliases(input) {
     const aliases = [...new Set(
-      String(input?.value || "")
-        .split(/[,،\n]+/)
+      (Array.isArray(input) ? input : String(input?.value || "").split(/[,،\n]+/))
+        .map((value) => String(value))
         .map((value) => value.trim().replace(/^[/!]/, ""))
         .filter(Boolean),
     )];
@@ -2066,87 +2066,81 @@
     let detailEnabled = effectivePolicy.enabled !== false;
     let activeTab = "general";
     const back = el("div", { class: "modal-back command-detail-back", role: "dialog", "aria-modal": "true" });
-    const input = el("input", {
-      class: "studio-input command-simulator-input",
-      value: state.commandSimulatorText || `${state.draft?.prefix || "!"}${command.command_name}`,
-      placeholder: `${state.draft?.prefix || "!"}${command.command_name} ...`,
-      "aria-label": "رسالة المحاكاة",
-    });
-    const output = el("div", { class: "command-simulator-output" });
-    const renderOutput = () => {
-      state.commandSimulatorText = input.value;
-      const entered = input.value.trim() || `${state.draft?.prefix || "!"}${command.command_name}`;
-      output.replaceChildren(
-        el("span", { class: "simulator-user", text: "أنت" }),
-        el("code", { text: entered }),
-        el("span", { class: "simulator-arrow", text: "→" }),
-        el("span", { class: "simulator-response", text: command.example_response || command.response_preview || "سيتم تشغيل الأمر حسب سياسة البوت الحالية." }),
-      );
-    };
-    input.oninput = renderOutput;
-    renderOutput();
     const permissionBox = warnings.length
       ? el("div", { class: "permission-warning" },
           el("strong", { text: "تنبيه صلاحيات" }),
           el("p", { text: warnings.join("، ") }),
         )
       : el("div", { class: "permission-ok", text: "لا توجد تحذيرات صلاحيات من البيانات الحالية" });
-    const aliasInput = el("textarea", {
-      class: "studio-textarea command-alias-input",
-      rows: "2",
-      placeholder: "مثال: عيب، تحذير، انذار",
-      "aria-label": "اختصارات الأمر",
+    let aliasValues = [...new Set(effectivePolicy.custom_aliases.map((value) => String(value).trim().replace(/^[/!]/, "")).filter(Boolean))].slice(0, 20);
+    const aliasInput = el("input", {
+      class: "studio-input command-alias-input",
+      type: "text",
+      placeholder: "اكتب اسماً بديلاً ثم اضغط Enter أو Space",
+      "aria-label": "إضافة اسم بديل",
+      autocomplete: "off",
     });
-    aliasInput.value = effectivePolicy.custom_aliases.join("، ");
     const aliasChips = el("div", { class: "command-alias-chips" });
     const renderAliases = () => {
-      const aliases = String(aliasInput.value || "")
-        .split(/[,،\n]+/)
-        .map((value) => value.trim().replace(/^[/!]/, ""))
-        .filter(Boolean);
-      const nodes = aliases.length
-        ? aliases.map((alias) => el("code", { class: "command-alias-chip", text: alias }))
+      const nodes = aliasValues.length
+        ? aliasValues.map((alias) => {
+            const chip = el("span", { class: "command-alias-chip" },
+              el("span", { text: alias }),
+              el("button", {
+                type: "button",
+                class: "command-alias-remove",
+                text: "×",
+                title: `إزالة ${alias}`,
+                "aria-label": `إزالة ${alias}`,
+                onClick: () => {
+                  aliasValues = aliasValues.filter((value) => value !== alias);
+                  renderAliases();
+                },
+              }),
+            );
+            return chip;
+          })
         : [el("span", { class: "hint", text: "لا توجد اختصارات مخصصة لهذا الأمر بعد" })];
       aliasChips.replaceChildren(...nodes);
+      aliasCount.textContent = `${aliasValues.length}/20`;
     };
-    aliasInput.oninput = renderAliases;
+    const aliasCount = el("span", { class: "alias-count", text: "0/20" });
+    const addAlias = () => {
+      const value = aliasInput.value.trim().replace(/^[/!]/, "");
+      if (!value) return;
+      if (/\s/.test(value) || value.length > 80) {
+        toast("كل اسم بديل يجب أن يكون كلمة واحدة وبحد أقصى 80 حرفاً", "warn");
+        return;
+      }
+      if (!aliasValues.some((item) => item.toLocaleLowerCase() === value.toLocaleLowerCase())) {
+        if (aliasValues.length >= 20) {
+          toast("يمكن إضافة 20 اسماً بديلاً كحد أقصى للأمر", "warn");
+          return;
+        }
+        aliasValues = [...aliasValues, value];
+      }
+      aliasInput.value = "";
+      renderAliases();
+      aliasInput.focus();
+    };
+    aliasInput.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        addAlias();
+      } else if (event.key === "Backspace" && !aliasInput.value && aliasValues.length) {
+        aliasValues = aliasValues.slice(0, -1);
+        renderAliases();
+      }
+    };
     renderAliases();
     const aliasesSection = el("section", { class: "command-aliases" },
       el("div", { class: "section-heading compact" },
         el("div", {}, el("div", { class: "eyebrow", text: "CUSTOM ALIASES" }), el("h3", { text: "الأسماء البديلة" })),
-        el("span", { class: "alias-count", text: "20 كحد أقصى" }),
+        aliasCount,
       ),
-      el("p", { class: "hint", text: "اكتب أسماء بديلة وافصل بينها بفاصلة. ستعمل كاختصارات مباشرة للأمر." }),
+      el("p", { class: "hint", text: "اضغط Enter أو Space بعد كل اسم. اضغط × للحذف أو Backspace لإزالة آخر اسم." }),
       aliasInput,
       aliasChips,
-    );
-    const shortcuts = commandShortcuts(command).filter((item) => !item.policyAlias);
-    const shortcutInput = el("textarea", {
-      class: "studio-textarea command-alias-input",
-      rows: "2",
-      placeholder: "مثال: عيب، تحذير، انذار",
-      "aria-label": "اختصارات الأمر",
-    });
-    shortcutInput.value = shortcuts.map((item) => item.trigger).join("، ");
-    const shortcutChips = el("div", { class: "command-alias-chips" });
-    const shortcutChipNodes = shortcuts.length
-      ? shortcuts.map((item) => el("code", { class: "command-alias-chip", text: item.trigger }))
-      : [el("span", { class: "hint", text: "لا توجد اختصارات محفوظة لهذا الأمر بعد" })];
-    shortcutChips.replaceChildren(...shortcutChipNodes);
-    const shortcutSection = el("section", { class: "command-aliases command-shortcut-editor" },
-      el("div", { class: "section-heading compact" },
-        el("div", {}, el("div", { class: "eyebrow", text: "SHORTCUT EDITOR" }), el("h3", { text: "محرر الاختصارات القديم" })),
-        el("span", { class: "alias-count", text: `${shortcuts.length}/20` }),
-      ),
-      el("p", { class: "hint", text: "يحافظ هذا المحرر على اختصارات Discord المحفوظة سابقاً. الأسماء البديلة الجديدة تُدار من القسم السابق." }),
-      shortcutInput,
-      shortcutChips,
-      el("button", {
-        class: "btn ghost alias-save-button",
-        type: "button",
-        text: "حفظ الاختصارات",
-        onClick: () => saveCommandShortcuts(command, shortcutInput),
-      }),
     );
     const rolesEditor = commandChoiceEditor(
       "الرتب المسموحة",

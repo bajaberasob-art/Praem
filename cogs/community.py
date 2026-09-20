@@ -1446,6 +1446,30 @@ class Community(commands.Cog):
             return await self._ticket_denied(itx)
         await itx.response.send_modal(CloseTicketModal())
 
+    async def delete_ticket_from_interaction(self, itx: discord.Interaction):
+        ticket = await get_ticket_by_channel(itx.channel.id)
+        if not ticket:
+            return await itx.response.send_message(
+                "هذه القناة ليست تذكرة مسجلة.", ephemeral=True
+            )
+        if not self._is_ticket_staff(itx.user, ticket):
+            return await self._ticket_denied(itx)
+        await itx.response.defer(ephemeral=True)
+        if ticket["status"] != "closed":
+            await close_ticket(
+                ticket["guild_id"],
+                ticket["id"],
+                itx.user.id,
+                "Deleted by staff",
+            )
+        try:
+            await itx.channel.delete(reason=f"Ticket #{ticket['id']} deleted by staff")
+        except (discord.Forbidden, discord.HTTPException):
+            return await itx.followup.send(
+                "تعذر حذف قناة التذكرة. تحقق من صلاحيات البوت.",
+                ephemeral=True,
+            )
+
     async def close_ticket_from_interaction(
         self,
         itx: discord.Interaction,

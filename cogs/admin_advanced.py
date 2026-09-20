@@ -423,14 +423,20 @@ class AdminAdvancedCog(commands.Cog):
             color=0x3B82F6,
             timestamp=discord.utils.utcnow(),
         )
-        warning_lines = [
-            f"`#{row['id']}` {row['reason']} — {str(row['created_at'])[:16]}"
-            for row in step_warnings[:8]
-        ]
-        warning_lines.extend(
-            f"`#{row[0]}` {row[1]} — {str(row[2])[:16]}"
-            for row in legacy_warnings[:8]
-        )
+        warning_lines = []
+        warning_keys: set[tuple[str, str]] = set()
+        for row in step_warnings:
+            key = (str(row["reason"]), str(row["created_at"])[:16])
+            warning_keys.add(key)
+            warning_lines.append(
+                f"`#{row['id']}` {row['reason']} — {str(row['created_at'])[:16]}"
+            )
+        for row in legacy_warnings:
+            key = (str(row[1]), str(row[2])[:16])
+            if key in warning_keys:
+                continue
+            warning_lines.append(f"`#{row[0]}` {row[1]} — {str(row[2])[:16]}")
+        warning_lines = warning_lines[:8]
         note_lines = [
             f"`#{row['id']}` {row['note_text']} — {str(row['created_at'])[:16]}"
             for row in notes[:8]
@@ -445,7 +451,7 @@ class AdminAdvancedCog(commands.Cog):
             "تم تجميع ملف العضو الإداري.",
             category="log_violations",
             color=0x3B82F6,
-            fields=[("👤 العضو", member.mention, True), ("التحذيرات", str(len(step_warnings) + len(legacy_warnings)), True), ("الملاحظات", str(len(notes)), True)],
+            fields=[("👤 العضو", member.mention, True), ("التحذيرات", str(len(warning_lines)), True), ("الملاحظات", str(len(notes)), True)],
         )
 
     @app_commands.command(name="note", description="إضافة ملاحظة إدارية سرية")

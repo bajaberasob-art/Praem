@@ -668,7 +668,7 @@ class ChatJailCog(commands.Cog):
     @app_commands.check(chat_policy_check)
     @app_commands.checks.has_permissions(administrator=True)
     async def unjail(self, interaction: discord.Interaction, member: discord.Member):
-        record = await unjail_user(interaction.guild.id, member.id)
+        record = await get_jailed_user(interaction.guild.id, member.id)
         if record is None:
             return await self._error(interaction, "unjail", "لا يوجد سجل سجن لهذا العضو.")
         try:
@@ -688,9 +688,10 @@ class ChatJailCog(commands.Cog):
                 private_channel = interaction.guild.get_channel(private_channel_id)
                 if private_channel:
                     await private_channel.delete(reason="انتهاء السجن الفردي")
+            await unjail_user(interaction.guild.id, member.id)
         except (ValueError, TypeError, discord.Forbidden, discord.HTTPException):
             logger.exception("Failed to restore jailed member %s", member.id)
-            return await self._error(interaction, "unjail", "تم حذف سجل السجن لكن تعذر استرجاع كل الرتب أو القناة.")
+            return await self._error(interaction, "unjail", "تعذر استرجاع كل الرتب أو القناة؛ بقي سجل السجن محفوظاً للمحاولة مرة أخرى.")
         return await self._respond(interaction, "unjail", "🔓 فك السجن", f"تم فك السجن عن {member.mention} واسترجاع الرتب المحفوظة.", categories=("log_sanctions", "log_automod"), color=0x22C55E)
 
 

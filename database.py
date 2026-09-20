@@ -979,6 +979,23 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_reminders_due "
                 "ON reminders(status, due_at);"
             )
+            # Step 5 reminders use a dedicated table so the new command
+            # contract can evolve without changing the legacy reminders API.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    remind_at TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_reminders_due "
+                "ON user_reminders(remind_at, id);"
+            )
             # Gaming & esports additions are intentionally isolated from the
             # existing tournament, giveaway, and ticket tables.
             await db.execute("""
@@ -4467,6 +4484,69 @@ async def create_reminder(
         reminder_id = cur.lastrowid
         await db.commit()
     return int(reminder_id)
+
+
+async def add_reminder(
+    guild_id: int,
+    user_id: int,
+    channel_id: int,
+    text: str,
+    remind_at: str,
+) -> int:
+    """Persist a Step 5 user reminder and return its database id.
+
+    This intentionally targets ``user_reminders`` rather than the legacy
+    ``reminders`` table used by the existing community cog.
+    """
+    async with connect() as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO user_reminders
+                (guild_id, user_id, channel_id, text, remind_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                int(user_id),
+                int(channel_id),
+                str(text).strip()[:1000],
+                str(remind_at),
+            ),
+        )
+        reminder_id = cursor.lastrowid
+        await db.commit()
+    return int(reminder_id)
+
+
+async def get_due_user_reminders(
+    now: Optional[str] = None,
+) -> list[Dict[str, Any]]:
+    """Return pending Step 5 reminders whose due time has arrived."""
+    current = now or _utc_now()
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, user_id, channel_id, text, remind_at, created_at
+            FROM user_reminders
+            WHERE remind_at <= ?
+            ORDER BY remind_at ASC, id ASC
+            LIMIT 100
+            """,
+            (str(current),),
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+
+async def delete_reminder(reminder_id: int) -> bool:
+    """Delete one Step 5 reminder, returning whether a row was removed."""
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM user_reminders WHERE id = ?",
+            (int(reminder_id),),
+        )
+        deleted = cursor.rowcount > 0
+        await db.commit()
+    return deleted
 
 
 async def get_due_reminders(now: Optional[str] = None) -> list[Dict[str, Any]]:

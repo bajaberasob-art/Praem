@@ -12,3 +12,5 @@ description: Non-obvious decisions behind the guild-settings persistence, dashbo
 - Frontend rule: rebase only the user's delta onto newer snapshots (SSE/409). Replacing the baseline while keeping a full old draft turns remote edits into "local changes" and overwrites them.
 - Frontend URLs stay relative (no leading slash) because the dashboard may be mounted under a path prefix; snowflakes travel as strings.
 - To test the dashboard in a browser without OAuth, use the harness under `tests/` that fakes the bot and seeds a session; the workspace bot is in zero guilds and OAuth env vars are not configured.
+- After a command-policy save, update both the command row and the in-memory registry policy before rerendering the drawer.
+  **Why:** rerendering from a stale registry snapshot makes a successful save appear to revert aliases and policy controls.

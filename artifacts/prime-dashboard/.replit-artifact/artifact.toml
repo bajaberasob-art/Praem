@@ -9,20 +9,26 @@ router = "path"
 [[services]]
 name = "web"
 paths = [ "/" ]
-localPort = 21849
+localPort = 8099
 
 [services.development]
 run = "pnpm --filter @workspace/prime-dashboard run dev"
 
 [services.production]
-build = [ "pnpm", "--filter", "@workspace/prime-dashboard", "run", "build" ]
-serve = "static"
-publicDir = "artifacts/prime-dashboard/dist/public"
 
-[[services.production.rewrites]]
-from = "/*"
-to = "/index.html"
+[services.production.run]
+args = ["python", "main.py"]
+
+[services.production.run.env]
+PORT = "8099"
+DASHBOARD_PORT = "8099"
+DASHBOARD_BASE_PATH = "/"
+
+[services.production.health.startup]
+path = "/healthz"
 
 [services.env]
-PORT = "21849"
+PORT = "8099"
 BASE_PATH = "/"
+DASHBOARD_PORT = "8099"
+DASHBOARD_BASE_PATH = "/"

@@ -2675,7 +2675,7 @@ async def api_deploy_self_roles(req):
     if isinstance(channel_id, bool) or not str(channel_id).isdigit():
         return json_error(400, "validation", fields={"target_channel_id": "معرف قناة غير صالح"})
     channel = guild.get_channel(int(channel_id))
-    if not isinstance(channel, discord.TextChannel):
+    if not isinstance(channel, MESSAGE_CHANNEL_TYPES):
         return json_error(400, "validation", fields={"target_channel_id": "القناة غير موجودة في هذا السيرفر"})
     roles = body.get("roles")
     if not isinstance(roles, list) or not 1 <= len(roles) <= 25:

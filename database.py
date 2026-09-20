@@ -358,6 +358,46 @@ async def init_db() -> None:
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+            # Step 2 sanctions state. These tables are intentionally isolated
+            # from the existing moderation and warning records.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS temp_bans (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    unban_at TIMESTAMP NOT NULL,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS voice_bans (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    banned_by INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS text_mutes (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    muted_by INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_temp_bans_expiry "
+                "ON temp_bans(unban_at);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_voice_bans_guild "
+                "ON voice_bans(guild_id);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_text_mutes_guild "
+                "ON text_mutes(guild_id);"
+            )
 
             # 3. جدول إعدادات السيرفر والتذاكر
             await db.execute("""

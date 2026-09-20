@@ -35,12 +35,19 @@ from database import (
     get_role_multipliers,
     get_scrims,
     get_guild_settings,
+    get_command_policies,
     delete_panel,
     get_guild_panels,
     delete_shortcut,
     save_shortcut,
     update_guild_settings,
     validate_setting,
+)
+from cogs.command_meta import (
+    AUTO_DELETE_PRESETS,
+    MASTER_COMMANDS_REGISTRY,
+    RESPONSE_STYLES,
+    grouped_command_registry,
 )
 
 routes = web.RouteTableDef()
@@ -1305,6 +1312,37 @@ async def api_guild_commands(req):
     return web.json_response(status)
 
 
+@routes.get('/api/guild/{guild_id}/commands/registry')
+async def api_guild_commands_registry(req):
+    _, guild = await authorize(req)
+    policies = await get_command_policies(guild.id, refresh=True)
+    flattened = []
+    for metadata in MASTER_COMMANDS_REGISTRY.values():
+        policy = policies.get(metadata["key"], {})
+        flattened.append({
+            **metadata,
+            "policy": {
+                "enabled": bool(policy.get("enabled", True)),
+                "aliases": list(policy.get("aliases", [])),
+                "allowed_roles": list(policy.get("allowed_roles", [])),
+                "allowed_channels": list(policy.get("allowed_channels", [])),
+                "auto_delete_seconds": int(policy.get("auto_delete_seconds") or 0),
+                "response_style": str(policy.get("response_style") or "default"),
+                "response_template": str(policy.get("response_template") or ""),
+                "configured": metadata["key"] in policies,
+                "updated_at": policy.get("updated_at"),
+            },
+        })
+    return web.json_response({
+        "guild_id": str(guild.id),
+        "categories": grouped_command_registry(),
+        "commands": flattened,
+        "policies": policies,
+        "auto_delete_presets": list(AUTO_DELETE_PRESETS),
+        "response_styles": list(RESPONSE_STYLES),
+    })
+
+
 @routes.post('/api/guild/{guild_id}/commands/toggle')
 async def api_guild_commands_toggle(req):
     _, guild = await authorize(req, write=True)
@@ -1376,6 +1414,36 @@ async def api_guild_command_policy(req):
     aliases, alias_error = _command_aliases(body.get("aliases", []))
     if alias_error:
         return json_error(400, "validation", fields={"aliases": alias_error})
+    auto_delete_seconds = body.get("auto_delete_seconds")
+    if auto_delete_seconds is not None:
+        try:
+            auto_delete_seconds = int(auto_delete_seconds)
+        except (TypeError, ValueError):
+            auto_delete_seconds = -1
+        if auto_delete_seconds not in AUTO_DELETE_PRESETS:
+            return json_error(
+                400,
+                "validation",
+                fields={"auto_delete_seconds": "اختر مدة حذف تلقائي معتمدة"},
+            )
+    response_style = body.get("response_style")
+    if response_style is not None:
+        response_style = str(response_style).strip().lower()
+        if response_style not in RESPONSE_STYLES:
+            return json_error(
+                400,
+                "validation",
+                fields={"response_style": "نمط الرد غير صالح"},
+            )
+    response_template = body.get("response_template")
+    if response_template is not None:
+        response_template = str(response_template)
+        if len(response_template) > 2000:
+            return json_error(
+                400,
+                "validation",
+                fields={"response_template": "القالب يتجاوز 2000 حرف"},
+            )
     try:
         result = await utilities.toggle_command(
             guild.id,
@@ -1384,6 +1452,9 @@ async def api_guild_command_policy(req):
             roles,
             channels,
             aliases,
+            auto_delete_seconds,
+            response_style,
+            response_template,
         )
     except ValueError as error:
         return json_error(400, "validation", fields={"aliases": str(error)})

@@ -629,6 +629,9 @@ async def init_db() -> None:
                 "aliases": "TEXT NOT NULL DEFAULT '[]'",
                 "allowed_roles": "TEXT NOT NULL DEFAULT '[]'",
                 "allowed_channels": "TEXT NOT NULL DEFAULT '[]'",
+                "auto_delete_seconds": "INTEGER NOT NULL DEFAULT 0",
+                "response_style": "TEXT NOT NULL DEFAULT 'default'",
+                "response_template": "TEXT NOT NULL DEFAULT ''",
                 "updated_at": "TEXT DEFAULT NULL",
             }
             for column, definition in policy_migrations.items():
@@ -2743,7 +2746,8 @@ async def get_command_policies(
         async with db.execute(
             """
             SELECT command_name, is_enabled, aliases, allowed_roles,
-                   allowed_channels, updated_at
+                   allowed_channels, auto_delete_seconds, response_style,
+                   response_template, updated_at
             FROM command_policies
             WHERE guild_id = ?
             ORDER BY command_name
@@ -2757,6 +2761,12 @@ async def get_command_policies(
                 item["aliases"] = _json_aliases(item.get("aliases"))
                 item["allowed_roles"] = _json_ids(item["allowed_roles"])
                 item["allowed_channels"] = _json_ids(item["allowed_channels"])
+                try:
+                    item["auto_delete_seconds"] = max(0, int(item.get("auto_delete_seconds") or 0))
+                except (TypeError, ValueError):
+                    item["auto_delete_seconds"] = 0
+                item["response_style"] = str(item.get("response_style") or "default")
+                item["response_template"] = str(item.get("response_template") or "")[:2000]
                 result[item["command_name"]] = item
     COMMAND_CACHE[guild_id] = result
     return {
@@ -2798,16 +2808,27 @@ async def save_command_policy(
     allowed_roles: list[int | str] | None = None,
     allowed_channels: list[int | str] | None = None,
     aliases: list[str] | None = None,
+    auto_delete_seconds: int | None = None,
+    response_style: str | None = None,
+    response_template: str | None = None,
 ) -> dict[str, Any]:
     guild_id = int(guild_id)
     name = str(command_name).strip().lower()
     roles = [str(role_id) for role_id in (allowed_roles or []) if str(role_id).isdigit()]
     channels = [str(channel_id) for channel_id in (allowed_channels or []) if str(channel_id).isdigit()]
-    if allowed_roles is None or allowed_channels is None or aliases is None:
+    if (
+        allowed_roles is None
+        or allowed_channels is None
+        or aliases is None
+        or auto_delete_seconds is None
+        or response_style is None
+        or response_template is None
+    ):
         async with connect(aiosqlite.Row) as db:
             async with db.execute(
                 """
-                SELECT aliases, allowed_roles, allowed_channels
+                SELECT aliases, allowed_roles, allowed_channels,
+                       auto_delete_seconds, response_style, response_template
                 FROM command_policies
                 WHERE guild_id = ? AND command_name = ?
                 """,
@@ -2821,22 +2842,43 @@ async def save_command_policy(
                 channels = _json_ids(existing["allowed_channels"])
             if aliases is None:
                 aliases = _json_aliases(existing["aliases"])
+            if auto_delete_seconds is None:
+                auto_delete_seconds = existing["auto_delete_seconds"]
+            if response_style is None:
+                response_style = existing["response_style"]
+            if response_template is None:
+                response_template = existing["response_template"]
     normalized_aliases = _json_aliases(aliases or [])
+    try:
+        auto_delete_seconds = int(auto_delete_seconds or 0)
+    except (TypeError, ValueError):
+        auto_delete_seconds = 0
+    if auto_delete_seconds not in {0, 5, 10, 30, 60, 300}:
+        auto_delete_seconds = 0
+    response_style = str(response_style or "default").strip().lower()
+    if response_style not in {"default", "embed", "compact", "silent"}:
+        response_style = "default"
+    response_template = str(response_template or "")[:2000]
     async with connect(aiosqlite.Row) as db:
         cursor = await db.execute(
             """
             INSERT INTO command_policies
                 (guild_id, command_name, is_enabled, aliases,
-                 allowed_roles, allowed_channels, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 allowed_roles, allowed_channels, auto_delete_seconds,
+                 response_style, response_template, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(guild_id, command_name) DO UPDATE SET
                 is_enabled = excluded.is_enabled,
                 aliases = excluded.aliases,
                 allowed_roles = excluded.allowed_roles,
                 allowed_channels = excluded.allowed_channels,
+                auto_delete_seconds = excluded.auto_delete_seconds,
+                response_style = excluded.response_style,
+                response_template = excluded.response_template,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING command_name, is_enabled, aliases, allowed_roles,
-                      allowed_channels, updated_at
+                      allowed_channels, auto_delete_seconds, response_style,
+                      response_template, updated_at
             """,
             (
                 guild_id,
@@ -2845,6 +2887,9 @@ async def save_command_policy(
                 json.dumps(normalized_aliases, ensure_ascii=False),
                 json.dumps(roles, ensure_ascii=False),
                 json.dumps(channels, ensure_ascii=False),
+                auto_delete_seconds,
+                response_style,
+                response_template,
             ),
         )
         row = await cursor.fetchone()
@@ -2855,6 +2900,9 @@ async def save_command_policy(
         "aliases": json.dumps(normalized_aliases, ensure_ascii=False),
         "allowed_roles": json.dumps(roles),
         "allowed_channels": json.dumps(channels),
+        "auto_delete_seconds": auto_delete_seconds,
+        "response_style": response_style,
+        "response_template": response_template,
     }
     result = {
         "command_name": name,
@@ -2862,6 +2910,9 @@ async def save_command_policy(
         "aliases": _json_aliases(item.get("aliases")),
         "allowed_roles": _json_ids(item.get("allowed_roles")),
         "allowed_channels": _json_ids(item.get("allowed_channels")),
+        "auto_delete_seconds": max(0, int(item.get("auto_delete_seconds") or 0)),
+        "response_style": str(item.get("response_style") or "default"),
+        "response_template": str(item.get("response_template") or "")[:2000],
         "updated_at": item.get("updated_at"),
     }
     COMMAND_CACHE.setdefault(guild_id, {})[name] = result

@@ -3429,7 +3429,7 @@ async def start_web_server(bot):
     global bot_ref
     bot_ref = bot
     app = web.Application(middlewares=[private_responses], client_max_size=MAX_BODY)
-    app["bot"] = bot
+    app['bot'] = bot
     app.add_routes(routes)
     # Access logs include callback query strings; do not log authorization codes.
     runner = web.AppRunner(app, access_log=None)

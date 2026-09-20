@@ -250,6 +250,67 @@ _COMMAND_SPECS = {
     "giveaway_reroll": ("إعادة السحب (Giveaway Reroll)", "إحصائيات وتراجع", "manage_events", ["إعادة_السحب"], "!giveaway_reroll [المعرف]", "!giveaway_reroll 12", "اختيار فائز بديل لسحب منتهٍ عند الحاجة."),
 }
 
+# Step 5 keeps its syntax and policy metadata in the same registry as the
+# earlier command families.  The callbacks remain in tools_channels.py, while
+# this data stays import-safe for the dashboard and help surfaces.
+_STEP5_COMMANDS = {
+    "avatar": ("أفتار", "أوامر الأعضاء — معلومات", "send_messages"),
+    "banner": ("بانر", "أوامر الأعضاء — معلومات", "send_messages"),
+    "userinfo": ("معلومات عضو", "أوامر الأعضاء — معلومات", "send_messages"),
+    "serverinfo": ("معلومات السيرفر", "أوامر الأعضاء — معلومات", "send_messages"),
+    "roleinfo": ("معلومات رتبة", "أوامر الأعضاء — معلومات", "send_messages"),
+    "ping": ("بينغ", "أوامر الأعضاء — معلومات", "send_messages"),
+    "serverheader": ("هيدر السيرفر", "أوامر الأعضاء — معلومات", "send_messages"),
+    "roles": ("الرتب", "أوامر الأعضاء — معلومات", "send_messages"),
+    "emojis": ("الإيموجي", "أوامر الأعضاء — معلومات", "send_messages"),
+    "joinposition": ("ترتيب الانضمام", "أوامر الأعضاء — معلومات", "send_messages"),
+    "mutual": ("السيرفرات المشتركة", "أوامر الأعضاء — معلومات", "send_messages"),
+    "whois": ("فحص العضو", "أوامر الأعضاء — معلومات", "send_messages"),
+    "channelinfo": ("معلومات قناة", "أوامر الأعضاء — معلومات", "send_messages"),
+    "rolemembers": ("أعضاء الرتبة", "أوامر الأعضاء — معلومات", "send_messages"),
+    "snipe": ("آخر رسالة محذوفة", "أوامر الأعضاء — أدوات", "manage_messages"),
+    "editsnipe": ("آخر تعديل", "أوامر الأعضاء — أدوات", "manage_messages"),
+    "firstmsg": ("أول رسالة", "أوامر الأعضاء — أدوات", "read_message_history"),
+    "steal_emoji": ("سرقة إيموجي", "أوامر الأعضاء — أدوات", "manage_emojis"),
+    "enlarge_emoji": ("تكبير إيموجي", "أوامر الأعضاء — أدوات", "send_messages"),
+    "remind": ("تذكير", "أوامر الأعضاء — أدوات", "send_messages"),
+    "countdown": ("عداد", "أوامر الأعضاء — أدوات", "send_messages"),
+    "color": ("معاينة لون", "أوامر الأعضاء — أدوات", "send_messages"),
+    "encode": ("تشفير Base64", "أوامر الأعضاء — أدوات", "send_messages"),
+    "decode": ("فك Base64", "أوامر الأعضاء — أدوات", "send_messages"),
+    "quote": ("اقتباس", "أوامر الأعضاء — أدوات", "read_message_history"),
+    "timestamp": ("وقت Discord", "أوامر الأعضاء — أدوات", "send_messages"),
+    "steal_sticker": ("سرقة ستيكر", "أوامر الأعضاء — أدوات", "manage_emojis"),
+    "create_channel": ("إنشاء روم", "إدارة القنوات", "manage_channels"),
+    "delete_channel": ("حذف روم", "إدارة القنوات", "manage_channels"),
+    "rename_channel": ("تغيير اسم روم", "إدارة القنوات", "manage_channels"),
+    "move_channel": ("نقل روم", "إدارة القنوات", "manage_channels"),
+    "set_topic": ("توبيك الروم", "إدارة القنوات", "manage_channels"),
+    "clone_channel": ("نسخ روم", "إدارة القنوات", "manage_channels"),
+    "create_voice": ("إنشاء روم صوتي", "إدارة القنوات", "manage_channels"),
+    "delete_voice": ("حذف روم صوتي", "إدارة القنوات", "manage_channels"),
+    "rename_voice": ("تغيير اسم صوتي", "إدارة القنوات", "manage_channels"),
+    "move_voice": ("نقل روم صوتي", "إدارة القنوات", "manage_channels"),
+    "mod_stats": ("إحصائيات المشرف", "إحصائيات وتراجع", "view_audit_log"),
+    "undo_action": ("تراجع عن إجراء", "إحصائيات وتراجع", "moderate_members"),
+    "security_report": ("تقرير المخاطر", "إحصائيات وتراجع", "administrator"),
+}
+_COMMAND_SPECS.update(
+    {
+        key: (
+            display,
+            category,
+            permission,
+            [],
+            f"!{key} [الخيارات]",
+            f"!{key}",
+            f"{display} ضمن حزمة Step 5 مع احترام سياسات الأوامر وسجل التدقيق.",
+        )
+        for key, (display, category, permission) in _STEP5_COMMANDS.items()
+        if key not in _COMMAND_SPECS
+    }
+)
+
 # Keep the public mapping stable and include the key in every metadata object.
 MASTER_COMMANDS_REGISTRY = {
     key: _command(key, *spec)

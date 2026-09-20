@@ -142,7 +142,7 @@ class ToolsChannelsCog(commands.Cog):
         for row in await get_due_user_reminders():
             guild = self.bot.get_guild(int(row["guild_id"]))
             channel = guild.get_channel(int(row["channel_id"])) if guild else None
-            content = f"<@{int(row['user_id'])}> ⏰ {_safe(row['text'], 1800)}"
+            content = f"<@{int(row['user_id'])}> ⏰ {_safe(row['reminder_text'], 1800)}"
             delivered = False
             try:
                 if channel and hasattr(channel, "send"):

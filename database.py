@@ -987,11 +987,22 @@ async def init_db() -> None:
                     guild_id INTEGER NOT NULL,
                     user_id INTEGER NOT NULL,
                     channel_id INTEGER NOT NULL,
-                    text TEXT NOT NULL,
+                    reminder_text TEXT NOT NULL,
                     remind_at TEXT NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+            async with db.execute("PRAGMA table_info(user_reminders)") as cur:
+                user_reminder_columns = {row[1] for row in await cur.fetchall()}
+            if "reminder_text" not in user_reminder_columns:
+                await db.execute(
+                    "ALTER TABLE user_reminders ADD COLUMN reminder_text TEXT NOT NULL DEFAULT ''"
+                )
+                if "text" in user_reminder_columns:
+                    await db.execute(
+                        "UPDATE user_reminders SET reminder_text = text "
+                        "WHERE reminder_text = ''"
+                    )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_user_reminders_due "
                 "ON user_reminders(remind_at, id);"
@@ -4502,7 +4513,7 @@ async def add_reminder(
         cursor = await db.execute(
             """
             INSERT INTO user_reminders
-                (guild_id, user_id, channel_id, text, remind_at)
+                (guild_id, user_id, channel_id, reminder_text, remind_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (
@@ -4526,7 +4537,7 @@ async def get_due_user_reminders(
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
             """
-            SELECT id, guild_id, user_id, channel_id, text, remind_at, created_at
+            SELECT id, guild_id, user_id, channel_id, reminder_text, remind_at, created_at
             FROM user_reminders
             WHERE remind_at <= ?
             ORDER BY remind_at ASC, id ASC

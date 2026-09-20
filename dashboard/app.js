@@ -4103,11 +4103,22 @@
       const body = Object.fromEntries(new FormData(form).entries());
       body.team_size = Number(body.team_size);
       body.max_slots = Number(body.max_slots);
-      const response = await writeApi(`api/guild/${state.guild.id}/gaming/deploy`, body);
-      const data = await readJson(response, {});
-      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر نشر لوحة السكريم");
-      toast("✅ نُشرت لوحة السكريم في Discord", "success", 3000);
-      await refreshGaming();
+      const button = event.submitter || form.querySelector("button[type=submit]");
+      if (button) button.disabled = true;
+      try {
+        const response = await writeApi(`api/guild/${state.guild.id}/gaming/deploy`, body);
+        const data = await readJson(response, {});
+        if (!response.ok) {
+          toast(data.fields ? Object.values(data.fields)[0] : "تعذر نشر لوحة السكريم", "warn");
+          return;
+        }
+        toast("✅ نُشرت لوحة السكريم في Discord", "success", 3000);
+        await refreshGaming();
+      } catch (error) {
+        if (error.message !== "unauth") toast("تعذر نشر لوحة السكريم", "warn");
+      } finally {
+        if (button) button.disabled = false;
+      }
     };
     const list = el("div", { class: "gaming-list" });
     if (!state.gaming.length) {
@@ -4125,11 +4136,21 @@
             class: "btn danger",
             type: "button",
             text: "إغلاق التسجيل",
-            onClick: async () => {
+            onClick: async (event) => {
               if (!confirm(`إغلاق سكريم «${scrim.title}»؟`)) return;
-              const response = await writeApi(`api/guild/${state.guild.id}/gaming/close`, { scrim_id: scrim.id });
-              if (response.ok) { toast("تم إغلاق السكريم", "success", 2500); await refreshGaming(); }
-              else toast("تعذر إغلاق السكريم");
+              const button = event.currentTarget;
+              button.disabled = true;
+              try {
+                const response = await writeApi(`api/guild/${state.guild.id}/gaming/close`, { scrim_id: scrim.id });
+                if (response.ok) {
+                  toast("تم إغلاق السكريم", "success", 2500);
+                  await refreshGaming();
+                } else toast("تعذر إغلاق السكريم", "warn");
+              } catch (error) {
+                if (error.message !== "unauth") toast("تعذر إغلاق السكريم", "warn");
+              } finally {
+                button.disabled = false;
+              }
             },
           }));
           actions.push(el("button", {
@@ -4171,14 +4192,18 @@
   async function openCredentialPrompt(scrimId) {
     const credentials = prompt("أدخل بيانات غرفة اللعب (الرابط/الكود):", "");
     if (!credentials?.trim()) return;
-    const response = await writeApi(`api/guild/${state.guild.id}/gaming/credentials`, { scrim_id: scrimId, credentials: credentials.trim() });
-    if (response.ok) toast("تم إرسال بيانات الغرفة إلى قناة السكريم", "success", 3000);
-    else toast("تعذر إرسال بيانات الغرفة");
+    try {
+      const response = await writeApi(`api/guild/${state.guild.id}/gaming/credentials`, { scrim_id: scrimId, credentials: credentials.trim() });
+      if (response.ok) toast("تم إرسال بيانات الغرفة إلى قناة السكريم", "success", 3000);
+      else toast("تعذر إرسال بيانات الغرفة", "warn");
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر إرسال بيانات الغرفة", "warn");
+    }
   }
   function economyView() {
     const snapshot = state.economy.settings || { settings: {} };
     const config = snapshot.settings || {};
-    const channels = (state.meta?.channels || []).filter((channel) => channel.type === "text" || !channel.type);
+    const channels = state.meta?.channels || [];
     const roles = state.meta?.roles || [];
     const channelSelect = el(
       "select",

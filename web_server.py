@@ -190,11 +190,14 @@ async def login(req):
     )
     return response
 
+@routes.get('/callback')
+@routes.get('/callback/')
 @routes.get('/api/auth/callback')
-async def callback(req):
+async def callback(request):
     prune_expired()
-    code, state = req.query.get("code"), req.query.get("state")
-    browser_state = req.cookies.get("oauth_state")
+    code = request.query.get("code")
+    state = request.query.get("state")
+    browser_state = request.cookies.get("oauth_state")
     if (
         not state or not browser_state or state not in STATES
         or not secrets.compare_digest(state, browser_state)
@@ -271,11 +274,6 @@ async def callback(req):
             if next_after == after:
                 raise ValueError("Invalid pagination")
             after = next_after
-        if owns_session:
-            close = getattr(session, "close", None)
-            if close:
-                await close()
-
         guilds = []
         for guild in guild_data:
             if (int(guild.get("permissions", 0)) & DASHBOARD_PERMISSION_BITS) or guild.get("owner", False):
@@ -305,11 +303,23 @@ async def callback(req):
             ),
             "connected_guilds_count": len(getattr(bot_ref, "guilds", ())) if bot_ref else 0,
         }
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, TypeError):
+    except (
+        aiohttp.ClientError,
+        asyncio.TimeoutError,
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+    ):
         logger.warning("Discord OAuth request failed or returned invalid data.")
         return web.Response(text="تسجيل الدخول غير متاح مؤقتاً.", status=502)
+    finally:
+        if owns_session and session is not None:
+            close = getattr(session, "close", None)
+            if close and not getattr(session, "closed", False):
+                await close()
 
-    SESSIONS.pop(req.cookies.get("bot_session"), None)
+    SESSIONS.pop(request.cookies.get("bot_session"), None)
     sid = secrets.token_urlsafe(32)
     SESSIONS[sid] = user_session
     res = web.HTTPFound(DASHBOARD_BASE_PATH)

@@ -235,6 +235,8 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
             "aliases": ["انذار", "!مسح"],
             "allowed_roles": [str(ROLES[1].id)],
             "allowed_channels": [str(CHANNELS[0].id)],
+            "response_mode": "compact",
+            "custom_template": "تم تنفيذ {command}",
         }
         req = request(
             "POST",
@@ -252,6 +254,8 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
                 data["command"]["aliases"],
                 data["command"]["allowed_roles"],
                 data["command"]["allowed_channels"],
+                data["command"]["response_mode"],
+                data["command"]["custom_template"],
             ),
             (
                 200,
@@ -259,6 +263,8 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
                 ["انذار", "مسح"],
                 [str(ROLES[1].id)],
                 [str(CHANNELS[0].id)],
+                "compact",
+                "تم تنفيذ {command}",
             ),
         )
 

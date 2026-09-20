@@ -1991,6 +1991,113 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
+.security-settings-stack {
+  display: grid;
+  gap: 12px;
+}
+.security-toggle-list {
+  display: grid;
+  gap: 0;
+}
+.security-accordion {
+  overflow: hidden;
+  border: 1px solid #263754;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, #0b1220, #080b10 72%);
+  box-shadow: inset 0 1px #ffffff08;
+}
+.security-accordion-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  min-height: 62px;
+  padding: 13px 16px;
+  border: 0;
+  color: #e2e8f0;
+  background: transparent;
+  text-align: right;
+  cursor: pointer;
+}
+.security-accordion-trigger:hover,
+.security-accordion-trigger:focus-visible {
+  background: #17255466;
+  outline: 2px solid #4c84ff88;
+  outline-offset: -2px;
+}
+.security-accordion-copy {
+  display: grid;
+  gap: 4px;
+}
+.security-accordion-copy strong {
+  font-size: 0.92rem;
+}
+.security-accordion-copy small {
+  color: #94a3b8;
+  font-size: 0.74rem;
+  font-weight: 500;
+}
+.security-accordion-chevron {
+  color: #7c9cff;
+  font-size: 1.25rem;
+  transition: transform 0.22s ease;
+}
+.security-accordion-trigger[aria-expanded="true"] .security-accordion-chevron {
+  transform: rotate(180deg);
+}
+.security-accordion-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.28s ease, opacity 0.2s ease;
+}
+.security-accordion-panel.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.security-accordion-inner {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 16px;
+  transition: padding 0.28s ease;
+}
+.security-accordion-panel.is-open .security-accordion-inner {
+  padding: 0 16px 16px;
+}
+.security-rule-grid {
+  margin: 0;
+  gap: 11px;
+}
+.security-rule-grid .field {
+  min-width: 0;
+}
+.security-rule-grid .hint {
+  line-height: 1.5;
+}
+.security-multi-select {
+  width: 100%;
+  min-height: 92px;
+  padding: 8px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  color: #e2e8f0;
+  background: #020617;
+  direction: rtl;
+}
+.security-multi-select:focus {
+  border-color: #4c84ff;
+  outline: 2px solid #4c84ff55;
+}
+.security-multi-select option {
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.security-multi-select option:checked {
+  color: #dbeafe;
+  background: #1d4ed8;
+}
 .tactical-card,
 .lockdown-card {
   border-radius: 16px;
@@ -2225,6 +2332,15 @@ textarea {
   }
   .security-feed {
     grid-column: auto;
+  }
+  .security-accordion-trigger {
+    min-height: 58px;
+    padding: 12px;
+  }
+  .security-accordion-inner,
+  .security-accordion-panel.is-open .security-accordion-inner {
+    padding-left: 12px;
+    padding-right: 12px;
   }
 }
 

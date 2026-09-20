@@ -1568,10 +1568,15 @@ class Utilities(commands.Cog):
         command_name = command_target.casefold()
         if not command_name:
             return False
-        slash_command = self._registered_command(command_target)
-        is_slash_command = slash_command is not None and hasattr(
-            slash_command, "_check_can_run"
-        )
+        slash_command = None
+        tree = getattr(self.bot, "tree", None)
+        getter = getattr(tree, "get_command", None)
+        if getter is not None:
+            try:
+                slash_command = getter(command_target)
+            except (AttributeError, TypeError):
+                slash_command = None
+        is_slash_command = slash_command is not None
         if is_slash_command and target.startswith("/"):
             callback = slash_command.callback
             interaction = ShortcutInteraction(message, slash_command)

@@ -74,6 +74,21 @@ class FakeBot:
             None,
         )
 
+    async def get_context(self, message):
+        async def invoke(command, **kwargs):
+            await command.callback(context, **kwargs)
+
+        context = SimpleNamespace(
+            message=message,
+            guild=message.guild,
+            author=message.author,
+            channel=message.channel,
+            command=None,
+            send=message.channel.send,
+            invoke=invoke,
+        )
+        return context
+
 
 class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

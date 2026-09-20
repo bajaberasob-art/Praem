@@ -70,6 +70,12 @@ DISCORD_API = "https://discord.com/api/v10"
 ADMIN_BIT = 0x8
 MANAGE_GUILD_BIT = 0x20
 DASHBOARD_PERMISSION_BITS = ADMIN_BIT | MANAGE_GUILD_BIT
+MESSAGE_CHANNEL_TYPES = (
+    discord.TextChannel,
+    discord.VoiceChannel,
+    discord.StageChannel,
+    discord.ForumChannel,
+)
 BOT_INVITE_PERMISSIONS = (os.getenv("BOT_INVITE_PERMISSIONS") or "8").strip()
 DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
 SESSIONS: dict[str, dict] = {}
@@ -855,10 +861,7 @@ async def live_grant(session, guild) -> bool:
             member = None
         except (discord.HTTPException, asyncio.TimeoutError):
             raise web.HTTPServiceUnavailable(reason="permission check unavailable")
-    allowed = bool(
-        member
-        and (member.guild_permissions.value & DASHBOARD_PERMISSION_BITS)
-    )
+    allowed = bool(member and member_allows_dashboard(member, guild))
     GRANT_CACHE[(user_id, guild.id)] = (now, allowed)
     return allowed
 
@@ -919,6 +922,7 @@ async def guild_meta(guild) -> dict:
     icon = getattr(guild, "icon", None)
     me = guild.me
     top = me.top_role if me else None
+    channels = await dashboard_channels(guild)
     text_channels = list(guild.text_channels)
     fetch_channels = getattr(guild, "fetch_channels", None)
     if fetch_channels is not None:
@@ -932,23 +936,6 @@ async def guild_meta(guild) -> dict:
                 text_channels = fetched_text
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
-    channels = []
-    for channel in sorted(
-        text_channels,
-        key=lambda c: (c.category.position if c.category else -1, c.position),
-    ):
-        try:
-            channel_type = str(channel.type)
-        except (AttributeError, TypeError):
-            # Lightweight test doubles may inherit TextChannel without its
-            # internal _type field; real Discord channels always expose type.
-            channel_type = "text"
-        channels.append({
-            "id": str(channel.id),
-            "name": channel.name,
-            "type": channel_type,
-            "category": channel.category.name if channel.category else None,
-        })
     categories = [
         {"id": str(category.id), "name": category.name}
         for category in sorted(
@@ -1024,6 +1011,49 @@ async def guild_meta(guild) -> dict:
         ],
         "emojis": serialized_emojis,
     }
+
+
+async def dashboard_channels(guild) -> list[dict]:
+    """Return every message-capable guild channel with string snowflake IDs."""
+    cached = list(getattr(guild, "channels", ()) or ())
+    fetch_channels = getattr(guild, "fetch_channels", None)
+    channels = cached
+    if callable(fetch_channels):
+        try:
+            fetched = list(await fetch_channels())
+            if fetched:
+                channels = fetched
+        except (discord.Forbidden, discord.HTTPException, asyncio.TimeoutError):
+            logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
+
+    channels = [
+        channel for channel in channels
+        if isinstance(channel, MESSAGE_CHANNEL_TYPES)
+    ]
+    channels.sort(
+        key=lambda channel: (
+            getattr(getattr(channel, "category", None), "position", -1),
+            getattr(channel, "position", 0),
+            str(getattr(channel, "name", "")),
+        )
+    )
+    result = []
+    for channel in channels:
+        try:
+            channel_type = str(channel.type)
+        except (AttributeError, TypeError):
+            channel_type = "text"
+        result.append({
+            "id": str(channel.id),
+            "name": str(channel.name),
+            "type": channel_type,
+            "category": (
+                str(channel.category.name)
+                if getattr(channel, "category", None) is not None
+                else None
+            ),
+        })
+    return result
 
 
 async def resolve_text_channel(guild, channel_id: int):

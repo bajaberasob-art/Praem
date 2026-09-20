@@ -45,3 +45,11 @@ comparison or an old token makes valid saves appear to fail with a generic 403.
 
 **How to apply:** Preserve the CSRF check, account for `X-Forwarded-Host`, and
 retry only after fetching a fresh authenticated session.
+
+Dashboard authorization should accept server owners, Administrator, or Manage
+Server (`MANAGE_GUILD`) users. Use the shared permission bitmask for both OAuth
+guild filtering and the live bot permission check.
+
+**Why:** Discord commonly grants Manage Server without the Administrator bit,
+and checking only Administrator makes legitimate server managers appear to
+have no authorized servers.

@@ -17,3 +17,4 @@
 - [Audit log routing](audit-log-routing.md) — six-category routes publish to memory only after SQLite commit; embed builders must omit absent avatar URLs.
 - [Production hardening](production-hardening.md) — proxy-relative PWA assets, public health probes, additive SQLite WAL tuning, and layered API limits must stay compatible.
 - [Sanctions and voice ownership](sanctions-voice-engine.md) — new sanctions/voice commands stay additive; existing timeout commands remain owned by moderation to avoid duplicate Slash registrations.
+- [Jail restoration safety](jail-restoration-safety.md) — retain jail state until Discord role and private-channel restoration succeeds.

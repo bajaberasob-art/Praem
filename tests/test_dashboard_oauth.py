@@ -10,8 +10,8 @@ from aiohttp.test_utils import make_mocked_request
 import web_server as dashboard
 
 
-def request(path="/", cookies=""):
-    return make_mocked_request("GET", path, headers={"Cookie": cookies})
+def request(path="/", cookies="", app=None):
+    return make_mocked_request("GET", path, headers={"Cookie": cookies}, app=app)
 
 
 class ProviderResponse:
@@ -144,6 +144,10 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
             response = await dashboard.callback(callback_request)
         self.assertEqual(response.status, 302)
         sid = response.cookies["bot_session"].value
+        self.assertEqual(
+            int(response.cookies["bot_session"]["max-age"]),
+            2_592_000,
+        )
         self.assertEqual([g["id"] for g in dashboard.SESSIONS[sid]["guilds"]], ["1", "3"])
         self.assertEqual((await dashboard.callback(callback_request)).status, 403)
         authenticated = request(cookies=f"bot_session={sid}")
@@ -193,6 +197,52 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 302)
         sid = response.cookies["bot_session"].value
         self.assertEqual([g["id"] for g in dashboard.SESSIONS[sid]["guilds"]], ["1"])
+
+    async def test_api_me_uses_app_bot_and_fetches_role_authorization(self):
+        role = SimpleNamespace(id=900, name="Prime")
+        member = SimpleNamespace(
+            id=42,
+            roles=[role],
+            guild_permissions=SimpleNamespace(
+                administrator=False,
+                manage_guild=False,
+            ),
+        )
+
+        class LiveGuild:
+            id = 777
+            name = "PR1ME TEAM"
+            owner_id = 99
+            member_count = 82
+            icon = None
+
+            def get_member(self, user_id):
+                return None
+
+            async def fetch_member(self, user_id):
+                self.fetched_user_id = user_id
+                return member
+
+        guild = LiveGuild()
+        live_bot = SimpleNamespace(
+            guilds=[guild],
+            is_ready=lambda: False,
+        )
+        dashboard.bot_ref = None
+        dashboard.SESSIONS["live"] = {
+            "id": "42",
+            "username": "operator",
+            "guilds": [],
+            "expires_at": time.time() + 60,
+            "csrf": "csrf",
+        }
+        response = await dashboard.api_me(
+            request("/api/me", "bot_session=live", app={"bot": live_bot}),
+        )
+        payload = json.loads(response.text)
+        self.assertEqual(response.status, 200)
+        self.assertEqual([item["id"] for item in payload["session"]["guilds"]], ["777"])
+        self.assertEqual(guild.fetched_user_id, 42)
 
 
 if __name__ == "__main__":

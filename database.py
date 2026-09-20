@@ -410,6 +410,47 @@ async def init_db() -> None:
                     UNIQUE (guild_id, channel_id, user_id, restriction_type)
                 );
             """)
+            # Step 4 administration state. These tables are intentionally
+            # separate from the legacy warnings table and existing role/
+            # moderation records so older commands keep their exact contract.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS member_warnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    moderator_id INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS temp_roles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS event_points (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    points INTEGER DEFAULT 0,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS mod_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    moderator_id INTEGER NOT NULL,
+                    note_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_temp_bans_expiry "
                 "ON temp_bans(unban_at);"
@@ -429,6 +470,18 @@ async def init_db() -> None:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_channel_blacklists_lookup "
                 "ON channel_blacklists(guild_id, channel_id, user_id);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_member_warnings_guild_user "
+                "ON member_warnings(guild_id, user_id, id DESC);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_temp_roles_expiry "
+                "ON temp_roles(expires_at);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mod_notes_guild_user "
+                "ON mod_notes(guild_id, user_id, id DESC);"
             )
 
             # 3. جدول إعدادات السيرفر والتذاكر

@@ -291,6 +291,14 @@ async def callback(req):
             ),
             "guilds": guilds, "expires_at": time.time() + SESSION_TTL,
             "csrf": secrets.token_urlsafe(32),
+            # Keep the empty-state actionable: an installed bot that has not
+            # reached READY cannot appear in bot_ref.guilds yet.
+            "bot_ready": bool(
+                bot_ref
+                and callable(getattr(bot_ref, "is_ready", None))
+                and bot_ref.is_ready()
+            ),
+            "connected_guilds_count": len(getattr(bot_ref, "guilds", ())) if bot_ref else 0,
         }
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, TypeError):
         logger.warning("Discord OAuth request failed or returned invalid data.")

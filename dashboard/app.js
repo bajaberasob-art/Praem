@@ -4870,6 +4870,7 @@
       state.session = me.session;
       if (!state.session.guilds?.length) {
         const inviteUrl = state.session.invite_url;
+         const botReady = state.session.bot_ready === true;
         app.replaceChildren(
           el(
             "main",
@@ -4879,7 +4880,9 @@
               { class: "empty access-empty" },
               el("strong", { text: "لا توجد سيرفرات مصرّح بها" }),
               el("span", {
-                text: "البوت غير موجود حالياً في أي سيرفر تملك صلاحية إدارته.",
+                text: botReady
+                  ? "البوت متصل، لكن لا توجد صلاحية إدارة في السيرفرات التي تملكها أو أن البوت غير مضاف إليها."
+                  : "البوت غير متصل حالياً بـ Discord، لذلك لا تستطيع اللوحة رؤية السيرفرات التي أُضيف إليها.",
               }),
               inviteUrl
                 ? el(
@@ -4895,10 +4898,12 @@
                       },
                       "دعوة البوت إلى سيرفر",
                     ),
-                    el("small", {
-                      class: "empty-hint",
-                      text: "اختر السيرفر من صفحة Discord ثم وافق على الدعوة، وبعدها أعد تحميل الداشبورد.",
-                    }),
+                     el("small", {
+                       class: "empty-hint",
+                       text: botReady
+                         ? "اختر السيرفر من صفحة Discord ثم وافق على الدعوة، وبعدها أعد تحميل الداشبورد."
+                         : "شغّل البوت وانتظر ظهور رسالة الاتصال بـ Discord، ثم سجّل الخروج وأعد تسجيل الدخول.",
+                     }),
                   )
                 : el("span", {
                     class: "empty-hint",

@@ -437,7 +437,7 @@ def liveness_payload() -> dict:
     started_at = getattr(bot_ref, "started_at", PROCESS_STARTED_AT) if bot_ref else PROCESS_STARTED_AT
     return {
         "status": "healthy",
-        "uptime_seconds": max(0, int(time.monotonic() - started_at)),
+        "uptime": max(0, int(time.monotonic() - started_at)),
         "bot": "online",
     }
 

@@ -59,6 +59,15 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         self.config.start()
         self.addCleanup(self.config.stop)
 
+    def test_callback_route_aliases_are_registered(self):
+        routes = {
+            (route.method, route.path)
+            for route in dashboard.routes._items
+        }
+        self.assertIn(("GET", "/callback"), routes)
+        self.assertIn(("GET", "/callback/"), routes)
+        self.assertIn(("GET", "/api/auth/callback"), routes)
+
     async def test_login_and_missing_config(self):
         response = await dashboard.login(request())
         query = parse_qs(urlsplit(response.location).query)

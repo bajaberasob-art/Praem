@@ -215,10 +215,12 @@ async def callback(request):
             headers={"Refresh": f"0; url={login_url}"},
         )
     STATES.pop(state, None)
-    if req.query.get("error") or not code:
+    if request.query.get("error") or not code:
         return web.Response(text="لم يكتمل تسجيل الدخول عبر ديسكورد.", status=400)
     if not C_ID or not C_SEC or not R_URI:
         return web.Response(text="إعدادات تسجيل الدخول غير مكتملة.", status=503)
+    session = None
+    owns_session = False
     try:
         session = getattr(bot_ref, "session", None)
         owns_session = session is None

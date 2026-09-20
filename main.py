@@ -78,6 +78,48 @@ SLASH_GROUP_DESCRIPTIONS = {
 }
 
 
+class RoutedCommandTree(app_commands.CommandTree):
+    """Route selected cog commands into Discord application-command groups."""
+
+    def add_command(
+        self,
+        command,
+        /,
+        *,
+        guild=None,
+        guilds=None,
+        override=False,
+    ) -> None:
+        cog_name = getattr(self, "_active_cog_name", None)
+        cog_groups = SLASH_COMMAND_GROUPS.get(cog_name, {})
+        group_name = next(
+            (
+                name
+                for name, command_names in cog_groups.items()
+                if getattr(command, "name", None) in command_names
+            ),
+            None,
+        )
+        if group_name and guild is None and guilds is None:
+            groups = getattr(self, "_slash_groups", {})
+            group = groups.get(group_name)
+            if group is None:
+                group = app_commands.Group(
+                    name=group_name,
+                    description=SLASH_GROUP_DESCRIPTIONS[group_name],
+                )
+                groups[group_name] = group
+                super().add_command(group, override=override)
+            group.add_command(command, override=override)
+            return
+        super().add_command(
+            command,
+            guild=guild,
+            guilds=guilds,
+            override=override,
+        )
+
+
 def configured_sync_guild() -> discord.Object | None:
     """Return the optional guild used for fast slash-command synchronization."""
     guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
@@ -103,6 +145,8 @@ class EnterpriseBot(commands.Bot):
             max_messages=1000,
             chunk_guilds_at_startup=True,
         )
+        self.tree = RoutedCommandTree(self)
+        self.tree._slash_groups = {}
         self.session: aiohttp.ClientSession | None = None
         self.dashboard_runner = None
         self.presence_step = 0
@@ -119,47 +163,11 @@ class EnterpriseBot(commands.Bot):
             options["guild"] = guild
         if guilds is not None:
             options["guilds"] = guilds
-        cog_groups = SLASH_COMMAND_GROUPS.get(cog.__class__.__name__, {})
-        original_add = self.tree.add_command
-
-        def routed_add(
-            command,
-            *,
-            override=False,
-            guild=None,
-            guilds=None,
-        ):
-            group_name = next(
-                (
-                    name
-                    for name, command_names in cog_groups.items()
-                    if getattr(command, "name", None) in command_names
-                ),
-                None,
-            )
-            if group_name and guild is None and guilds is None:
-                group = self._slash_groups.get(group_name)
-                if group is None:
-                    group = app_commands.Group(
-                        name=group_name,
-                        description=SLASH_GROUP_DESCRIPTIONS[group_name],
-                    )
-                    self._slash_groups[group_name] = group
-                    original_add(group, override=override)
-                group.add_command(command, override=override)
-                return
-            return original_add(
-                command,
-                override=override,
-                guild=guild,
-                guilds=guilds,
-            )
-
-        self.tree.add_command = routed_add
+        self.tree._active_cog_name = cog.__class__.__name__
         try:
             result = await super().add_cog(cog, **options)
         finally:
-            self.tree.add_command = original_add
+            self.tree._active_cog_name = None
         self.install_interaction_guards()
         return result
 

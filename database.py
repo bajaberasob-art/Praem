@@ -61,6 +61,21 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     "anti_links": ("INTEGER", True, "bool"),
     "anti_spam": ("INTEGER", True, "bool"),
     "anti_mass_mention": ("INTEGER", True, "bool"),
+    # Granular Auto-Mod rules. These remain additive to the legacy toggles.
+    "anti_spam_max_messages": ("INTEGER", 5, "int"),
+    "anti_spam_time_window_seconds": ("INTEGER", 4, "int"),
+    "anti_spam_action": ("TEXT", "timeout", "str"),
+    "anti_spam_timeout_duration_minutes": ("INTEGER", 10, "int"),
+    "anti_spam_ignored_role_ids": ("TEXT", [], "json_list"),
+    "anti_spam_ignored_channel_ids": ("TEXT", [], "json_list"),
+    "anti_mention_max_per_message": ("INTEGER", 3, "int"),
+    "anti_mention_target_enabled": ("INTEGER", True, "bool"),
+    "anti_mention_target_max_repeats": ("INTEGER", 3, "int"),
+    "anti_mention_target_time_window_seconds": ("INTEGER", 10, "int"),
+    "anti_mention_action": ("TEXT", "timeout", "str"),
+    "anti_mention_timeout_duration_minutes": ("INTEGER", 5, "int"),
+    "anti_mention_ignored_role_ids": ("TEXT", [], "json_list"),
+    "anti_mention_ignored_channel_ids": ("TEXT", [], "json_list"),
     "banned_words_list": ("TEXT", [], "json_list"),
 }
 SETTINGS_DEFAULTS: Dict[str, Any] = {k: v[1] for k, v in SETTINGS_SCHEMA.items()}
@@ -71,6 +86,7 @@ LEGACY_ALIASES = {
     "anti_spam": "anti_spam_enabled",
     "anti_links": "anti_link_enabled",
 }
+AUTOMOD_ACTIONS = {"warn_delete", "timeout", "kick", "ban"}
 
 CACHE_TTL = 60.0
 CACHE_MAX = 1024
@@ -1252,6 +1268,13 @@ def validate_setting(key: str, value: Any) -> Any:
         value = int(value)
         limits = {
             "anti_alt_days": (0, 365),
+            "anti_spam_max_messages": (1, 100),
+            "anti_spam_time_window_seconds": (1, 3600),
+            "anti_spam_timeout_duration_minutes": (1, 10080),
+            "anti_mention_max_per_message": (1, 100),
+            "anti_mention_target_max_repeats": (1, 100),
+            "anti_mention_target_time_window_seconds": (1, 3600),
+            "anti_mention_timeout_duration_minutes": (1, 10080),
             "daily_amount": (0, 1_000_000),
             "daily_base_amount": (0, 1_000_000),
             "level_multiplier_pct": (0, 500),
@@ -1315,6 +1338,9 @@ def validate_setting(key: str, value: Any) -> Any:
             parsed = urlparse(value)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise ValueError("رابط صورة الـ Embed غير صالح")
+    elif key in {"anti_spam_action", "anti_mention_action"}:
+        if value not in AUTOMOD_ACTIONS:
+            raise ValueError("إجراء الحماية غير صالح")
     return value
 
 

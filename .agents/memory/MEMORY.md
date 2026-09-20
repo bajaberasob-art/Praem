@@ -16,3 +16,4 @@
 - [Gaming operations architecture](gaming-operations.md) — persistent scrim reservations and Discord boards stay additive to tournament state.
 - [Audit log routing](audit-log-routing.md) — six-category routes publish to memory only after SQLite commit; embed builders must omit absent avatar URLs.
 - [Production hardening](production-hardening.md) — proxy-relative PWA assets, public health probes, additive SQLite WAL tuning, and layered API limits must stay compatible.
+- [Sanctions and voice ownership](sanctions-voice-engine.md) — new sanctions/voice commands stay additive; existing timeout commands remain owned by moderation to avoid duplicate Slash registrations.

@@ -923,19 +923,6 @@ async def guild_meta(guild) -> dict:
     me = guild.me
     top = me.top_role if me else None
     channels = await dashboard_channels(guild)
-    text_channels = list(guild.text_channels)
-    fetch_channels = getattr(guild, "fetch_channels", None)
-    if fetch_channels is not None:
-        try:
-            fetched_channels = await fetch_channels()
-            fetched_text = [
-                channel for channel in fetched_channels
-                if isinstance(channel, discord.TextChannel)
-            ]
-            if fetched_text:
-                text_channels = fetched_text
-        except (discord.Forbidden, discord.HTTPException):
-            logger.debug("Unable to refresh channel list for guild %s", guild.id, exc_info=True)
     categories = [
         {"id": str(category.id), "name": category.name}
         for category in sorted(
@@ -1868,10 +1855,7 @@ async def api_guild_auto_responses(req):
     meta = await guild_meta(guild)
     return web.json_response({
         "rules": rules,
-        "channels": [
-            {"id": str(channel.id), "name": channel.name}
-            for channel in guild.text_channels
-        ],
+        "channels": await dashboard_channels(guild),
         "roles": meta["roles"],
         "emojis": meta["emojis"],
         "members": meta["members"],
@@ -2969,6 +2953,12 @@ async def static_asset(req):
     if name.endswith(".png"):
         return web.Response(body=asset.read_bytes(), content_type=types[name])
     return web.Response(text=asset.read_text("utf-8"), content_type=types[name], charset="utf-8")
+
+
+@routes.get('/dashboard/')
+async def dashboard_trailing_slash(req):
+    """Canonicalize the dashboard URL so relative assets resolve correctly."""
+    raise web.HTTPFound(req.path.rstrip("/") or "/")
 
 
 @routes.get('/')

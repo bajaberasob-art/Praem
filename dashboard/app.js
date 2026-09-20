@@ -169,6 +169,20 @@
     "anti_links",
     "anti_spam",
     "anti_mass_mention",
+    "anti_spam_max_messages",
+    "anti_spam_time_window_seconds",
+    "anti_spam_action",
+    "anti_spam_timeout_duration_minutes",
+    "anti_spam_ignored_role_ids",
+    "anti_spam_ignored_channel_ids",
+    "anti_mention_max_per_message",
+    "anti_mention_target_enabled",
+    "anti_mention_target_max_repeats",
+    "anti_mention_target_time_window_seconds",
+    "anti_mention_action",
+    "anti_mention_timeout_duration_minutes",
+    "anti_mention_ignored_role_ids",
+    "anti_mention_ignored_channel_ids",
     "banned_words_list",
     "economy_tax",
     "daily_amount",
@@ -600,6 +614,76 @@
     });
     return field(label, n, key);
   }
+  function settingSelect(key, label, options, hint = "") {
+    const n = el("select", { id: `in-${key}` });
+    options.forEach(([value, text]) =>
+      n.append(el("option", { value, text })),
+    );
+    n.value = state.draft[key] ?? options[0]?.[0] ?? "";
+    n.addEventListener("change", () => {
+      state.draft[key] = n.value;
+      state.fields[key] = "";
+      if (key.endsWith("_action")) renderPage();
+      else renderDynamic();
+    });
+    return field(label, n, key, hint);
+  }
+  function multiSettingSelect(key, label, type, hint = "") {
+    const choices =
+      type === "channel" ? state.meta?.channels || [] : state.meta?.roles || [];
+    const selected = new Set(
+      (Array.isArray(state.draft[key]) ? state.draft[key] : []).map(String),
+    );
+    const n = el("select", {
+      id: `in-${key}`,
+      class: "security-multi-select",
+      multiple: true,
+      size: Math.min(5, Math.max(3, choices.length || 3)),
+    });
+    choices.forEach((choice) => {
+      const option = el("option", {
+        value: choice.id,
+        text: type === "channel" ? `#${choice.name}` : choice.name,
+      });
+      option.selected = selected.has(String(choice.id));
+      n.append(option);
+    });
+    n.addEventListener("change", () => {
+      state.draft[key] = [...n.selectedOptions].map((option) => option.value);
+      state.fields[key] = "";
+      renderDynamic();
+    });
+    return field(label, n, key, hint);
+  }
+  function securityAccordion(key, title, summary, content, open = true) {
+    const panel = el(
+      "div",
+      { class: `security-accordion-panel${open ? " is-open" : ""}`, "aria-hidden": String(!open) },
+      el("div", { class: "security-accordion-inner" }, content),
+    );
+    const button = el(
+      "button",
+      {
+        class: "security-accordion-trigger",
+        type: "button",
+        "aria-expanded": String(open),
+        "aria-controls": `security-panel-${key}`,
+      },
+      el("span", { class: "security-accordion-copy" },
+        el("strong", { text: title }),
+        el("small", { text: summary }),
+      ),
+      el("span", { class: "security-accordion-chevron", text: "⌄", "aria-hidden": "true" }),
+    );
+    panel.id = `security-panel-${key}`;
+    button.onclick = () => {
+      const next = !panel.classList.contains("is-open");
+      panel.classList.toggle("is-open", next);
+      panel.setAttribute("aria-hidden", String(!next));
+      button.setAttribute("aria-expanded", String(next));
+    };
+    return el("section", { class: "security-accordion" }, button, panel);
+  }
   function toggle(key, label) {
     const b = el("button", {
       class: "switch",
@@ -612,7 +696,7 @@
     const go = () => {
       state.draft[key] = !state.draft[key];
       b.setAttribute("aria-checked", String(state.draft[key]));
-      if (key === "welcome_embed_enabled") renderPage();
+       if (key === "welcome_embed_enabled" || ["anti_spam", "anti_mass_mention"].includes(key)) renderPage();
       else {
         renderDynamic();
         refreshEmbedPreview();

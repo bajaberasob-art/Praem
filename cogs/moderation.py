@@ -36,10 +36,13 @@ LINK_RE = re.compile(
     r"2no\.co|yip\.sx|urlz\.fr)/[^\s<>()]+)",
 )
 
-SPAM_WINDOW = 3.0
+SPAM_WINDOW = 4.0
 SPAM_LIMIT = 5
-SPAM_TIMEOUT_MINUTES = 5
-MENTION_LIMIT = 5
+SPAM_TIMEOUT_MINUTES = 10
+MENTION_LIMIT = 3
+MENTION_TARGET_LIMIT = 3
+MENTION_TARGET_WINDOW = 10.0
+MENTION_TIMEOUT_MINUTES = 5
 INFRACTION_LIMIT = 100
 
 
@@ -49,8 +52,9 @@ class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.spam: defaultdict[tuple[int, int], list[float]] = defaultdict(list)
+        self.target_mentions: defaultdict[tuple[int, int, int], list[float]] = defaultdict(list)
         self._word_patterns: dict[tuple[str, ...], Optional[re.Pattern]] = {}
-        self._last_spam_prune = time.monotonic()
+        self._last_rate_prune = time.monotonic()
 
     async def moderation_settings(self, guild_id: int) -> dict[str, Any]:
         """Read Auto-Mod values through database.py's in-memory settings cache."""
@@ -63,6 +67,20 @@ class Moderation(commands.Cog):
                 "anti_links": bool(values.get("anti_links", True)),
                 "anti_spam": bool(values.get("anti_spam", True)),
                 "anti_mass_mention": bool(values.get("anti_mass_mention", True)),
+                "anti_spam_max_messages": int(values.get("anti_spam_max_messages", SPAM_LIMIT)),
+                "anti_spam_time_window_seconds": int(values.get("anti_spam_time_window_seconds", SPAM_WINDOW)),
+                "anti_spam_action": values.get("anti_spam_action", "timeout"),
+                "anti_spam_timeout_duration_minutes": int(values.get("anti_spam_timeout_duration_minutes", SPAM_TIMEOUT_MINUTES)),
+                "anti_spam_ignored_role_ids": values.get("anti_spam_ignored_role_ids", []),
+                "anti_spam_ignored_channel_ids": values.get("anti_spam_ignored_channel_ids", []),
+                "anti_mention_max_per_message": int(values.get("anti_mention_max_per_message", MENTION_LIMIT)),
+                "anti_mention_target_enabled": bool(values.get("anti_mention_target_enabled", True)),
+                "anti_mention_target_max_repeats": int(values.get("anti_mention_target_max_repeats", MENTION_TARGET_LIMIT)),
+                "anti_mention_target_time_window_seconds": int(values.get("anti_mention_target_time_window_seconds", MENTION_TARGET_WINDOW)),
+                "anti_mention_action": values.get("anti_mention_action", "timeout"),
+                "anti_mention_timeout_duration_minutes": int(values.get("anti_mention_timeout_duration_minutes", MENTION_TIMEOUT_MINUTES)),
+                "anti_mention_ignored_role_ids": values.get("anti_mention_ignored_role_ids", []),
+                "anti_mention_ignored_channel_ids": values.get("anti_mention_ignored_channel_ids", []),
                 "banned_words_list": words if isinstance(words, list) else [],
                 "log_channel_id": values.get("log_channel_id"),
             }
@@ -73,6 +91,20 @@ class Moderation(commands.Cog):
                 "anti_links": True,
                 "anti_spam": True,
                 "anti_mass_mention": True,
+                "anti_spam_max_messages": SPAM_LIMIT,
+                "anti_spam_time_window_seconds": SPAM_WINDOW,
+                "anti_spam_action": "timeout",
+                "anti_spam_timeout_duration_minutes": SPAM_TIMEOUT_MINUTES,
+                "anti_spam_ignored_role_ids": [],
+                "anti_spam_ignored_channel_ids": [],
+                "anti_mention_max_per_message": MENTION_LIMIT,
+                "anti_mention_target_enabled": True,
+                "anti_mention_target_max_repeats": MENTION_TARGET_LIMIT,
+                "anti_mention_target_time_window_seconds": MENTION_TARGET_WINDOW,
+                "anti_mention_action": "timeout",
+                "anti_mention_timeout_duration_minutes": MENTION_TIMEOUT_MINUTES,
+                "anti_mention_ignored_role_ids": [],
+                "anti_mention_ignored_channel_ids": [],
                 "banned_words_list": [],
                 "log_channel_id": None,
             }
@@ -118,21 +150,73 @@ class Moderation(commands.Cog):
             )
         return self._word_patterns[normalized]
 
-    def _spam_triggered(self, guild_id: int, user_id: int) -> bool:
+    def _rate_triggered(
+        self,
+        bucket: defaultdict,
+        key: tuple,
+        limit: int,
+        window_seconds: float,
+    ) -> bool:
         now = time.monotonic()
-        key = (int(guild_id), int(user_id))
-        timestamps = [stamp for stamp in self.spam[key] if now - stamp < SPAM_WINDOW]
+        timestamps = [
+            stamp for stamp in bucket[key] if now - stamp < max(1.0, float(window_seconds))
+        ]
         timestamps.append(now)
-        self.spam[key] = timestamps
-        if now - self._last_spam_prune > 30:
-            self._last_spam_prune = now
+        bucket[key] = timestamps
+        if now - self._last_rate_prune > 30:
+            self._last_rate_prune = now
             for stale_key, values in list(self.spam.items()):
                 if not values or now - values[-1] >= SPAM_WINDOW:
                     self.spam.pop(stale_key, None)
-        if len(timestamps) > SPAM_LIMIT:
-            self.spam.pop(key, None)
+            for stale_key, values in list(self.target_mentions.items()):
+                if not values or now - values[-1] >= MENTION_TARGET_WINDOW:
+                    self.target_mentions.pop(stale_key, None)
+        if len(timestamps) > max(1, int(limit)):
+            bucket.pop(key, None)
             return True
         return False
+
+    def _spam_triggered(
+        self,
+        guild_id: int,
+        user_id: int,
+        *,
+        limit: int = SPAM_LIMIT,
+        window_seconds: float = SPAM_WINDOW,
+    ) -> bool:
+        return self._rate_triggered(
+            self.spam,
+            (int(guild_id), int(user_id)),
+            limit,
+            window_seconds,
+        )
+
+    def _target_mention_triggered(
+        self,
+        guild_id: int,
+        user_id: int,
+        target_id: int,
+        *,
+        limit: int = MENTION_TARGET_LIMIT,
+        window_seconds: float = MENTION_TARGET_WINDOW,
+    ) -> bool:
+        return self._rate_triggered(
+            self.target_mentions,
+            (int(guild_id), int(user_id), int(target_id)),
+            limit,
+            window_seconds,
+        )
+
+    @staticmethod
+    def _is_exempt(msg: discord.Message, config: dict[str, Any], prefix: str) -> bool:
+        ignored_channels = {str(item) for item in config.get(f"{prefix}_ignored_channel_ids", [])}
+        if str(getattr(msg.channel, "id", "")) in ignored_channels:
+            return True
+        ignored_roles = {str(item) for item in config.get(f"{prefix}_ignored_role_ids", [])}
+        return any(
+            str(getattr(role, "id", "")) in ignored_roles
+            for role in getattr(msg.author, "roles", ())
+        )
 
     async def _resolve_member(
         self,
@@ -156,6 +240,7 @@ class Moderation(commands.Cog):
         reason: str,
         *,
         timeout_minutes: int = 0,
+        action: str = "timeout",
     ) -> None:
         guild, member = msg.guild, msg.author
         try:
@@ -175,8 +260,9 @@ class Moderation(commands.Cog):
         except Exception:
             logger.exception("[AUTOMOD] فشل تسجيل الإنذار للسيرفر %s", guild.id)
 
+        applied_action = "warn_delete"
         timed_out = False
-        if timeout_minutes:
+        if action == "timeout" and timeout_minutes:
             try:
                 await member.timeout(
                     discord.utils.utcnow()
@@ -184,6 +270,7 @@ class Moderation(commands.Cog):
                     reason=reason,
                 )
                 timed_out = True
+                applied_action = "timeout"
             except (discord.Forbidden, discord.HTTPException):
                 logger.warning(
                     "[AUTOMOD] فشل تطبيق الكتم على %s في %s",
@@ -191,6 +278,18 @@ class Moderation(commands.Cog):
                     guild.id,
                     exc_info=True,
                 )
+        elif action == "kick":
+            try:
+                await member.kick(reason=reason)
+                applied_action = "kick"
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("[AUTOMOD] فشل طرد %s في %s", member.id, guild.id, exc_info=True)
+        elif action == "ban":
+            try:
+                await guild.ban(member, reason=reason, delete_message_seconds=0)
+                applied_action = "ban"
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("[AUTOMOD] فشل حظر %s في %s", member.id, guild.id, exc_info=True)
 
         # No public @everyone alert: it mentions only the offender and deletes
         # itself, keeping the moderation channel quiet.
@@ -219,7 +318,10 @@ class Moderation(commands.Cog):
             value=(
                 f"حذف + كتم {timeout_minutes} دقائق"
                 if timed_out
-                else "حذف + تسجيل إنذار"
+                else {
+                    "kick": "حذف + طرد",
+                    "ban": "حذف + حظر",
+                }.get(applied_action, "حذف + تسجيل إنذار")
             ),
             inline=True,
         )
@@ -272,20 +374,67 @@ class Moderation(commands.Cog):
             await self._apply_violation(msg, "استخدام كلمة محظورة")
             return
 
-        if config["anti_mass_mention"] and len(msg.mentions) > MENTION_LIMIT:
-            await self._apply_violation(
-                msg,
-                f"منشن جماعي يتجاوز {MENTION_LIMIT} أعضاء",
-                timeout_minutes=SPAM_TIMEOUT_MINUTES,
+        if config["anti_mass_mention"] and not self._is_exempt(msg, config, "anti_mention"):
+            mass_limit = config.get("anti_mention_max_per_message", MENTION_LIMIT)
+            mention_action = config.get("anti_mention_action", "timeout")
+            mention_timeout = config.get(
+                "anti_mention_timeout_duration_minutes",
+                MENTION_TIMEOUT_MINUTES,
             )
-            return
+            if len(msg.mentions) > mass_limit:
+                await self._apply_violation(
+                    msg,
+                    f"منشن جماعي يتجاوز {mass_limit} أعضاء",
+                    timeout_minutes=mention_timeout,
+                    action=mention_action,
+                )
+                return
+            if config.get("anti_mention_target_enabled", True):
+                target_limit = config.get(
+                    "anti_mention_target_max_repeats",
+                    MENTION_TARGET_LIMIT,
+                )
+                target_window = config.get(
+                    "anti_mention_target_time_window_seconds",
+                    MENTION_TARGET_WINDOW,
+                )
+                for target in msg.mentions:
+                    if self._target_mention_triggered(
+                        msg.guild.id,
+                        msg.author.id,
+                        target.id,
+                        limit=target_limit,
+                        window_seconds=target_window,
+                    ):
+                        await self._apply_violation(
+                            msg,
+                            f"تكرار منشن العضو أكثر من {target_limit} مرات خلال {int(target_window)} ثوان",
+                            timeout_minutes=mention_timeout,
+                            action=mention_action,
+                        )
+                        return
 
-        if config["anti_spam"] and self._spam_triggered(msg.guild.id, msg.author.id):
-            await self._apply_violation(
-                msg,
-                f"إرسال أكثر من {SPAM_LIMIT} رسائل خلال {int(SPAM_WINDOW)} ثوان",
-                timeout_minutes=SPAM_TIMEOUT_MINUTES,
+        if config["anti_spam"] and not self._is_exempt(msg, config, "anti_spam"):
+            spam_limit = config.get("anti_spam_max_messages", SPAM_LIMIT)
+            spam_window = config.get("anti_spam_time_window_seconds", SPAM_WINDOW)
+            spam_action = config.get("anti_spam_action", "timeout")
+            spam_timeout = config.get(
+                "anti_spam_timeout_duration_minutes",
+                SPAM_TIMEOUT_MINUTES,
             )
+            if self._spam_triggered(
+                msg.guild.id,
+                msg.author.id,
+                limit=spam_limit,
+                window_seconds=spam_window,
+            ):
+                await self._apply_violation(
+                    msg,
+                    f"إرسال أكثر من {spam_limit} رسائل خلال {int(spam_window)} ثوان",
+                    timeout_minutes=spam_timeout,
+                    action=spam_action,
+                )
+                return
 
     async def get_recent_infractions(self, guild_id: int) -> list[dict[str, Any]]:
         return await get_recent_warnings(guild_id, INFRACTION_LIMIT)

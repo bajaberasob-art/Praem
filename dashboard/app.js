@@ -1968,13 +1968,17 @@
     state.commandDetail = command;
     const commandKey = String(command.command_name || "").toLowerCase().split(/\s+/).pop();
     const registryMeta = state.commandRegistry?.byKey?.[commandKey] || {};
-    const registryPolicy = state.commandRegistry?.policies?.[commandKey] || {};
+    const registryPolicies = state.commandRegistry?.policies || {};
+    const registryPolicy = registryPolicies[command.command_name]
+      || registryPolicies[String(command.command_name || "").toLowerCase()]
+      || registryPolicies[commandKey]
+      || {};
     const effectivePolicy = {
-      ...command,
       ...registryPolicy,
-      custom_aliases: registryPolicy.aliases || command.custom_aliases || command.aliases || [],
-      allowed_roles: registryPolicy.allowed_roles || command.allowed_roles || [],
-      allowed_channels: registryPolicy.allowed_channels || command.allowed_channels || [],
+      ...command,
+      custom_aliases: command.custom_aliases || registryPolicy.aliases || command.aliases || [],
+      allowed_roles: command.allowed_roles || registryPolicy.allowed_roles || [],
+      allowed_channels: command.allowed_channels || registryPolicy.allowed_channels || [],
     };
     const warnings = commandPermissionWarnings(command);
     const visual = commandVisual(command);
@@ -2056,6 +2060,12 @@
       el("p", { class: "hint", text: "اضغط Enter أو Space بعد كل اسم. اضغط × للحذف أو Backspace لإزالة آخر اسم." }),
       aliasInput,
       aliasChips,
+      el("button", {
+        class: "btn primary alias-save-button",
+        type: "button",
+        text: "حفظ الاختصارات والإعدادات",
+        onClick: saveDetails,
+      }),
     );
     const rolesEditor = commandChoiceEditor(
       "الرتب المسموحة",
@@ -2200,7 +2210,7 @@
       onClick: () => setActiveTab(key),
     })));
     setActiveTab(activeTab);
-    const saveDetails = async () => {
+    async function saveDetails() {
       const aliases = parseCommandAliases(aliasValues);
       if (aliases === null) return;
       const policySaved = await saveCommandPolicy(
@@ -2220,7 +2230,7 @@
       toast("تم حفظ إعدادات الأمر وتطبيقها على السيرفر", "success", 2600);
       closeCommandDetail();
       renderPage();
-    };
+    }
     const modal = el("aside", { class: "modal command-detail-drawer" },
       el("div", { class: "drawer-head" },
         el("div", {}, el("span", { class: "eyebrow", text: `${command.cog || "COMMANDS"} / POLICY` }), el("h2", {}, el("span", { text: visual.name }), el("small", { text: ` (${command.command_name})` }))),

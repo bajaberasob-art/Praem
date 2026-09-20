@@ -138,7 +138,11 @@ async def private_responses(req, handler):
             response = await handler(req)
     except web.HTTPException as error:
         response = error
-    if req.path.startswith(("/static/", "/manifest.json", "/sw.js", "/icon-")):
+    if req.path == "/sw.js":
+        # The worker must be revalidated so routing fixes can reach existing
+        # clients instead of leaving an older worker in control indefinitely.
+        response.headers["Cache-Control"] = "no-store"
+    elif req.path.startswith(("/static/", "/manifest.json", "/icon-")):
         response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=86400"
     else:
         response.headers["Cache-Control"] = "no-store"
@@ -463,7 +467,7 @@ def pwa_svg() -> str:
 
 
 def service_worker_source() -> str:
-    return """const CACHE = "prime-dashboard-shell-v1";
+    return """const CACHE = "prime-dashboard-shell-v2";
 const STATIC = [
   "./",
   "./static/app.css",
@@ -478,6 +482,10 @@ const isAsset = (url) =>
   url.pathname.endsWith("/manifest.json") ||
   url.pathname.endsWith("/icon.svg") ||
   url.pathname.includes("/icon-");
+const isAuthRoute = (url) =>
+  url.pathname.includes("/api/auth/") ||
+  url.pathname.endsWith("/login") ||
+  url.pathname.endsWith("/login/");
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(STATIC)));
@@ -494,15 +502,19 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
+  // Never replace OAuth/login navigations with the cached app shell. The
+  // document URL must stay on the real callback route so relative assets and
+  // the authentication redirect both resolve through the public mount.
+  if (event.request.mode === "navigate" && isAuthRoute(url)) return;
   if (event.request.mode === "navigate") {
+    const shell = new URL("./", self.registration.scope);
     event.respondWith(
-      caches.match(new URL("./", self.registration.scope).href).then((cached) => {
-        const fresh = fetch(event.request).then((response) => {
-          if (response.ok) caches.open(CACHE).then((cache) => cache.put(event.request, response.clone()));
-          return response;
-        }).catch(() => cached);
-        return cached || fresh;
-      })
+      fetch(event.request).then((response) => {
+        if (response.ok && url.pathname === shell.pathname) {
+          caches.open(CACHE).then((cache) => cache.put(shell.href, response.clone()));
+        }
+        return response;
+      }).catch(() => caches.match(shell.href))
     );
     return;
   }

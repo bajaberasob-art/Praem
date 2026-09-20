@@ -384,6 +384,17 @@ class TicketControlView(discord.ui.View):
             await cog.show_close_modal(itx)
 
     @discord.ui.button(
+        label="حذف التذكرة",
+        style=discord.ButtonStyle.danger,
+        emoji="🗑️",
+        custom_id="ticket:delete",
+    )
+    async def delete(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        if cog:
+            await cog.delete_ticket_from_interaction(itx)
+
+    @discord.ui.button(
         label="بانتظار العميل",
         style=discord.ButtonStyle.secondary,
         emoji="⏳",
@@ -673,34 +684,96 @@ class Community(commands.Cog):
         self,
         channel_id: int,
         categories_config: list[dict] | None = None,
+        embed_config: dict | None = None,
     ) -> dict:
-        """Publish and persist a category panel with durable custom IDs."""
+        """Publish or update a persistent dropdown panel."""
         channel = self.bot.get_channel(int(channel_id))
         if channel is None:
             raise ValueError("ticket panel channel was not found")
         categories = normalize_ticket_categories(categories_config)
+        guild_id = int(channel.guild.id)
+        await replace_ticket_options(guild_id, categories)
+        stored_config = await get_ticket_config(guild_id) or {}
+        config = {**stored_config, **(embed_config or {})}
         embed = discord.Embed(
-            title="🎫 مركز الدعم والتذاكر",
-            description=(
+            title=str(config.get("embed_title") or "🎫 مركز الدعم والتذاكر")[:256],
+            description=str(
+                config.get("embed_description")
+                or (
+                    "اختر التصنيف الأقرب لطلبك. ستظهر لك نافذة قصيرة لجمع "
+                    "التفاصيل قبل فتح قناة خاصة مع فريق الدعم."
+                )
+            )[:4096],
+            color=int(config.get("embed_color") or 0x00D9A6),
+        )
+        embed.set_footer(
+            text=str(
+                config.get("footer_text")
+                or "Help Desk • اختر تصنيفاً لبدء المحادثة"
+            )[:2048]
+        )
+        view = TicketSelectView(categories, guild_id)
+        message = None
+        previous_message_id = config.get("message_id")
+        previous_channel_id = config.get("channel_id")
+        if previous_message_id and int(previous_channel_id or channel.id) == channel.id:
+            try:
+                message = await channel.fetch_message(int(previous_message_id))
+                await message.edit(embed=embed, view=view)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logger.info(
+                    "Ticket panel message %s is unavailable; sending a replacement.",
+                    previous_message_id,
+                )
+        if message is None:
+            message = await channel.send(embed=embed, view=view)
+            try:
+                await message.pin()
+            except (AttributeError, discord.Forbidden, discord.HTTPException):
+                logger.debug("Unable to pin ticket panel message", exc_info=True)
+        self.bot.add_view(view, message_id=message.id)
+        await save_ticket_config(
+            guild_id,
+            channel.id,
+            message.id,
+            embed_title=str(config.get("embed_title") or "🎫 مركز الدعم والتذاكر"),
+            embed_description=str(config.get("embed_description") or (
                 "اختر التصنيف الأقرب لطلبك. ستظهر لك نافذة قصيرة لجمع "
                 "التفاصيل قبل فتح قناة خاصة مع فريق الدعم."
-            ),
-            color=0x00D9A6,
+            )),
+            embed_color=int(config.get("embed_color") or 0x00D9A6),
+            footer_text=str(config.get("footer_text") or "Help Desk • اختر تصنيفاً لبدء المحادثة"),
         )
-        embed.set_footer(text="Help Desk • اختر تصنيفاً لبدء المحادثة")
-        view = TicketPanelView(categories)
-        message = await channel.send(embed=embed, view=view)
-        try:
-            await message.pin()
-        except (AttributeError, discord.Forbidden, discord.HTTPException):
-            logger.debug("Unable to pin ticket panel message", exc_info=True)
-        self.bot.add_view(view, message_id=message.id)
         return await save_ticket_panel(
-            channel.guild.id,
+            guild_id,
             channel.id,
             message.id,
             categories,
         )
+
+    async def get_ticket_config(self, guild_id: int) -> dict:
+        return {
+            "config": await get_ticket_config(guild_id),
+            "options": await get_ticket_options(guild_id),
+        }
+
+    async def save_ticket_config(
+        self,
+        guild_id: int,
+        config: dict,
+        options: list[dict],
+    ) -> dict:
+        saved = await save_ticket_config(
+            guild_id,
+            config.get("channel_id"),
+            config.get("message_id"),
+            config.get("embed_title") or "الدعم الفني",
+            config.get("embed_description") or "",
+            int(config.get("embed_color") or 0x5865F2),
+            config.get("footer_text") or "PR1ME TEAM Support",
+        )
+        await replace_ticket_options(guild_id, options)
+        return {"config": saved, "options": await get_ticket_options(guild_id)}
 
     async def get_active_tickets(self, guild_id: int) -> list[dict]:
         return await get_active_tickets(guild_id)

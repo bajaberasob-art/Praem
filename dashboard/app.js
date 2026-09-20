@@ -696,7 +696,10 @@
     const go = () => {
       state.draft[key] = !state.draft[key];
       b.setAttribute("aria-checked", String(state.draft[key]));
-       if (key === "welcome_embed_enabled" || ["anti_spam", "anti_mass_mention"].includes(key)) renderPage();
+       if (
+         key === "welcome_embed_enabled"
+         || ["anti_spam", "anti_mass_mention", "anti_mention_target_enabled"].includes(key)
+       ) renderPage();
       else {
         renderDynamic();
         refreshEmbedPreview();
@@ -3856,8 +3859,8 @@
         required: true,
       }),
     );
-    const protect = el("div", { class: "fields" }),
-      switches = el("div", { class: "field wide" });
+    const protect = el("div", { class: "security-settings-stack" }),
+      switches = el("div", { class: "field wide security-toggle-list" });
     switches.append(
       toggle("anti_nuke", "حماية من التخريب الجماعي"),
       toggle("captcha_enabled", "تفعيل كابتشا التحقق"),
@@ -3866,6 +3869,84 @@
       toggle("anti_spam", "تفعيل رادار السبام"),
       toggle("anti_mass_mention", "حماية المنشن الجماعي"),
     );
+    if (state.draft.anti_spam) {
+      const spamFields = el("div", { class: "fields security-rule-grid" });
+      spamFields.append(
+        input("anti_spam_max_messages", "الحد الأقصى للرسائل", "number", { min: "1", max: "100" }),
+        input("anti_spam_time_window_seconds", "النافذة الزمنية (ثوانٍ)", "number", { min: "1", max: "3600" }),
+        settingSelect("anti_spam_action", "الإجراء التلقائي", [
+          ["warn_delete", "حذف الرسائل وتنبيه"],
+          ["timeout", "كتم مؤقت"],
+          ["kick", "طرد"],
+          ["ban", "حظر"],
+        ]),
+        ...(state.draft.anti_spam_action === "timeout"
+          ? [input("anti_spam_timeout_duration_minutes", "مدة الكتم (دقائق)", "number", { min: "1", max: "10080" })]
+          : []),
+        multiSettingSelect(
+          "anti_spam_ignored_role_ids",
+          "الرتب المستثناة",
+          "role",
+          "أعضاء هذه الرتب لا تُطبّق عليهم حماية السبام.",
+        ),
+        multiSettingSelect(
+          "anti_spam_ignored_channel_ids",
+          "القنوات المستثناة",
+          "channel",
+          "اتركها فارغة لتطبيق الحماية على جميع القنوات.",
+        ),
+      );
+      protect.append(
+        securityAccordion(
+          "anti-spam",
+          "إعدادات رادار السبام",
+          "الحدود، الإجراء، والاستثناءات",
+          spamFields,
+        ),
+      );
+    }
+    if (state.draft.anti_mass_mention) {
+      const mentionFields = el("div", { class: "fields security-rule-grid" });
+      mentionFields.append(
+        input("anti_mention_max_per_message", "أقصى منشن في الرسالة", "number", { min: "1", max: "100" }),
+        toggle("anti_mention_target_enabled", "منع تكرار منشن نفس العضو"),
+        ...(state.draft.anti_mention_target_enabled
+          ? [
+              input("anti_mention_target_max_repeats", "أقصى تكرار لنفس العضو", "number", { min: "1", max: "100" }),
+              input("anti_mention_target_time_window_seconds", "نافذة تكرار المنشن (ثوانٍ)", "number", { min: "1", max: "3600" }),
+            ]
+          : []),
+        settingSelect("anti_mention_action", "الإجراء التلقائي", [
+          ["warn_delete", "حذف الرسائل وتنبيه"],
+          ["timeout", "كتم مؤقت"],
+          ["kick", "طرد"],
+          ["ban", "حظر"],
+        ]),
+        ...(state.draft.anti_mention_action === "timeout"
+          ? [input("anti_mention_timeout_duration_minutes", "مدة الكتم (دقائق)", "number", { min: "1", max: "10080" })]
+          : []),
+        multiSettingSelect(
+          "anti_mention_ignored_role_ids",
+          "الرتب المستثناة",
+          "role",
+          "مثل المشرفين أو فريق الإدارة.",
+        ),
+        multiSettingSelect(
+          "anti_mention_ignored_channel_ids",
+          "القنوات المستثناة",
+          "channel",
+          "لن تُحتسب المنشنات في القنوات المحددة.",
+        ),
+      );
+      protect.append(
+        securityAccordion(
+          "anti-mention",
+          "إعدادات حماية المنشن",
+          "المنشن العام والتكرار الموجّه",
+          mentionFields,
+        ),
+      );
+    }
     protect.append(
       switches,
       input("anti_alt_days", "عمر الحساب الأدنى (أيام)", "number", { min: "0", max: "365" }),

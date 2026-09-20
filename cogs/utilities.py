@@ -629,7 +629,8 @@ class Utilities(commands.Cog):
         if controls is None:
             controls = await self._load_command_controls(guild_id)
         command_name = interaction.command.qualified_name.lower()
-        control = controls.get(command_name)
+        leaf_name = str(getattr(interaction.command, "name", "")).lower()
+        control = controls.get(command_name) or controls.get(leaf_name)
         if not control:
             return True
         permissions = getattr(interaction.user, "guild_permissions", None)
@@ -1498,7 +1499,7 @@ class Utilities(commands.Cog):
         if not command_name:
             return None
         tree = getattr(self.bot, "tree", None)
-        slash_command = tree.get_command(command_name) if tree and hasattr(tree, "get_command") else None
+        slash_command = self._registered_command(command_name)
         prefix_command = self.bot.get_command(command_name) if hasattr(self.bot, "get_command") else None
         return slash_command or prefix_command
 
@@ -1566,7 +1567,7 @@ class Utilities(commands.Cog):
         command_name = target.lstrip("!/").split()[0].lower() if target else ""
         if not command_name:
             return False
-        slash_command = self.bot.tree.get_command(command_name)
+        slash_command = self._registered_command(command_name)
         if slash_command is not None and target.startswith("/"):
             callback = slash_command.callback
             interaction = ShortcutInteraction(message, slash_command)

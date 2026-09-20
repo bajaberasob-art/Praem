@@ -1564,11 +1564,15 @@ class Utilities(commands.Cog):
         target: str,
     ) -> bool:
         target = str(target).strip()
-        command_name = target.lstrip("!/").split()[0].lower() if target else ""
+        command_target = target.lstrip("!/").strip() if target else ""
+        command_name = command_target.casefold()
         if not command_name:
             return False
-        slash_command = self._registered_command(command_name)
-        if slash_command is not None and target.startswith("/"):
+        slash_command = self._registered_command(command_target)
+        is_slash_command = slash_command is not None and hasattr(
+            slash_command, "_check_can_run"
+        )
+        if is_slash_command and target.startswith("/"):
             callback = slash_command.callback
             interaction = ShortcutInteraction(message, slash_command)
             try:
@@ -1587,7 +1591,7 @@ class Utilities(commands.Cog):
                 if not interaction.response.is_done():
                     await message.channel.send(f"⚠️ تعذر تنفيذ الاختصار للأمر `/{command_name}`.")
                 return True
-        command = self.bot.get_command(command_name)
+        command = self.bot.get_command(command_name.split()[0])
         if command is None:
             await message.channel.send(f"⚠️ الأمر `{command_name}` غير موجود حالياً.")
             return True

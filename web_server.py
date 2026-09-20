@@ -1424,7 +1424,7 @@ async def api_guild_command_policy(req):
         return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
     command_name = str(req.match_info.get("command_name", "")).strip().lower()
     if not command_name or len(command_name) > 100 or any(
-        char.isspace() for char in command_name
+        char in "\r\n\t" for char in command_name
     ):
         return json_error(400, "validation", fields={"command_name": "اسم الأمر غير صالح"})
     is_enabled = body.get("is_enabled", body.get("enabled"))

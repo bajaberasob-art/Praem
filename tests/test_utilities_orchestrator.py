@@ -64,6 +64,16 @@ class FakeBot:
     def remove_check(self, check):
         self.checks.remove(check)
 
+    def get_command(self, name):
+        return next(
+            (
+                command
+                for command in self.commands
+                if str(getattr(command, "name", "")).casefold() == str(name).casefold()
+            ),
+            None,
+        )
+
 
 class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -205,6 +215,29 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(message.channel.sent), 1)
         self.assertEqual(message.channel.sent[0][0], "نفّذ الأمر فعلياً")
+
+    async def test_command_shortcut_executes_prefix_command_with_context(self):
+        executed = []
+
+        async def callback(ctx):
+            executed.append(ctx)
+            await ctx.send("نفّذ أمر Prefix فعلياً")
+
+        command = SimpleNamespace(
+            name="راتب",
+            qualified_name="راتب",
+            callback=callback,
+            aliases=["يومي"],
+            clean_params={},
+        )
+        self.bot.commands.append(command)
+        await self.cog.add_shortcut(700, "راتب", "command", target="/راتب")
+
+        message = FakeMessage("راتب")
+        await self.cog.on_message(message)
+
+        self.assertEqual(len(executed), 1)
+        self.assertEqual(message.channel.sent[0][0], "نفّذ أمر Prefix فعلياً")
 
     async def test_command_shortcut_cannot_bypass_channel_policy(self):
         executed = []

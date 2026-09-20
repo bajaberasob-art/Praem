@@ -267,6 +267,21 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
                 "تم تنفيذ {command}",
             ),
         )
+        grouped_req = request(
+            "POST",
+            "/x",
+            "s10",
+            {
+                "is_enabled": True,
+                "aliases": ["قائمة"],
+                "allowed_roles": [],
+                "allowed_channels": [],
+            },
+            self.headers,
+        )
+        grouped_req.match_info["command_name"] = "admin bot_list"
+        grouped_status, grouped_data = await call(ws.api_guild_command_policy, grouped_req)
+        self.assertEqual((grouped_status, grouped_data["command"]["command_name"]), (200, "admin bot_list"))
 
         rule_body = {
             "trigger": "hello",

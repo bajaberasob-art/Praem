@@ -90,7 +90,7 @@ class RoutedCommandTree(app_commands.CommandTree):
         guilds=None,
         override=False,
     ) -> None:
-        cog_name = getattr(self, "_active_cog_name", None)
+        cog_name = getattr(getattr(self, "client", None), "_active_cog_name", None)
         cog_groups = SLASH_COMMAND_GROUPS.get(cog_name, {})
         group_name = next(
             (
@@ -145,7 +145,7 @@ class EnterpriseBot(commands.Bot):
             max_messages=1000,
             chunk_guilds_at_startup=True,
         )
-        self.tree = RoutedCommandTree(self)
+        self.tree.__class__ = RoutedCommandTree
         self.tree._slash_groups = {}
         self.session: aiohttp.ClientSession | None = None
         self.dashboard_runner = None
@@ -156,6 +156,7 @@ class EnterpriseBot(commands.Bot):
         self._wal_checkpoint_task: asyncio.Task | None = None
         self.started_at = time.monotonic()
         self._slash_groups: dict[str, app_commands.Group] = {}
+        self._active_cog_name: str | None = None
 
     async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):
         options = {"override": override}
@@ -163,11 +164,11 @@ class EnterpriseBot(commands.Bot):
             options["guild"] = guild
         if guilds is not None:
             options["guilds"] = guilds
-        self.tree._active_cog_name = cog.__class__.__name__
+        self._active_cog_name = cog.__class__.__name__
         try:
             result = await super().add_cog(cog, **options)
         finally:
-            self.tree._active_cog_name = None
+            self._active_cog_name = None
         self.install_interaction_guards()
         return result
 

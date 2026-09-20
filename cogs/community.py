@@ -24,6 +24,12 @@ from database import (
     get_staff_kpis,
     get_ticket_by_channel,
     get_ticket_panels,
+    get_ticket_configs,
+    get_ticket_config,
+    get_ticket_options,
+    replace_ticket_options,
+    save_ticket_config,
+    get_active_ticket_for_user_category,
     get_ticket_transcripts,
     get_ticket_transcript,
     get_canned_responses,
@@ -52,29 +58,46 @@ TICKET_PRIORITIES = ("normal", "high", "management")
 DEFAULT_TICKET_CATEGORIES = [
     {
         "key": "general",
-        "label": "شكاوى عامة",
-        "emoji": "📣",
+        "label": "الدعم العام",
+        "description": "للاستفسارات العامة، الاقتراحات، أو المشاكل التقنية",
+        "welcome_msg": "أهلاً بك في الدعم العام. سيقوم فريقنا بمتابعة طلبك قريباً.",
+        "emoji": "🔧",
         "support_role_ids": [],
         "senior_role_ids": [],
     },
     {
-        "key": "questions",
-        "label": "استفسارات",
-        "emoji": "❓",
+        "key": "girls-verification",
+        "label": "توثيق البنات",
+        "description": "يتم توثيقك وتمييزك عن باقي الأعضاء",
+        "welcome_msg": "أهلاً بك. سيتابع فريق التوثيق طلبك بسرية واحترام.",
+        "emoji": "🌸",
         "support_role_ids": [],
         "senior_role_ids": [],
     },
     {
-        "key": "billing",
-        "label": "دعم الشحن",
-        "emoji": "💳",
+        "key": "rewards",
+        "label": "المكافآت والجوائز",
+        "description": "لاستلام جوائز المسابقات الخاصة بPR1ME",
+        "welcome_msg": "أهلاً بك في قسم المكافآت والجوائز.",
+        "emoji": "🎁",
         "support_role_ids": [],
         "senior_role_ids": [],
     },
     {
-        "key": "tournaments",
-        "label": "بطولات",
-        "emoji": "🏆",
+        "key": "content-creators",
+        "label": "برنامج صناع المحتوى",
+        "description": "للحصول على رتبة صانع محتوى ومزايا خاصة",
+        "welcome_msg": "أهلاً بك في برنامج صناع المحتوى.",
+        "emoji": "📹",
+        "support_role_ids": [],
+        "senior_role_ids": [],
+    },
+    {
+        "key": "clan-application",
+        "label": "التقديم للكلان",
+        "description": "طلبات الانضمام إلى الكلان",
+        "welcome_msg": "أهلاً بك. سيقوم فريق الكلان بمراجعة طلبك.",
+        "emoji": "🕹️",
         "support_role_ids": [],
         "senior_role_ids": [],
     },
@@ -84,6 +107,7 @@ DEFAULT_TICKET_CATEGORIES = [
 def normalize_ticket_categories(categories_config):
     source = categories_config or DEFAULT_TICKET_CATEGORIES
     normalized = []
+    used_keys = set()
     for index, raw in enumerate(source[:25]):
         if isinstance(raw, str):
             raw = {"key": raw, "label": raw}
@@ -91,15 +115,33 @@ def normalize_ticket_categories(categories_config):
             continue
         label = str(raw.get("label") or raw.get("name") or f"تصنيف {index + 1}").strip()
         key = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(raw.get("key") or label).strip().lower()).strip("-")
+        key = key[:60] or f"category-{index + 1}"
+        base_key = key
+        suffix = 2
+        while key in used_keys:
+            key = f"{base_key[:54]}-{suffix}"
+            suffix += 1
+        used_keys.add(key)
         if not key or not label:
             continue
+        support_role_ids = [
+            str(item)
+            for item in raw.get(
+                "support_role_ids",
+                [raw.get("role_id")] if raw.get("role_id") not in (None, "") else [],
+            )
+            if str(item).isdigit()
+        ]
         normalized.append({
-            "key": key[:60],
+            "key": key,
             "label": label[:80],
+            "description": str(raw.get("description") or "")[:100],
             "emoji": str(raw.get("emoji") or "🎫")[:2],
             "category_id": str(raw["category_id"]) if raw.get("category_id") else None,
-            "support_role_ids": [str(item) for item in raw.get("support_role_ids", []) if str(item).isdigit()],
+            "role_id": support_role_ids[0] if support_role_ids else None,
+            "support_role_ids": support_role_ids,
             "senior_role_ids": [str(item) for item in raw.get("senior_role_ids", []) if str(item).isdigit()],
+            "welcome_msg": str(raw.get("welcome_msg") or "")[:2000],
             "intake_fields": [
                 {
                     "key": re.sub(
@@ -229,6 +271,55 @@ class TicketMemberActionModal(discord.ui.Modal):
         if cog is None:
             return await itx.response.send_message("نظام التذاكر غير متاح حالياً.", ephemeral=True)
         await cog.handle_ticket_member_action(itx, self.action, str(self.member_id))
+
+
+class TicketSelectView(discord.ui.View):
+    """Persistent dropdown panel whose options are restored from SQLite."""
+
+    def __init__(self, categories_config=None, guild_id: int | None = None):
+        super().__init__(timeout=None)
+        self.categories = normalize_ticket_categories(categories_config)
+        self.guild_id = int(guild_id) if guild_id is not None else None
+        custom_id = (
+            f"ticket:select:{self.guild_id}"
+            if self.guild_id is not None
+            else "ticket:select"
+        )
+        select = discord.ui.Select(
+            placeholder="اختر القسم المناسب لطلبك 📋",
+            min_values=1,
+            max_values=1,
+            custom_id=custom_id,
+            options=[
+                discord.SelectOption(
+                    label=category["label"][:100],
+                    description=(
+                        category.get("description")
+                        or "فتح تذكرة مع فريق الدعم"
+                    )[:100],
+                    emoji=category["emoji"],
+                    value=category["key"][:100],
+                )
+                for category in self.categories[:25]
+            ],
+        )
+
+        async def callback(itx: discord.Interaction):
+            selected_key = (getattr(select, "values", None) or [None])[0]
+            category = next(
+                (item for item in self.categories if item["key"] == selected_key),
+                None,
+            )
+            if category is None:
+                return await itx.response.send_message(
+                    "تعذر تحميل هذا القسم. أعد نشر لوحة التذاكر من لوحة التحكم.",
+                    ephemeral=True,
+                )
+            await itx.response.send_modal(TicketCategoryModal(category))
+
+        mark_modal_callback(callback)
+        select.callback = callback
+        self.add_item(select)
 
 
 class TicketPanelView(discord.ui.View):

@@ -261,6 +261,7 @@ async def verified_dashboard_guilds(
     bot_guilds = list(getattr(bot, "guilds", ()) or ()) if bot else []
     if bot_guilds:
         verified = []
+        get_guild = getattr(bot, "get_guild", None)
         for guild in bot_guilds:
             try:
                 guild_id = int(guild.id)
@@ -271,12 +272,19 @@ async def verified_dashboard_guilds(
             # no cached OAuth list, live bot membership remains authoritative.
             if oauth_by_id and oauth_data is None:
                 continue
-            member = await resolve_dashboard_member(guild, user_id)
-            direct_access = bool(member and member_allows_dashboard(member, guild))
+            bot_guild = get_guild(guild_id) if callable(get_guild) else guild
+            if bot_guild is None:
+                continue
+            member = await resolve_dashboard_member(bot_guild, user_id)
+            direct_access = bool(
+                member and member_allows_dashboard(member, bot_guild)
+            )
             oauth_access = bool(oauth_data and oauth_guild_allows_dashboard(oauth_data))
             if not direct_access and not oauth_access:
                 continue
-            verified.append(dashboard_guild_payload(guild, member, oauth_data))
+            verified.append(
+                dashboard_guild_payload(bot_guild, member, oauth_data)
+            )
         return verified
 
     # Compatibility fallback for startup/test doubles without a guild cache.

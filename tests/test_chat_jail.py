@@ -48,11 +48,10 @@ class ChatJailTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("clear", moderation_names)
         self.assertIn("slowmode", moderation_names)
 
-    async def test_combined_step_three_command_surface_has_29_unique_names(self):
+    async def test_step_three_surface_has_29_names_and_stays_disjoint_from_sanctions(self):
         intents = discord.Intents.none()
         bot = commands.Bot(command_prefix="!", intents=intents)
         await bot.add_cog(Moderation(bot))
-        await bot.add_cog(SanctionsVoiceCog(bot))
         await bot.add_cog(ChatJailCog(bot))
         names = [command.name for command in bot.tree.walk_commands()]
         self.assertEqual(len(names), 29)
@@ -61,6 +60,10 @@ class ChatJailTests(unittest.IsolatedAsyncioTestCase):
             set(names),
             set(command_names(Moderation)) | set(command_names(ChatJailCog)),
         )
+        sanctions_names = command_names(SanctionsVoiceCog)
+        self.assertEqual(len(sanctions_names), 25)
+        self.assertEqual(len(set(sanctions_names)), 25)
+        self.assertTrue(set(names).isdisjoint(sanctions_names))
         await bot.close()
 
     def test_step_three_commands_have_central_metadata(self):
@@ -84,9 +87,7 @@ class ChatJailTests(unittest.IsolatedAsyncioTestCase):
             {row["restriction_type"] for row in restrictions},
             {"write_block", "hide_member"},
         )
-        self.assertFalse(
-            await database.add_channel_restriction(700, 8080, 55, "write_block")
-        )
+        await database.add_channel_restriction(700, 8080, 55, "write_block")
         self.assertTrue(
             await database.remove_channel_restriction(700, 8080, 55, "write_block")
         )

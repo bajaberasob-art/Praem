@@ -4909,6 +4909,14 @@
       state.draft = clone(state.baseline);
       state.revision = onboarding.revision ?? settings.revision;
       state.updated = onboarding.updated_at ?? settings.updated_at;
+      const ticketConfigResponse = await api(`api/guild/${id}/tickets/config`);
+      if (ticketConfigResponse.ok) {
+        const ticketConfigData = await ticketConfigResponse.json();
+        state.ticketConfig = { ...state.ticketConfig, ...(ticketConfigData.config || {}) };
+        if (Array.isArray(ticketConfigData.categories) && ticketConfigData.categories.length) {
+          state.ticketCategories = ticketConfigData.categories;
+        }
+      }
       renderPage();
       openSSE(id);
       startIncidentRefresh(id);

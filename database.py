@@ -41,6 +41,7 @@ SETTINGS_SCHEMA: Dict[str, Tuple[str, Any, str]] = {
     "bot_auto_role_id": ("INTEGER", None, "id"),
     "verified_role_id": ("INTEGER", None, "id"),
     "unverified_role_id": ("INTEGER", None, "id"),
+    "quarantine_role_id": ("INTEGER", None, "id"),
     "rules_channel_id": ("INTEGER", None, "id"),
     "leave_message": ("TEXT", "", "str"),
     "economy_tax": ("REAL", 0.0, "float"),
@@ -386,6 +387,29 @@ async def init_db() -> None:
                     PRIMARY KEY (guild_id, user_id)
                 );
             """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS jailed_users (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    jailed_by INTEGER NOT NULL,
+                    saved_roles TEXT NOT NULL DEFAULT '[]',
+                    jail_type TEXT NOT NULL DEFAULT 'general',
+                    private_channel_id INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS channel_blacklists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    restriction_type TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (guild_id, channel_id, user_id, restriction_type)
+                );
+            """)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_temp_bans_expiry "
                 "ON temp_bans(unban_at);"
@@ -397,6 +421,14 @@ async def init_db() -> None:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_text_mutes_guild "
                 "ON text_mutes(guild_id);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_jailed_users_guild "
+                "ON jailed_users(guild_id);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_channel_blacklists_lookup "
+                "ON channel_blacklists(guild_id, channel_id, user_id);"
             )
 
             # 3. جدول إعدادات السيرفر والتذاكر
@@ -2520,6 +2552,132 @@ async def get_text_mutes(guild_id: int) -> list[dict[str, Any]]:
             ORDER BY created_at ASC
             """,
             (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def jail_user(
+    guild_id: int,
+    user_id: int,
+    mod_id: int,
+    saved_roles_json: str,
+    jail_type: str = "general",
+    private_channel_id: int = 0,
+) -> None:
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO jailed_users
+                (guild_id, user_id, jailed_by, saved_roles, jail_type, private_channel_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                jailed_by = excluded.jailed_by,
+                saved_roles = excluded.saved_roles,
+                jail_type = excluded.jail_type,
+                private_channel_id = excluded.private_channel_id,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (
+                int(guild_id),
+                int(user_id),
+                int(mod_id),
+                str(saved_roles_json),
+                str(jail_type or "general"),
+                int(private_channel_id or 0),
+            ),
+        )
+        await db.commit()
+
+
+async def get_jailed_user(guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT guild_id, user_id, jailed_by, saved_roles, jail_type,
+                   private_channel_id, created_at
+            FROM jailed_users
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def unjail_user(guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT guild_id, user_id, jailed_by, saved_roles, jail_type,
+                   private_channel_id, created_at
+            FROM jailed_users
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        await db.execute(
+            "DELETE FROM jailed_users WHERE guild_id = ? AND user_id = ?",
+            (int(guild_id), int(user_id)),
+        )
+        await db.commit()
+        return dict(row)
+
+
+async def add_channel_restriction(
+    guild_id: int,
+    channel_id: int,
+    user_id: int,
+    r_type: str,
+) -> None:
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO channel_blacklists
+                (guild_id, channel_id, user_id, restriction_type)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, user_id, restriction_type)
+            DO UPDATE SET created_at = CURRENT_TIMESTAMP
+            """,
+            (int(guild_id), int(channel_id), int(user_id), str(r_type)),
+        )
+        await db.commit()
+
+
+async def remove_channel_restriction(
+    guild_id: int,
+    channel_id: int,
+    user_id: int,
+    r_type: str,
+) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            """
+            DELETE FROM channel_blacklists
+            WHERE guild_id = ? AND channel_id = ? AND user_id = ?
+              AND restriction_type = ?
+            """,
+            (int(guild_id), int(channel_id), int(user_id), str(r_type)),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def get_channel_restrictions(
+    guild_id: int,
+    channel_id: int,
+) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, channel_id, user_id, restriction_type, created_at
+            FROM channel_blacklists
+            WHERE guild_id = ? AND channel_id = ?
+            ORDER BY id ASC
+            """,
+            (int(guild_id), int(channel_id)),
         ) as cur:
             return [dict(row) for row in await cur.fetchall()]
 

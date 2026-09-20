@@ -2594,13 +2594,13 @@
         api(`api/guild/${id}/tickets/config`),
       ]);
       state.tickets = {
-        active: active.ok ? (await active.json()).tickets || [] : state.tickets.active,
-        archive: archive.ok ? (await archive.json()).tickets || [] : state.tickets.archive,
-        kpis: kpis.ok ? (await kpis.json()).kpis || [] : state.tickets.kpis,
-        canned: canned.ok ? (await canned.json()).responses || [] : state.tickets.canned,
+        active: (await readJson(active, { tickets: state.tickets.active })).tickets || [],
+        archive: (await readJson(archive, { tickets: state.tickets.archive })).tickets || [],
+        kpis: (await readJson(kpis, { kpis: state.tickets.kpis })).kpis || [],
+        canned: (await readJson(canned, { responses: state.tickets.canned })).responses || [],
       };
       if (configResponse.ok) {
-        const configData = await configResponse.json();
+        const configData = await readJson(configResponse, {});
         state.ticketConfig = { ...state.ticketConfig, ...(configData.config || {}) };
         if (Array.isArray(configData.categories) && configData.categories.length) {
           state.ticketCategories = configData.categories;
@@ -4104,7 +4104,7 @@
       body.team_size = Number(body.team_size);
       body.max_slots = Number(body.max_slots);
       const response = await writeApi(`api/guild/${state.guild.id}/gaming/deploy`, body);
-      const data = await response.json();
+      const data = await readJson(response, {});
       if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر نشر لوحة السكريم");
       toast("✅ نُشرت لوحة السكريم في Discord", "success", 3000);
       await refreshGaming();
@@ -4161,7 +4161,7 @@
     try {
       const response = await api(`api/guild/${state.guild.id}/gaming`);
       if (response.ok) {
-        state.gaming = (await response.json()).scrims || [];
+        state.gaming = (await readJson(response, { scrims: [] })).scrims || [];
         if (state.activeView === "gaming") renderPage();
       }
     } catch (error) {
@@ -4228,7 +4228,7 @@
         economy_support_role_ids: [...supportSelect.selectedOptions].map((option) => option.value),
       };
       const response = await writeApi(`api/guild/${state.guild.id}/economy/config`, body);
-      const data = await response.json();
+      const data = await readJson(response, {});
       if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ إعدادات الاقتصاد");
       toast("✅ تم حفظ إعدادات الاقتصاد وتثبيت اللوحة", "success", 3000);
       await refreshEconomy();
@@ -4249,7 +4249,7 @@
           wallet_delta: Number(wallet.value || 0),
           level_delta: Number(level.value || 0),
         });
-        const data = await response.json();
+        const data = await readJson(response, {});
         if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر تعديل الحساب");
         back.remove();
         toast("✅ تم تحديث حساب العضو", "success", 2500);
@@ -4284,7 +4284,7 @@
     try {
       const response = await api(`api/guild/${state.guild.id}/economy`);
       if (response.ok) {
-        const data = await response.json();
+        const data = await readJson(response, {});
         state.economy = {
           wealth: data.wealth || [],
           levels: data.levels || [],
@@ -4341,7 +4341,7 @@
               button.disabled = true;
               try {
                 const response = await writeApi(`api/guild/${state.guild.id}/logs/test/${key}`, {});
-                const data = await response.json().catch(() => ({}));
+                const data = await readJson(response, {});
                 const message = {
                   category_unassigned: "عيّن قناة لهذا التصنيف أولاً ثم احفظ التوزيع",
                   missing_send_permission: "البوت لا يملك صلاحية إرسال الرسائل في هذه القناة",
@@ -4377,7 +4377,7 @@
                 `api/guild/${state.guild.id}/logs/channels`,
                 { channels: state.logRouting.channels },
               );
-              const data = await response.json().catch(() => ({}));
+              const data = await readJson(response, {});
               if (response.ok) {
                 state.logRouting = data;
                 toast("تم حفظ توزيع السجلات وتحديث الذاكرة مباشرة", "success");
@@ -5120,7 +5120,7 @@
   async function start() {
     try {
       const r = await api("api/me"),
-        me = await r.json();
+        me = await readJson(r, {});
       if (!me.auth) return redirect();
       state.session = me.session;
       if (!state.session.guilds?.length) {

@@ -2594,6 +2594,7 @@
   async function deployTicketPanel(form) {
     const channelId = form.elements.target_channel_id.value;
     if (!channelId) return toast("اختر قناة نشر اللوحة");
+    const color = form.elements.embed_color.value || "#5865f2";
     try {
       const r = await api(`api/guild/${state.guild.id}/tickets/deploy`, {
         method: "POST",
@@ -2601,6 +2602,10 @@
         body: JSON.stringify({
           target_channel_id: channelId,
           categories: state.ticketCategories,
+          embed_title: form.elements.embed_title.value.trim(),
+          embed_description: form.elements.embed_description.value.trim(),
+          embed_color: color,
+          footer_text: form.elements.footer_text.value.trim(),
         }),
       });
       const data = await r.json();
@@ -2852,8 +2857,21 @@
     state.ticketCategories.forEach((category, index) => {
       const label = el("input", { class: "studio-input", value: category.label, maxlength: "80" });
       label.oninput = () => { state.ticketCategories[index].label = label.value; };
+      const description = el("input", {
+        class: "studio-input",
+        value: category.description || "",
+        maxlength: "100",
+        placeholder: "وصف مختصر يظهر في القائمة",
+      });
+      description.oninput = () => { state.ticketCategories[index].description = description.value; };
       const emoji = el("input", { class: "studio-input ticket-emoji-input", value: category.emoji || "🎫", maxlength: "2", "aria-label": "رمز التصنيف" });
       emoji.oninput = () => { state.ticketCategories[index].emoji = emoji.value || "🎫"; };
+      const parent = el("select", { class: "studio-input", "aria-label": `فئة قنوات ${category.label}` },
+        el("option", { value: "" }, "بدون فئة أب"),
+        (state.meta?.categories || []).map((item) => el("option", { value: item.id }, item.name)),
+      );
+      parent.value = category.category_id || "";
+      parent.onchange = () => { state.ticketCategories[index].category_id = parent.value || null; };
       const roles = el("select", { class: "ticket-role-select", multiple: "multiple", "aria-label": `رتب دعم ${category.label}` });
       (state.commandStudio.roles || []).forEach((role) => {
         const option = el("option", { value: role.id }, role.name);
@@ -2862,6 +2880,7 @@
       });
       roles.onchange = () => {
         state.ticketCategories[index].support_role_ids = [...roles.selectedOptions].map((option) => option.value);
+        state.ticketCategories[index].role_id = state.ticketCategories[index].support_role_ids[0] || null;
       };
       const seniorRoles = el("select", { class: "ticket-role-select ticket-senior-role-select", multiple: "multiple", "aria-label": `رتب التصعيد ${category.label}` });
       (state.commandStudio.roles || []).forEach((role) => {
@@ -2873,6 +2892,14 @@
         state.ticketCategories[index].senior_role_ids = [...seniorRoles.selectedOptions].map((option) => option.value);
       };
       const fields = el("div", { class: "ticket-intake-editor" });
+      const welcome = el("textarea", {
+        class: "studio-textarea",
+        maxlength: "2000",
+        rows: "2",
+        placeholder: "رسالة ترحيبية اختيارية داخل التذكرة",
+      });
+      welcome.value = category.welcome_msg || "";
+      welcome.oninput = () => { state.ticketCategories[index].welcome_msg = welcome.value; };
       const renderFields = () => {
         fields.replaceChildren();
         const intakeFields = category.intake_fields || [];
@@ -2926,8 +2953,11 @@
           }),
         ),
         el("label", { class: "ticket-editor-label" }, "اسم القسم", label),
+         el("label", { class: "ticket-editor-label" }, "وصف القائمة", description),
+         el("label", { class: "ticket-editor-label" }, "الفئة الأب للقنوات", parent),
         el("label", { class: "ticket-editor-label" }, "فريق الدعم", roles),
         el("label", { class: "ticket-editor-label" }, "رتب التصعيد", seniorRoles),
+         el("label", { class: "ticket-editor-label" }, "رسالة الترحيب", welcome),
         el("small", { class: "ticket-field-caption", text: "الرتب المحددة تمنح صلاحية متابعة هذا القسم والتصعيد الإداري." }),
         el("small", { class: "ticket-field-caption", text: "حقول نموذج الفتح (اختيارية، حتى 3)" }),
         fields,
@@ -2937,6 +2967,10 @@
   }
   function ticketsView() {
     const studio = state.commandStudio || { channels: [] };
+    const ticketConfig = state.ticketConfig || {};
+    const colorValue = Number(ticketConfig.embed_color);
+    const embedColor = `#${(Number.isFinite(colorValue) ? colorValue : 0x5865F2)
+      .toString(16).padStart(6, "0").slice(-6)}`;
     const launchForm = el("form", { class: "ticket-launcher-form" },
       el("div", { class: "ticket-preview-card" },
         el("div", { class: "ticket-preview-glow" }),
@@ -2951,6 +2985,44 @@
         el("select", { name: "target_channel_id", class: "studio-input" },
           el("option", { value: "" }, "اختر قناة نصية"),
           (studio.channels || []).map((channel) => el("option", { value: channel.id }, `#${channel.name}`)),
+        ),
+      ),
+      el("div", { class: "ticket-config-grid" },
+        el("label", { class: "ticket-editor-label" }, "عنوان الـ Embed",
+          el("input", {
+            name: "embed_title",
+            class: "studio-input",
+            maxlength: "256",
+            value: ticketConfig.embed_title || "🎫 مركز الدعم والتذاكر",
+            oninput: (event) => { state.ticketConfig.embed_title = event.target.value; },
+          }),
+        ),
+        el("label", { class: "ticket-editor-label" }, "لون اللوحة",
+          el("input", {
+            name: "embed_color",
+            class: "studio-input",
+            type: "color",
+            value: embedColor,
+            oninput: (event) => { state.ticketConfig.embed_color = parseInt(event.target.value.slice(1), 16); },
+          }),
+        ),
+        el("label", { class: "ticket-editor-label" }, "تذييل اللوحة",
+          el("input", {
+            name: "footer_text",
+            class: "studio-input",
+            maxlength: "2048",
+            value: ticketConfig.footer_text || "",
+            oninput: (event) => { state.ticketConfig.footer_text = event.target.value; },
+          }),
+        ),
+        el("label", { class: "ticket-editor-label ticket-config-wide" }, "وصف اللوحة",
+          el("textarea", {
+            name: "embed_description",
+            class: "studio-textarea",
+            maxlength: "4096",
+            rows: "3",
+            placeholder: "النص الظاهر أعلى قائمة الأقسام",
+          }),
         ),
       ),
       el("div", { class: "ticket-category-heading" },
@@ -2980,6 +3052,10 @@
       ticketCategoryEditor(),
       el("button", { class: "btn primary ticket-deploy", type: "submit", text: "نشر لوحة التذاكر للسيرفر 🚀" }),
     );
+    launchForm.elements.embed_description.value = ticketConfig.embed_description || "";
+    launchForm.elements.embed_description.oninput = (event) => {
+      state.ticketConfig.embed_description = event.target.value;
+    };
     launchForm.onsubmit = (event) => { event.preventDefault(); deployTicketPanel(launchForm); };
 
     const kpis = state.tickets.kpis || [];

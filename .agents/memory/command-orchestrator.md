@@ -26,3 +26,13 @@ The commands dashboard should reuse the existing settings revision endpoint for 
 **Why:** The dashboard already has conflict-safe settings saves and live permission rechecks; introducing a second write protocol would create inconsistent authorization and stale prefix state.
 
 **How to apply:** Keep command/trigger routes behind `authorize(req, write=True)`, send the current settings revision for prefix updates, and refresh the orchestrator registry after trigger changes.
+
+Discord's 100-command application limit applies to top-level entries; preserve larger
+command surfaces by grouping leaf commands and treating discord.utils.MISSING as a
+global-registration sentinel when routing during cog injection.
+
+**Why:** A bot can have more than 100 total leaf commands, but registering every
+leaf at the root prevents startup and leaves the dashboard with no connected guilds.
+
+**How to apply:** Keep grouped leaf callbacks discoverable through walk_commands,
+resolve shortcuts by leaf name, and count tree.get_commands() before syncing.

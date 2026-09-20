@@ -158,7 +158,6 @@ class EnterpriseBot(commands.Bot):
         self._gateway_watchdog_task: asyncio.Task | None = None
         self._wal_checkpoint_task: asyncio.Task | None = None
         self.started_at = time.monotonic()
-        self._slash_groups: dict[str, app_commands.Group] = {}
         self._active_cog_name: str | None = None
 
     async def add_cog(self, cog, /, *, override=False, guild=None, guilds=None):

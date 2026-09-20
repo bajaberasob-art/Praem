@@ -1060,10 +1060,14 @@ class Community(commands.Cog):
             return await itx.response.send_message(
                 "🔒 فتح التذاكر متاح داخل السيرفرات فقط.", ephemeral=True
             )
-        active = await get_active_tickets(guild.id)
-        if any(ticket["user_id"] == itx.user.id for ticket in active):
+        existing = await get_active_ticket_for_user_category(
+            guild.id,
+            itx.user.id,
+            category["key"],
+        )
+        if existing:
             return await itx.response.send_message(
-                "📌 لديك تذكرة مفتوحة بالفعل. أغلقها قبل فتح تذكرة جديدة.",
+                f"📌 لديك تذكرة مفتوحة في قسم «{category['label']}» بالفعل.",
                 ephemeral=True,
             )
         parent = None
@@ -1073,8 +1077,16 @@ class Community(commands.Cog):
                 parent = None
         if parent is None and isinstance(itx.channel, discord.TextChannel):
             parent = itx.channel.category
-        safe_name = re.sub(r"[^a-zA-Z0-9-]+", "-", itx.user.display_name.lower()).strip("-")
-        safe_name = (safe_name or f"user-{itx.user.id}")[:45]
+        safe_name = re.sub(r"[^a-zA-Z0-9-]+", "-", itx.user.name.lower()).strip("-")
+        safe_name = (safe_name or f"user-{itx.user.id}")[:80]
+        channel_name = f"ticket-{safe_name}"[:100]
+        existing_names = {
+            str(item.name).casefold()
+            for item in getattr(guild, "channels", ())
+            if getattr(item, "name", None)
+        }
+        if channel_name.casefold() in existing_names:
+            channel_name = f"ticket-{safe_name[:85]}-{itx.user.id}"[:100]
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             itx.user: discord.PermissionOverwrite(
@@ -1101,7 +1113,7 @@ class Community(commands.Cog):
                 manage_messages=True,
             )
         channel = await guild.create_text_channel(
-            name=f"ticket-{safe_name}-{itx.user.id}"[:100],
+            name=channel_name,
             category=parent,
             overwrites=overwrites,
             topic=f"Ticket • {category['label']} • Normal • {subject[:80]}",

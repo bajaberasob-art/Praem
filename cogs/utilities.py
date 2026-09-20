@@ -355,6 +355,10 @@ class Utilities(commands.Cog):
                 enabled=bool(control["enabled"]),
                 allowed_roles=list(control["allowed_roles"]),
                 allowed_channels=list(control.get("allowed_channels", [])),
+                custom_aliases=list(control.get("aliases", [])),
+                auto_delete_seconds=int(control.get("auto_delete_seconds") or 0),
+                response_style=str(control.get("response_style") or "default"),
+                response_template=str(control.get("response_template") or ""),
                 configured=True,
                 updated_at=control.get("updated_at"),
             )
@@ -399,6 +403,9 @@ class Utilities(commands.Cog):
         allowed_roles: list[int | str] | None = None,
         allowed_channels: list[int | str] | None = None,
         aliases: list[str] | None = None,
+        auto_delete_seconds: int | None = None,
+        response_style: str | None = None,
+        response_template: str | None = None,
     ) -> dict[str, Any]:
         """Persist and publish a command's enabled/role policy."""
         name = str(command_name).strip().lower()
@@ -428,7 +435,11 @@ class Utilities(commands.Cog):
             allowed_roles=roles,
             allowed_channels=channels,
             aliases=aliases,
+            auto_delete_seconds=auto_delete_seconds,
+            response_style=response_style,
+            response_template=response_template,
         )
+        result["custom_aliases"] = list(result.get("aliases", []))
         self.command_controls.setdefault(int(guild_id), {})[name] = result
         self.command_aliases[int(guild_id)] = {
             str(alias).casefold(): (command, policy)

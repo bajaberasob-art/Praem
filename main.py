@@ -140,6 +140,7 @@ class EnterpriseBot(commands.Bot):
             "cogs.moderation",
             "cogs.sanctions_voice",
             "cogs.chat_jail",
+            "cogs.admin_advanced",
             "cogs.engagement",
             "cogs.economy",
             "cogs.utilities",

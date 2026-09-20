@@ -138,6 +138,7 @@ class EnterpriseBot(commands.Bot):
             "cogs.security",
             "cogs.analytics",
             "cogs.moderation",
+            "cogs.sanctions_voice",
             "cogs.engagement",
             "cogs.economy",
             "cogs.utilities",

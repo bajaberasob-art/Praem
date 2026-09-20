@@ -8,6 +8,7 @@ particular, timeout and untimeout are intentionally not duplicated here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import logging
 import re
@@ -456,10 +457,10 @@ class SanctionsVoiceCog(commands.Cog):
             member = interaction.guild.get_member(user_id)
             try:
                 if member is None or not self._hierarchy_ok(interaction, member):
-                    raise discord.Forbidden
+                    raise PermissionError("member hierarchy")
                 await member.kick(reason=reason)
                 success += 1
-            except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            except (PermissionError, discord.Forbidden, discord.HTTPException, discord.NotFound):
                 failed += 1
             await asyncio.sleep(0.35)
         return await self._send(interaction, "masskick", "👢 طرد جماعي", f"اكتمل الطرد الجماعي: **{success}** ناجح، **{failed}** فشل.", category="log_sanctions", color=0xEF4444, fields=[("السبب", reason, False)])
@@ -480,10 +481,10 @@ class SanctionsVoiceCog(commands.Cog):
             member = interaction.guild.get_member(user_id)
             try:
                 if member is None or not self._hierarchy_ok(interaction, member):
-                    raise discord.Forbidden
+                    raise PermissionError("member hierarchy")
                 await member.timeout(until, reason=reason)
                 success += 1
-            except (discord.Forbidden, discord.HTTPException, discord.NotFound):
+            except (PermissionError, discord.Forbidden, discord.HTTPException, discord.NotFound):
                 failed += 1
         return await self._send(interaction, "massmute", "🔇 إسكات جماعي", f"اكتمل الإسكات: **{success}** ناجح، **{failed}** فشل.", category="log_sanctions", color=0xF59E0B, fields=[("المدة", duration, True), ("السبب", reason, False)])
 

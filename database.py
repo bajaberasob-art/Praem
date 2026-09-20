@@ -2510,6 +2510,20 @@ async def remove_text_mute(guild_id: int, user_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+async def get_text_mutes(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT guild_id, user_id, muted_by, created_at
+            FROM text_mutes
+            WHERE guild_id = ?
+            ORDER BY created_at ASC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
 async def record_invite_use(guild_id: int, inviter_id: int) -> int:
     """Atomically increment persistent invite usage and return the new total."""
     async with connect() as db:

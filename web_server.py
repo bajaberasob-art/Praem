@@ -841,6 +841,35 @@ async def validate_changes(guild, changes: dict) -> tuple[dict, dict]:
             if role.managed or not me or role >= me.top_role:
                 errors[key] = "لا يمكن للبوت منح هذه الرتبة (أعلى من رتبته أو مُدارة)"
                 continue
+        if isinstance(value, list) and key.endswith("_role_ids"):
+            invalid = False
+            for raw_id in value:
+                if not str(raw_id).isdigit() or not 15 <= len(str(raw_id)) <= 22:
+                    invalid = True
+                    break
+                role = guild.get_role(int(raw_id))
+                if role is None or role.is_default():
+                    invalid = True
+                    break
+            if invalid:
+                errors[key] = "تحتوي القائمة على رتبة غير موجودة في هذا السيرفر"
+                continue
+            value = list(dict.fromkeys(str(raw_id) for raw_id in value))
+        if isinstance(value, list) and key.endswith("_channel_ids"):
+            valid_channels = []
+            for raw_id in value:
+                if not str(raw_id).isdigit() or not 15 <= len(str(raw_id)) <= 22:
+                    valid_channels = []
+                    break
+                channel = await resolve_text_channel(guild, int(raw_id))
+                if channel is None:
+                    valid_channels = []
+                    break
+                valid_channels.append(str(raw_id))
+            if len(valid_channels) != len(value):
+                errors[key] = "تحتوي القائمة على قناة غير موجودة في هذا السيرفر"
+                continue
+            value = list(dict.fromkeys(valid_channels))
         clean[key] = value
     return clean, errors
 

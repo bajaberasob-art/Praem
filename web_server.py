@@ -69,7 +69,10 @@ BOT_INVITE_PERMISSIONS = (os.getenv("BOT_INVITE_PERMISSIONS") or "8").strip()
 DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
 SESSIONS: dict[str, dict] = {}
 STATES: dict[str, float] = {}
-STATE_TTL, SESSION_TTL = 300, 604800
+STATE_TTL, SESSION_TTL = 300, 2_592_000
+AUTHORIZED_ROLE_NAMES = frozenset(
+    {"admin", "owner", "prime", "management", "مشرف"}
+)
 # حدود معدل الطلبات: (عدد الطلبات، النافذة بالثواني)
 SAVE_LIMIT, READ_LIMIT = (5, 10.0), (60, 10.0)
 IP_API_LIMIT, IP_SENSITIVE_LIMIT = (60, 60.0), (10, 60.0)
@@ -122,6 +125,199 @@ def bot_invite_url() -> str | None:
         f"{DISCORD_AUTHORIZE}?"
         f"{urlencode({'client_id': C_ID, 'scope': 'bot applications.commands', 'permissions': BOT_INVITE_PERMISSIONS})}"
     )
+
+
+def request_bot(request) -> discord.Client | None:
+    """Return the exact bot instance shared with the aiohttp application."""
+    app = getattr(request, "app", None)
+    if app is not None:
+        try:
+            app_bot = app["bot"]
+        except (KeyError, TypeError):
+            app_bot = None
+        if app_bot is not None:
+            return app_bot
+    return bot_ref
+
+
+def bot_is_connected(bot) -> bool:
+    """Treat a populated gateway cache as usable before READY finishes."""
+    if bot is None:
+        return False
+    ready = getattr(bot, "is_ready", None)
+    if callable(ready):
+        try:
+            if ready():
+                return True
+        except Exception:
+            logger.debug("Could not read Discord gateway readiness.", exc_info=True)
+    return bool(getattr(bot, "guilds", ()))
+
+
+def configured_admin_role_ids() -> set[int]:
+    """Read optional dashboard role IDs without exposing them to the browser."""
+    raw = (os.getenv("ADMIN_ROLE_IDS") or "").strip()
+    role_ids: set[int] = set()
+    for value in re.split(r"[,\s]+", raw):
+        if value.isdigit():
+            role_ids.add(int(value))
+    return role_ids
+
+
+def oauth_guild_allows_dashboard(guild_data: dict) -> bool:
+    try:
+        permissions = int(guild_data.get("permissions", 0))
+    except (TypeError, ValueError):
+        permissions = 0
+    return bool(
+        guild_data.get("owner") is True
+        or permissions & MANAGE_GUILD_BIT
+        or permissions & ADMIN_BIT
+    )
+
+
+def member_allows_dashboard(member, guild) -> bool:
+    """Check ownership, Discord permissions, or an explicitly trusted role."""
+    try:
+        if int(getattr(member, "id", 0)) == int(getattr(guild, "owner_id", 0) or 0):
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    permissions = getattr(member, "guild_permissions", None)
+    if (
+        permissions is not None
+        and (
+            bool(getattr(permissions, "administrator", False))
+            or bool(getattr(permissions, "manage_guild", False))
+        )
+    ):
+        return True
+
+    role_ids = configured_admin_role_ids()
+    for role in getattr(member, "roles", ()) or ():
+        try:
+            role_id = int(getattr(role, "id", 0))
+        except (TypeError, ValueError):
+            role_id = 0
+        role_name = str(getattr(role, "name", "") or "").strip().casefold()
+        if role_id in role_ids or role_name in AUTHORIZED_ROLE_NAMES:
+            return True
+    return False
+
+
+async def resolve_dashboard_member(guild, user_id: int):
+    """Use the cache first, then fetch the member when the cache is cold."""
+    get_member = getattr(guild, "get_member", None)
+    member = get_member(user_id) if callable(get_member) else None
+    if member is not None:
+        return member
+    fetch_member = getattr(guild, "fetch_member", None)
+    if not callable(fetch_member):
+        return None
+    try:
+        return await fetch_member(user_id)
+    except (
+        discord.NotFound,
+        discord.Forbidden,
+        discord.HTTPException,
+        asyncio.TimeoutError,
+    ):
+        return None
+
+
+def dashboard_guild_payload(guild, member=None, oauth_data=None) -> dict:
+    icon = getattr(guild, "icon", None)
+    try:
+        is_owner = bool(
+            member
+            and int(getattr(member, "id", 0))
+            == int(getattr(guild, "owner_id", 0) or 0)
+        )
+    except (TypeError, ValueError):
+        is_owner = bool(oauth_data and oauth_data.get("owner") is True)
+    return {
+        "id": str(guild.id),
+        "name": str(getattr(guild, "name", guild.id)),
+        "members": getattr(guild, "member_count", None),
+        "icon": icon.url if icon else None,
+        "is_owner": is_owner or bool(oauth_data and oauth_data.get("owner") is True),
+    }
+
+
+async def verified_dashboard_guilds(
+    bot,
+    user_id: int,
+    oauth_guilds: list[dict] | None = None,
+) -> list[dict]:
+    """Return mutual guilds authorized by live Discord membership data."""
+    oauth_by_id: dict[str, dict] = {}
+    for item in oauth_guilds or ():
+        try:
+            oauth_by_id[str(int(item["id"]))] = item
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    bot_guilds = list(getattr(bot, "guilds", ()) or ()) if bot else []
+    if bot_guilds:
+        verified = []
+        for guild in bot_guilds:
+            try:
+                guild_id = int(guild.id)
+            except (AttributeError, TypeError, ValueError):
+                continue
+            oauth_data = oauth_by_id.get(str(guild_id))
+            # OAuth guilds establish mutual membership. If a later session has
+            # no cached OAuth list, live bot membership remains authoritative.
+            if oauth_by_id and oauth_data is None:
+                continue
+            member = await resolve_dashboard_member(guild, user_id)
+            direct_access = bool(member and member_allows_dashboard(member, guild))
+            oauth_access = bool(oauth_data and oauth_guild_allows_dashboard(oauth_data))
+            if not direct_access and not oauth_access:
+                continue
+            verified.append(dashboard_guild_payload(guild, member, oauth_data))
+        return verified
+
+    # Compatibility fallback for startup/test doubles without a guild cache.
+    verified = []
+    get_guild = getattr(bot, "get_guild", None) if bot else None
+    for oauth_data in oauth_guilds or ():
+        if not oauth_guild_allows_dashboard(oauth_data):
+            continue
+        try:
+            guild_id = int(oauth_data["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        guild = get_guild(guild_id) if callable(get_guild) else None
+        if guild is not None:
+            verified.append(dashboard_guild_payload(guild, None, oauth_data))
+    return verified
+
+
+async def sync_session_guilds(request, session: dict) -> list[dict]:
+    """Refresh a session from the shared bot without blocking on READY."""
+    bot = request_bot(request)
+    if bot is None:
+        return session.get("guilds", [])
+    bot_guilds = list(getattr(bot, "guilds", ()) or ())
+    if not bot_is_connected(bot) and not bot_guilds:
+        return session.get("guilds", [])
+    try:
+        user_id = int(session["id"])
+    except (KeyError, TypeError, ValueError):
+        session["guilds"] = []
+        return []
+
+    verified = await verified_dashboard_guilds(
+        bot,
+        user_id,
+        session.get("_oauth_guilds", []),
+    )
+    session["guilds"] = verified
+    session["bot_ready"] = bot_is_connected(bot)
+    session["connected_guilds_count"] = len(bot_guilds)
+    return verified
 
 
 @web.middleware

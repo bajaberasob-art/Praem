@@ -1,4 +1,3 @@
-import asyncio
 import io
 import json
 import logging
@@ -6,7 +5,6 @@ from urllib.parse import quote
 
 import aiohttp
 import discord
-from deep_translator import GoogleTranslator
 from discord import app_commands
 from discord.ext import commands
 
@@ -29,6 +27,40 @@ FLAG_MAP = {
     "🇷🇺": "ru",
     "🇰🇷": "ko",
 }
+
+
+async def translate_text(
+    session: aiohttp.ClientSession,
+    text: str,
+    target_lang: str,
+) -> str:
+    """Translate text without relying on the unmaintained deep-translator package."""
+    params = {
+        "client": "gtx",
+        "sl": "auto",
+        "tl": target_lang,
+        "dt": "t",
+        "q": text,
+    }
+    async with session.get(
+        "https://translate.googleapis.com/translate_a/single",
+        params=params,
+        timeout=aiohttp.ClientTimeout(total=20),
+    ) as response:
+        response.raise_for_status()
+        payload = await response.json(content_type=None)
+
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
+        raise ValueError("Unexpected translation response")
+
+    translated = "".join(
+        part[0]
+        for part in payload[0]
+        if isinstance(part, list) and part and isinstance(part[0], str)
+    )
+    if not translated:
+        raise ValueError("Translation response was empty")
+    return translated
 
 
 class AITools(commands.Cog):
@@ -63,9 +95,10 @@ class AITools(commands.Cog):
             if not message.content or message.author.bot:
                 return
 
-            translated = await asyncio.to_thread(
-                GoogleTranslator(source="auto", target=target_lang).translate,
+            translated = await translate_text(
+                self.session,
                 message.content,
+                target_lang,
             )
             embed = discord.Embed(
                 title=f"🌐 الترجمة الفورية ({target_lang.upper()})",

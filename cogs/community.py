@@ -1131,6 +1131,12 @@ class Community(commands.Cog):
             intake_data=intake_data,
         )
         embed = self._ticket_embed(ticket)
+        if category.get("welcome_msg"):
+            embed.add_field(
+                name="رسالة القسم",
+                value=str(category["welcome_msg"])[:1024],
+                inline=False,
+            )
         message = await channel.send(
             content=itx.user.mention,
             embed=embed,
@@ -1838,6 +1844,38 @@ class Community(commands.Cog):
 async def setup(bot: commands.Bot):
     bot.add_view(SuggestionActionView())
     bot.add_view(TicketControlView())
+    for config in await get_ticket_configs():
+        channel = bot.get_channel(config["channel_id"]) if config.get("channel_id") else None
+        if channel is None or not config.get("message_id"):
+            continue
+        options = await get_ticket_options(config["guild_id"])
+        if options:
+            categories = [
+                {
+                    "key": re.sub(
+                        r"[^a-zA-Z0-9_-]+",
+                        "-",
+                        option["label"].strip().lower(),
+                    ).strip("-") or f"category-{option['id']}",
+                    "label": option["label"],
+                    "description": option["description"],
+                    "emoji": option["emoji"],
+                    "role_id": option["role_id"],
+                    "category_id": option["category_id"],
+                    "welcome_msg": option["welcome_msg"],
+                    "support_role_ids": (
+                        [str(option["role_id"])]
+                        if option.get("role_id") is not None
+                        else []
+                    ),
+                    "senior_role_ids": [],
+                }
+                for option in options
+            ]
+            bot.add_view(
+                TicketSelectView(categories, config["guild_id"]),
+                message_id=config["message_id"],
+            )
     for panel in await get_ticket_panels():
         if bot.get_channel(panel["channel_id"]):
             bot.add_view(

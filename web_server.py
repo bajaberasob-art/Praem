@@ -42,6 +42,10 @@ from database import (
     save_shortcut,
     update_guild_settings,
     validate_setting,
+    get_ticket_config,
+    get_ticket_options,
+    save_ticket_config,
+    replace_ticket_options,
 )
 from cogs.command_meta import (
     AUTO_DELETE_PRESETS,
@@ -944,6 +948,13 @@ async def guild_meta(guild) -> dict:
             "type": channel_type,
             "category": channel.category.name if channel.category else None,
         })
+    categories = [
+        {"id": str(category.id), "name": category.name}
+        for category in sorted(
+            getattr(guild, "categories", ()) or (),
+            key=lambda item: getattr(item, "position", 0),
+        )
+    ]
     roles = []
     for role in reversed(guild.roles):
         if role.is_default():
@@ -1002,6 +1013,7 @@ async def guild_meta(guild) -> dict:
         "guild": {"id": str(guild.id), "name": guild.name, "icon": icon.url if icon else None,
                   "members": guild.member_count},
         "channels": channels,
+        "categories": categories,
         "roles": roles,
         "members": members,
         "stickers": [

@@ -2120,6 +2120,34 @@
       aliasInput,
       aliasChips,
     );
+    const shortcuts = commandShortcuts(command);
+    const shortcutInput = el("textarea", {
+      class: "studio-textarea command-alias-input",
+      rows: "2",
+      placeholder: "مثال: عيب، تحذير، انذار",
+      "aria-label": "اختصارات الأمر",
+    });
+    shortcutInput.value = shortcuts.map((item) => item.trigger).join("، ");
+    const shortcutChips = el("div", { class: "command-alias-chips" });
+    const shortcutChipNodes = shortcuts.length
+      ? shortcuts.map((item) => el("code", { class: "command-alias-chip", text: item.trigger }))
+      : [el("span", { class: "hint", text: "لا توجد اختصارات محفوظة لهذا الأمر بعد" })];
+    shortcutChips.replaceChildren(...shortcutChipNodes);
+    const shortcutSection = el("section", { class: "command-aliases command-shortcut-editor" },
+      el("div", { class: "section-heading compact" },
+        el("div", {}, el("div", { class: "eyebrow", text: "SHORTCUT EDITOR" }), el("h3", { text: "محرر الاختصارات القديم" })),
+        el("span", { class: "alias-count", text: `${shortcuts.length}/20` }),
+      ),
+      el("p", { class: "hint", text: "يحافظ هذا المحرر على اختصارات Discord المحفوظة سابقاً. الأسماء البديلة الجديدة تُدار من القسم السابق." }),
+      shortcutInput,
+      shortcutChips,
+      el("button", {
+        class: "btn ghost alias-save-button",
+        type: "button",
+        text: "حفظ الاختصارات",
+        onClick: () => saveCommandShortcuts(command, shortcutInput),
+      }),
+    );
     const rolesEditor = commandChoiceEditor(
       "الرتب المسموحة",
       state.commandStudio.roles || [],
@@ -2229,6 +2257,7 @@
         el("div", { class: "command-detail-status-editor" }, statusCopy, statusSwitch),
       ),
       aliasesSection,
+      shortcutSection,
       rolesEditor.root,
       channelsEditor.root,
       autoDeleteSection,

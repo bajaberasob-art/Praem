@@ -33,7 +33,7 @@
     revision: null,
     updated: null,
     onboarding: null,
-    commandStudio: { commands: [], roles: [], channels: [], shortcuts: [] },
+    commandStudio: { commands: [], roles: [], channels: [] },
     commandRegistry: { categories: [], commands: [], policies: {}, byKey: {} },
     autoResponses: [],
     autoResponderMeta: { roles: [], emojis: [], members: [] },
@@ -4490,7 +4490,7 @@
     state.actions = [];
     state.drawerOpen = false;
     state.onboarding = null;
-    state.commandStudio = { commands: [], roles: [], channels: [], shortcuts: [] };
+    state.commandStudio = { commands: [], roles: [], channels: [] };
     state.commandRegistry = { categories: [], commands: [], policies: {}, byKey: {} };
     state.autoResponses = [];
     state.commandSearch = "";
@@ -4529,7 +4529,7 @@
         sr.json(),
         ir.ok ? ir.json() : Promise.resolve({ incidents: [] }),
         or.json(),
-        cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [], shortcuts: [] }),
+        cr.ok ? cr.json() : Promise.resolve({ commands: [], roles: [], channels: [] }),
         registryResponse.ok ? registryResponse.json() : Promise.resolve({ categories: [], commands: [], policies: {} }),
         ar.ok ? ar.json() : Promise.resolve({ rules: [], channels: [] }),
         ta.ok ? ta.json() : Promise.resolve({ tickets: [] }),

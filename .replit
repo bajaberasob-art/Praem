@@ -46,7 +46,9 @@ packages = ["libsodium"]
 [userenv]
 
 [userenv.shared]
-DASHBOARD_PORT = "8099"
+# The Vite dashboard preview owns 8099 in development; the Python dashboard
+# stays on 8098 locally. Koyeb production supplies PORT and does not use this.
+DASHBOARD_PORT = "8098"
 CLIENT_ID = "1550042204091715634"
 REDIRECT_URI = "https://606ace4b-80f4-436d-a16c-4b91959eec01-00-1btltnca2drwt.pike.replit.dev/api/dashboard/api/auth/callback"
 DASHBOARD_BASE_PATH = "/api/dashboard/"
@@ -62,3 +64,7 @@ externalPort = 8081
 [[ports]]
 localPort = 8099
 externalPort = 8099
+
+[[ports]]
+localPort = 8098
+externalPort = 8098

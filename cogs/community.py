@@ -1844,13 +1844,18 @@ class Community(commands.Cog):
 async def setup(bot: commands.Bot):
     bot.add_view(SuggestionActionView())
     bot.add_view(TicketControlView())
+    legacy_panels = await get_ticket_panels()
+    legacy_by_message = {
+        (int(panel["guild_id"]), int(panel["message_id"])): panel["categories"]
+        for panel in legacy_panels
+    }
     for config in await get_ticket_configs():
         channel = bot.get_channel(config["channel_id"]) if config.get("channel_id") else None
         if channel is None or not config.get("message_id"):
             continue
         options = await get_ticket_options(config["guild_id"])
         if options:
-            categories = [
+            option_categories = [
                 {
                     "key": re.sub(
                         r"[^a-zA-Z0-9_-]+",
@@ -1872,11 +1877,15 @@ async def setup(bot: commands.Bot):
                 }
                 for option in options
             ]
+            categories = legacy_by_message.get(
+                (int(config["guild_id"]), int(config["message_id"])),
+                option_categories,
+            )
             bot.add_view(
                 TicketSelectView(categories, config["guild_id"]),
                 message_id=config["message_id"],
             )
-    for panel in await get_ticket_panels():
+    for panel in legacy_panels:
         if bot.get_channel(panel["channel_id"]):
             bot.add_view(
                 TicketPanelView(panel["categories"]),

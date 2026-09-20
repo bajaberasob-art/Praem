@@ -958,6 +958,10 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_tickets_guild_status "
                 "ON tickets(guild_id, status);"
             )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tickets_user_category "
+                "ON tickets(guild_id, user_id, category_key, status);"
+            )
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS ticket_notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

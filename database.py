@@ -2405,6 +2405,111 @@ async def get_warnings(user_id: int, guild_id: int) -> List[Tuple[int, str, str]
             return await cur.fetchall()
 
 
+def _penalty_timestamp(value: Any) -> str:
+    """Normalize datetime-like expiry values to SQLite's sortable UTC format."""
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)
+
+
+async def add_temp_ban(guild_id: int, user_id: int, unban_at: Any) -> None:
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO temp_bans (guild_id, user_id, unban_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                unban_at = excluded.unban_at
+            """,
+            (int(guild_id), int(user_id), _penalty_timestamp(unban_at)),
+        )
+        await db.commit()
+
+
+async def get_expired_temp_bans() -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT guild_id, user_id, unban_at
+            FROM temp_bans
+            WHERE datetime(unban_at) <= CURRENT_TIMESTAMP
+            ORDER BY unban_at ASC
+            """
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def remove_temp_ban(guild_id: int, user_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM temp_bans WHERE guild_id = ? AND user_id = ?",
+            (int(guild_id), int(user_id)),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def add_voice_ban(guild_id: int, user_id: int, mod_id: int) -> None:
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO voice_bans (guild_id, user_id, banned_by)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                banned_by = excluded.banned_by,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (int(guild_id), int(user_id), int(mod_id)),
+        )
+        await db.commit()
+
+
+async def remove_voice_ban(guild_id: int, user_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM voice_bans WHERE guild_id = ? AND user_id = ?",
+            (int(guild_id), int(user_id)),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
+async def is_voice_banned(guild_id: int, user_id: int) -> bool:
+    async with connect() as db:
+        async with db.execute(
+            "SELECT 1 FROM voice_bans WHERE guild_id = ? AND user_id = ? LIMIT 1",
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            return await cur.fetchone() is not None
+
+
+async def add_text_mute(guild_id: int, user_id: int, mod_id: int) -> None:
+    async with connect() as db:
+        await db.execute(
+            """
+            INSERT INTO text_mutes (guild_id, user_id, muted_by)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                muted_by = excluded.muted_by,
+                created_at = CURRENT_TIMESTAMP
+            """,
+            (int(guild_id), int(user_id), int(mod_id)),
+        )
+        await db.commit()
+
+
+async def remove_text_mute(guild_id: int, user_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM text_mutes WHERE guild_id = ? AND user_id = ?",
+            (int(guild_id), int(user_id)),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
 async def record_invite_use(guild_id: int, inviter_id: int) -> int:
     """Atomically increment persistent invite usage and return the new total."""
     async with connect() as db:

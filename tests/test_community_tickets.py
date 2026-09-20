@@ -67,6 +67,7 @@ class CommunityTicketTests(unittest.IsolatedAsyncioTestCase):
                 "ticket:remove-member",
                 "ticket:unclaim",
                 "ticket:transfer",
+                "ticket:delete",
             },
         )
 

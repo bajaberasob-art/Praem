@@ -477,7 +477,7 @@ def pwa_svg() -> str:
 
 
 def service_worker_source() -> str:
-    return """const CACHE = "prime-dashboard-shell-v3";
+    return """const CACHE = "prime-dashboard-shell-v4";
 const STATIC = [
   "./",
   "./static/app.css",

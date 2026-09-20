@@ -2490,6 +2490,214 @@ async def get_warnings(user_id: int, guild_id: int) -> List[Tuple[int, str, str]
             return await cur.fetchall()
 
 
+async def add_member_warning(
+    guild_id: int,
+    user_id: int,
+    mod_id: int,
+    reason: str,
+) -> int:
+    """Add a Step 4 warning without changing the legacy warnings contract."""
+    async with connect() as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO member_warnings (guild_id, user_id, moderator_id, reason)
+            VALUES (?, ?, ?, ?)
+            """,
+            (int(guild_id), int(user_id), int(mod_id), str(reason).strip()[:2000]),
+        )
+        warning_id = int(cursor.lastrowid)
+        await db.commit()
+    return warning_id
+
+
+async def get_member_warnings(guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, user_id, moderator_id, reason, created_at
+            FROM member_warnings
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY id DESC
+            """,
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def delete_member_warning(warning_id: int, guild_id: int | None = None) -> bool:
+    async with connect() as db:
+        if guild_id is None:
+            cursor = await db.execute(
+                "DELETE FROM member_warnings WHERE id = ?",
+                (int(warning_id),),
+            )
+        else:
+            cursor = await db.execute(
+                "DELETE FROM member_warnings WHERE id = ? AND guild_id = ?",
+                (int(warning_id), int(guild_id)),
+            )
+        changed = cursor.rowcount > 0
+        await db.commit()
+    return changed
+
+
+async def clear_member_warnings(guild_id: int, user_id: int) -> int:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM member_warnings WHERE guild_id = ? AND user_id = ?",
+            (int(guild_id), int(user_id)),
+        )
+        deleted = max(0, int(cursor.rowcount))
+        await db.commit()
+    return deleted
+
+
+async def add_temp_role(
+    guild_id: int,
+    user_id: int,
+    role_id: int,
+    expires_at: Any,
+) -> int:
+    async with connect() as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO temp_roles (guild_id, user_id, role_id, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                int(user_id),
+                int(role_id),
+                _penalty_timestamp(expires_at),
+            ),
+        )
+        entry_id = int(cursor.lastrowid)
+        await db.commit()
+    return entry_id
+
+
+async def get_expired_temp_roles() -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, user_id, role_id, expires_at, created_at
+            FROM temp_roles
+            WHERE expires_at <= CURRENT_TIMESTAMP
+            ORDER BY id ASC
+            """
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def remove_temp_role_entry(entry_id: int) -> bool:
+    async with connect() as db:
+        cursor = await db.execute(
+            "DELETE FROM temp_roles WHERE id = ?",
+            (int(entry_id),),
+        )
+        changed = cursor.rowcount > 0
+        await db.commit()
+    return changed
+
+
+async def adjust_event_points(guild_id: int, user_id: int, delta: int) -> int:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            INSERT INTO event_points (guild_id, user_id, points)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                points = event_points.points + excluded.points
+            """,
+            (int(guild_id), int(user_id), int(delta)),
+        )
+        async with db.execute(
+            """
+            SELECT points FROM event_points
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return int(row["points"]) if row else 0
+
+
+async def reset_event_points(guild_id: int) -> int:
+    async with connect() as db:
+        cursor = await db.execute(
+            "UPDATE event_points SET points = 0 WHERE guild_id = ?",
+            (int(guild_id),),
+        )
+        changed = max(0, int(cursor.rowcount))
+        await db.commit()
+    return changed
+
+
+async def get_event_leaderboard(guild_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT guild_id, user_id, points
+            FROM event_points
+            WHERE guild_id = ?
+            ORDER BY points DESC, user_id ASC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def add_mod_note(
+    guild_id: int,
+    user_id: int,
+    mod_id: int,
+    text: str,
+) -> int:
+    async with connect() as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO mod_notes (guild_id, user_id, moderator_id, note_text)
+            VALUES (?, ?, ?, ?)
+            """,
+            (int(guild_id), int(user_id), int(mod_id), str(text).strip()[:4000]),
+        )
+        note_id = int(cursor.lastrowid)
+        await db.commit()
+    return note_id
+
+
+async def get_mod_notes(guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, user_id, moderator_id, note_text, created_at
+            FROM mod_notes
+            WHERE guild_id = ? AND user_id = ?
+            ORDER BY id DESC
+            """,
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def delete_mod_note(note_id: int, guild_id: int | None = None) -> bool:
+    async with connect() as db:
+        if guild_id is None:
+            cursor = await db.execute(
+                "DELETE FROM mod_notes WHERE id = ?",
+                (int(note_id),),
+            )
+        else:
+            cursor = await db.execute(
+                "DELETE FROM mod_notes WHERE id = ? AND guild_id = ?",
+                (int(note_id), int(guild_id)),
+            )
+        changed = cursor.rowcount > 0
+        await db.commit()
+    return changed
+
+
 def _penalty_timestamp(value: Any) -> str:
     """Normalize datetime-like expiry values to SQLite's sortable UTC format."""
     if isinstance(value, datetime):

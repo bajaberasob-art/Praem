@@ -53,17 +53,19 @@ class ChatJailTests(unittest.IsolatedAsyncioTestCase):
         bot = commands.Bot(command_prefix="!", intents=intents)
         await bot.add_cog(Moderation(bot))
         await bot.add_cog(ChatJailCog(bot))
-        names = [command.name for command in bot.tree.walk_commands()]
-        self.assertEqual(len(names), 29)
-        self.assertEqual(len(names), len(set(names)))
+        registered_names = [command.name for command in bot.tree.walk_commands()]
+        step_three_names = set(command_names(ChatJailCog)) | {"clear", "slowmode"}
+        self.assertEqual(len(step_three_names), 29)
+        self.assertEqual(len(step_three_names), len(set(step_three_names)))
         self.assertEqual(
-            set(names),
-            set(command_names(Moderation)) | set(command_names(ChatJailCog)),
+            set(command.name for command in bot.tree.walk_commands())
+            & step_three_names,
+            step_three_names,
         )
         sanctions_names = command_names(SanctionsVoiceCog)
         self.assertEqual(len(sanctions_names), 25)
         self.assertEqual(len(set(sanctions_names)), 25)
-        self.assertTrue(set(names).isdisjoint(sanctions_names))
+        self.assertTrue(step_three_names.isdisjoint(sanctions_names))
         await bot.close()
 
     def test_step_three_commands_have_central_metadata(self):

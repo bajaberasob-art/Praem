@@ -2192,14 +2192,14 @@
         ["silent", "صامت"],
       ].map(([value, label]) => el("option", { value, text: label })),
     );
-    responseStyleSelect.value = effectivePolicy.response_style || "default";
+    responseStyleSelect.value = effectivePolicy.response_mode || effectivePolicy.response_style || "default";
     const responseTemplate = el("textarea", {
       class: "studio-textarea command-response-template",
       rows: "5",
       placeholder: "اختياري: اكتب قالب الرد المخصص (حتى 2000 حرف)…",
       "aria-label": "قالب الرد المخصص",
     });
-    responseTemplate.value = effectivePolicy.response_template || "";
+    responseTemplate.value = effectivePolicy.custom_template || effectivePolicy.response_template || "";
     const responsePanel = el("section", { class: "command-detail-policy command-response-panel" },
       el("div", { class: "command-detail-policy-heading" },
         el("span", { class: "command-policy-icon", text: "↗" }),
@@ -2251,7 +2251,6 @@
         el("div", { class: "command-detail-status-editor" }, statusCopy, statusSwitch),
       ),
       aliasesSection,
-      shortcutSection,
       rolesEditor.root,
       channelsEditor.root,
       autoDeleteSection,
@@ -2271,7 +2270,9 @@
         tab.setAttribute("aria-selected", String(selected));
       });
       tabDefinitions.forEach(([panelKey, , panel]) => {
-        panel.hidden = panelKey !== key;
+        const isActive = panelKey === key;
+        panel.hidden = !isActive;
+        panel.style.display = isActive ? "grid" : "none";
       });
     };
     tabDefinitions.forEach(([key, label]) => tabs.append(el("button", {
@@ -2285,7 +2286,7 @@
     })));
     setActiveTab(activeTab);
     const saveDetails = async () => {
-      const aliases = parseCommandAliases(aliasInput);
+      const aliases = parseCommandAliases(aliasValues);
       if (aliases === null) return;
       const policySaved = await saveCommandPolicy(
         command,
@@ -2295,8 +2296,8 @@
         aliases,
         {
           auto_delete_seconds: selectedAutoDelete,
-          response_style: responseStyleSelect.value,
-          response_template: responseTemplate.value,
+          response_mode: responseStyleSelect.value,
+          custom_template: responseTemplate.value,
         },
       );
       if (!policySaved) return;
@@ -2317,12 +2318,6 @@
       el("p", { class: "command-detail-description", text: visual.description }),
       tabs,
       tabPanels,
-      el("section", { class: "command-simulator" },
-        el("div", { class: "section-heading compact" }, el("div", {}, el("div", { class: "eyebrow", text: "SAFE SIMULATOR" }), el("h3", { text: "اختبر شكل التنفيذ" }))),
-        input,
-        output,
-        el("small", { class: "hint", text: "محاكاة محلية فقط؛ لا يتم إرسال رسالة إلى Discord." }),
-      ),
       el("div", { class: "modal-actions" },
         el("button", { class: "btn ghost", type: "button", text: "إلغاء", onClick: closeCommandDetail }),
         el("button", { class: "btn primary command-detail-save", type: "button", text: "حفظ التعديلات ✓", onClick: saveDetails }),
@@ -2331,7 +2326,7 @@
     back.onclick = (event) => { if (event.target === back) closeCommandDetail(); };
     back.append(modal);
     document.body.append(back);
-    input.focus();
+    aliasInput.focus();
   }
   async function bulkUpdateCommands(enabled) {
     const selected = (state.commandStudio.commands || []).filter((command) => state.selectedCommandIds.includes(String(command.command_name)));
@@ -3208,49 +3203,6 @@
       ),
       el("button", { class: "btn ghost", type: "button", disabled: !state.selectedCommandIds.length, text: "تفعيل المحدد", onClick: () => bulkUpdateCommands(true) }),
       el("button", { class: "btn ghost danger-outline", type: "button", disabled: !state.selectedCommandIds.length, text: "تعطيل المحدد", onClick: () => bulkUpdateCommands(false) }),
-    );
-    const shortcutCommand = studio.commands.find((command) => String(command.command_name) === String(state.shortcutCommandId))
-      || studio.commands[0];
-    if (shortcutCommand && !state.shortcutCommandId) state.shortcutCommandId = shortcutCommand.command_name;
-    const shortcutValue = state.shortcutInputText != null
-      ? state.shortcutInputText
-      : (shortcutCommand ? commandShortcuts(shortcutCommand).map((item) => item.trigger).join("، ") : "");
-    const shortcutCommandSelect = el("select", { class: "studio-input command-shortcut-command", "aria-label": "اختر الأمر لإدارة اختصاراته" },
-      studio.commands.map((command) => el("option", {
-        value: command.command_name,
-        text: `/${command.command_name} · ${command.cog || "Commands"}`,
-      })),
-    );
-    if (shortcutCommand) shortcutCommandSelect.value = shortcutCommand.command_name;
-    shortcutCommandSelect.onchange = () => {
-      state.shortcutCommandId = shortcutCommandSelect.value;
-      const next = studio.commands.find((command) => String(command.command_name) === String(state.shortcutCommandId));
-      state.shortcutInputText = next ? commandShortcuts(next).map((item) => item.trigger).join("، ") : "";
-      renderPage();
-    };
-    const shortcutInput = el("textarea", {
-      class: "studio-textarea command-shortcut-input",
-      rows: "2",
-      placeholder: "مثال: عيب، تحذير، انذار",
-      "aria-label": "اختصارات الأمر",
-      text: shortcutValue,
-    });
-    shortcutInput.oninput = () => { state.shortcutInputText = shortcutInput.value; };
-    const shortcutWorkbench = el("section", { class: "command-shortcut-workbench" },
-      el("div", { class: "command-shortcut-workbench-head" },
-        el("div", {},
-          el("div", { class: "eyebrow", text: "COMMAND ALIASES" }),
-          el("h3", { text: "اختصارات الأوامر" }),
-          el("p", { text: "اختر أمراً واكتب أكثر من اسم بديل له. ستظهر الاختصارات في البطاقة وتُحفظ دفعة واحدة." }),
-        ),
-        el("span", { class: "command-shortcut-count", text: shortcutCommand ? `${commandShortcuts(shortcutCommand).length}/20` : "0/20" }),
-      ),
-      el("div", { class: "command-shortcut-editor" },
-        shortcutCommandSelect,
-        shortcutInput,
-        el("button", { class: "btn primary command-shortcut-save", type: "button", text: "حفظ الاختصارات", disabled: !shortcutCommand, onClick: () => shortcutCommand && saveCommandShortcuts(shortcutCommand, shortcutInput, { reopen: false }) }),
-      ),
-      el("small", { class: "command-shortcut-hint", text: "مثال: اختر /warn ثم اكتب: عيب، تحذير، انذار. اكتب كل الاختصارات بفواصل أو أسطر." }),
     );
     const commandPanel = card("قائمة الأوامر",
       el("div", { class: "command-panel" },

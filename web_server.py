@@ -60,6 +60,8 @@ R_URI = os.getenv("REDIRECT_URI")
 DASHBOARD_BASE_PATH = os.getenv("DASHBOARD_BASE_PATH", "/").rstrip("/") + "/"
 DISCORD_API = "https://discord.com/api/v10"
 ADMIN_BIT = 0x8
+MANAGE_GUILD_BIT = 0x20
+DASHBOARD_PERMISSION_BITS = ADMIN_BIT | MANAGE_GUILD_BIT
 BOT_INVITE_PERMISSIONS = os.getenv("BOT_INVITE_PERMISSIONS", "8")
 DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
 SESSIONS: dict[str, dict] = {}
@@ -271,7 +273,7 @@ async def callback(req):
 
         guilds = []
         for guild in guild_data:
-            if (int(guild.get("permissions", 0)) & ADMIN_BIT) or guild.get("owner", False):
+            if (int(guild.get("permissions", 0)) & DASHBOARD_PERMISSION_BITS) or guild.get("owner", False):
                 if bot_ref and (bg := bot_ref.get_guild(int(guild["id"]))):
                     icon = getattr(bg, "icon", None)
                     guilds.append({
@@ -606,7 +608,10 @@ async def live_grant(session, guild) -> bool:
             member = None
         except (discord.HTTPException, asyncio.TimeoutError):
             raise web.HTTPServiceUnavailable(reason="permission check unavailable")
-    allowed = bool(member and (member.guild_permissions.value & ADMIN_BIT))
+    allowed = bool(
+        member
+        and (member.guild_permissions.value & DASHBOARD_PERMISSION_BITS)
+    )
     GRANT_CACHE[(user_id, guild.id)] = (now, allowed)
     return allowed
 

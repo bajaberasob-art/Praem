@@ -124,6 +124,37 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 401)
         self.assertNotIn("expired", dashboard.SESSIONS)
 
+    async def test_manage_guild_permission_is_dashboard_authorization(self):
+        guilds = {
+            1: SimpleNamespace(id=1, name="managed", member_count=5),
+        }
+        dashboard.STATES["managed"] = time.time()
+        callback_request = request(
+            "/api/auth/callback?code=test&state=managed", "oauth_state=managed",
+        )
+
+        class ManageGuildProvider(ProviderSession):
+            def get(self, url, **kwargs):
+                if url.endswith("/guilds"):
+                    return ProviderResponse([
+                        {"id": "1", "permissions": str(dashboard.MANAGE_GUILD_BIT)},
+                    ])
+                return super().get(url, **kwargs)
+
+        with (
+            patch.object(
+                dashboard.aiohttp,
+                "ClientSession",
+                return_value=ManageGuildProvider(),
+            ),
+            patch.object(dashboard, "bot_ref", SimpleNamespace(get_guild=guilds.get)),
+        ):
+            response = await dashboard.callback(callback_request)
+
+        self.assertEqual(response.status, 302)
+        sid = response.cookies["bot_session"].value
+        self.assertEqual([g["id"] for g in dashboard.SESSIONS[sid]["guilds"]], ["1"])
+
 
 if __name__ == "__main__":
     unittest.main()

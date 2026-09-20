@@ -2236,26 +2236,49 @@
       onClick: () => setActiveTab(key),
     })));
     setActiveTab(activeTab);
+    let savingDetails = false;
     async function saveDetails() {
+      if (savingDetails) return;
+      const pendingAlias = aliasInput.value.trim().replace(/^[/!]/, "");
+      if (pendingAlias) {
+        if (/\s/.test(pendingAlias) || pendingAlias.length > 80) {
+          toast("كل اسم بديل يجب أن يكون كلمة واحدة وبحد أقصى 80 حرفاً", "warn");
+          aliasInput.focus();
+          return;
+        }
+        if (!aliasValues.some((item) => item.toLocaleLowerCase() === pendingAlias.toLocaleLowerCase())) {
+          if (aliasValues.length >= 20) {
+            toast("يمكن إضافة 20 اسماً بديلاً كحد أقصى للأمر", "warn");
+            aliasInput.focus();
+            return;
+          }
+          aliasValues = [...aliasValues, pendingAlias];
+        }
+        aliasInput.value = "";
+        renderAliases();
+      }
       const aliases = parseCommandAliases(aliasValues);
       if (aliases === null) return;
-      const policySaved = await saveCommandPolicy(
-        command,
-        detailEnabled,
-        rolesEditor.values(),
-        channelsEditor.values(),
-        aliases,
-        {
-          auto_delete_seconds: selectedAutoDelete,
-          response_mode: responseStyleSelect.value,
-          custom_template: responseTemplate.value,
-        },
-      );
-      if (!policySaved) return;
-      pulse();
-      toast("تم حفظ إعدادات الأمر وتطبيقها على السيرفر", "success", 2600);
-      closeCommandDetail();
-      renderPage();
+      savingDetails = true;
+      try {
+        const policySaved = await saveCommandPolicy(
+          command,
+          detailEnabled,
+          rolesEditor.values(),
+          channelsEditor.values(),
+          aliases,
+          {
+            auto_delete_seconds: selectedAutoDelete,
+            response_mode: responseStyleSelect.value,
+            custom_template: responseTemplate.value,
+          },
+        );
+        if (!policySaved) return;
+        pulse();
+        toast("تم حفظ إعدادات الأمر وتطبيقها على السيرفر", "success", 2600);
+      } finally {
+        savingDetails = false;
+      }
     }
     const modal = el("aside", { class: "modal command-detail-drawer" },
       el("div", { class: "drawer-head" },

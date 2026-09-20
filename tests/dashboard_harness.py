@@ -251,6 +251,9 @@ class FakeBot:
             allowed_roles,
             allowed_channels=None,
             aliases=None,
+            auto_delete_seconds=None,
+            response_style=None,
+            response_template=None,
         ):
             result = await database.save_command_policy(
                 guild_id,
@@ -259,6 +262,9 @@ class FakeBot:
                 allowed_roles=allowed_roles,
                 allowed_channels=allowed_channels or [],
                 aliases=aliases,
+                auto_delete_seconds=auto_delete_seconds,
+                response_style=response_style,
+                response_template=response_template,
             )
             item = next((x for x in self.commands if x["command_name"] == command_name), None)
             if item is None:

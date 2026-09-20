@@ -227,6 +227,7 @@ class OAuthTests(unittest.IsolatedAsyncioTestCase):
         live_bot = SimpleNamespace(
             guilds=[guild],
             is_ready=lambda: False,
+            get_guild=lambda guild_id: guild if guild_id == guild.id else None,
         )
         dashboard.bot_ref = None
         dashboard.SESSIONS["live"] = {

@@ -12,6 +12,7 @@ from discord.ext import commands
 
 from database import (
     SETTINGS_DEFAULTS,
+    add_member_warning,
     add_warning,
     delete_warning,
     get_guild_settings,

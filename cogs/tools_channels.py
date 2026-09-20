@@ -92,6 +92,7 @@ class ToolsChannelsCog(commands.Cog):
         self, interaction: discord.Interaction, name: str, title: str, text: str,
         *, category: str = "log_member", color: int = 0x5865F2,
         fields: list[tuple[str, str, bool]] | None = None, ephemeral: bool = False,
+        view: discord.ui.View | None = None, image_url: str | None = None,
     ):
         policy = await self._policy(interaction.guild.id, name)
         values = {"user": getattr(interaction.user, "mention", ""), "guild": interaction.guild.name}
@@ -100,6 +101,8 @@ class ToolsChannelsCog(commands.Cog):
         except (KeyError, ValueError, IndexError):
             pass
         embed = discord.Embed(title=title, description=_safe(text, 4000), color=color, timestamp=discord.utils.utcnow())
+        if image_url:
+            embed.set_image(url=str(image_url))
         for field_name, value, inline in fields or []:
             embed.add_field(name=_safe(field_name, 256), value=_safe(value, 1024), inline=inline)
         payload: dict[str, Any] = {"content": f"**{title}**\n{text}" if policy.get("response_style") == "compact" else None}
@@ -110,9 +113,9 @@ class ToolsChannelsCog(commands.Cog):
         message = None
         try:
             if interaction.response.is_done():
-                message = await interaction.followup.send(wait=True, allowed_mentions=discord.AllowedMentions.none(), **payload)
+                message = await interaction.followup.send(wait=True, allowed_mentions=discord.AllowedMentions.none(), view=view, **payload)
             else:
-                await interaction.response.send_message(allowed_mentions=discord.AllowedMentions.none(), **payload)
+                await interaction.response.send_message(allowed_mentions=discord.AllowedMentions.none(), view=view, **payload)
                 with contextlib.suppress(discord.HTTPException, discord.NotFound):
                     message = await interaction.original_response()
         except (discord.Forbidden, discord.HTTPException, discord.NotFound, discord.InteractionResponded):
@@ -148,12 +151,15 @@ class ToolsChannelsCog(commands.Cog):
                 if channel and hasattr(channel, "send"):
                     await channel.send(content, allowed_mentions=discord.AllowedMentions(users=True))
                     delivered = True
-                else:
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                logger.info("Reminder %s channel delivery failed; trying DM", row["id"])
+            if not delivered:
+                try:
                     user = self.bot.get_user(int(row["user_id"])) or await self.bot.fetch_user(int(row["user_id"]))
                     await user.send(content, allowed_mentions=discord.AllowedMentions(users=True))
                     delivered = True
-            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-                logger.info("Reminder %s could not be delivered yet", row["id"])
+                except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                    logger.info("Reminder %s could not be delivered yet", row["id"])
             if delivered:
                 await delete_reminder(int(row["id"]))
 
@@ -164,12 +170,24 @@ class ToolsChannelsCog(commands.Cog):
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         if message.guild and not getattr(message.author, "bot", False):
-            LAST_DELETED_MESSAGE[message.channel.id] = {"author": message.author, "content": message.content, "url": getattr(message, "jump_url", ""), "attachments": [a.url for a in message.attachments]}
+            LAST_DELETED_MESSAGE[message.channel.id] = {
+                "author": message.author,
+                "content": message.content,
+                "timestamp": getattr(message, "created_at", discord.utils.utcnow()),
+                "url": getattr(message, "jump_url", ""),
+                "attachments": [a.url for a in message.attachments],
+            }
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         if before.guild and not getattr(before.author, "bot", False) and before.content != after.content:
-            LAST_EDITED_MESSAGE[before.channel.id] = {"author": before.author, "before": before.content, "after": after.content, "url": getattr(after, "jump_url", "")}
+            LAST_EDITED_MESSAGE[before.channel.id] = {
+                "author": before.author,
+                "before": before.content,
+                "after": after.content,
+                "timestamp": getattr(after, "edited_at", None) or discord.utils.utcnow(),
+                "url": getattr(after, "jump_url", ""),
+            }
 
     @app_commands.command(name="avatar", description="عرض صور العضو")
     @app_commands.check(tools_policy_check)
@@ -178,7 +196,10 @@ class ToolsChannelsCog(commands.Cog):
         url = str(user.display_avatar.url)
         embed = discord.Embed(title=f"🖼️ صورة {user.display_name}", color=0x5865F2)
         embed.set_image(url=url)
-        return await self._reply(interaction, "avatar", embed.title, "PNG/GIF: " + url, category="log_member")
+        view = discord.ui.View(timeout=120)
+        view.add_item(discord.ui.Button(label="PNG", style=discord.ButtonStyle.link, url=str(user.display_avatar.with_format("png").url)))
+        view.add_item(discord.ui.Button(label="GIF", style=discord.ButtonStyle.link, url=str(user.display_avatar.with_format("gif").url)))
+        return await self._reply(interaction, "avatar", embed.title, "اختر صيغة التحميل من الأزرار.", category="log_member", view=view, image_url=url)
 
     @app_commands.command(name="banner", description="عرض بانر العضو")
     @app_commands.check(tools_policy_check)
@@ -190,7 +211,7 @@ class ToolsChannelsCog(commands.Cog):
             return await self._error(interaction, "banner", "تعذر جلب بيانات البانر.")
         if not user.banner:
             return await self._error(interaction, "banner", "هذا العضو لا يملك بانراً.")
-        return await self._reply(interaction, "banner", "🖼️ بانر العضو", str(user.banner.url), fields=[("الرابط", str(user.banner.url), False)])
+        return await self._reply(interaction, "banner", "🖼️ بانر العضو", str(user.banner.url), fields=[("الرابط", str(user.banner.url), False)], image_url=str(user.banner.url))
 
     @app_commands.command(name="userinfo", description="عرض معلومات العضو")
     @app_commands.check(tools_policy_check)
@@ -270,7 +291,13 @@ class ToolsChannelsCog(commands.Cog):
     @app_commands.check(tools_policy_check)
     async def snipe(self, interaction: discord.Interaction):
         item = LAST_DELETED_MESSAGE.get(interaction.channel.id)
-        return await self._reply(interaction, "snipe", "🕵️ آخر رسالة محذوفة", f"{item['author'].mention}: {_safe(item['content'], 1800)}" if item else "لا توجد رسالة محفوظة.", category="log_message")
+        if not item:
+            return await self._reply(interaction, "snipe", "🕵️ آخر رسالة محذوفة", "لا توجد رسالة محفوظة.", category="log_message")
+        attachments = "\n".join(item.get("attachments") or [])
+        text = f"{item['author'].mention}: {_safe(item['content'], 1600)}\n<t:{int(item['timestamp'].timestamp())}:R>"
+        if attachments:
+            text += f"\nالمرفقات:\n{_safe(attachments, 900)}"
+        return await self._reply(interaction, "snipe", "🕵️ آخر رسالة محذوفة", text, category="log_message")
 
     @app_commands.command(name="editsnipe", description="عرض آخر تعديل")
     @app_commands.check(tools_policy_check)
@@ -442,7 +469,9 @@ class ToolsChannelsCog(commands.Cog):
     @app_commands.command(name="delete_channel", description="حذف قناة")
     @app_commands.check(tools_policy_check)
     @app_commands.checks.has_permissions(manage_channels=True)
-    async def delete_channel(self, interaction: discord.Interaction, channel: discord.abc.GuildChannel | None = None):
+    async def delete_channel(self, interaction: discord.Interaction, channel: discord.abc.GuildChannel | None = None, confirm: bool = False):
+        if not confirm:
+            return await self._reply(interaction, "delete_channel", "⚠️ تأكيد حذف القناة", "هذا الإجراء نهائي. أعد الأمر مع `confirm: True` للمتابعة.", category="log_channel", ephemeral=True)
         return await self._channel_action(interaction, "delete_channel", "delete", channel)
 
     @app_commands.command(name="rename_channel", description="إعادة تسمية قناة")
@@ -482,7 +511,9 @@ class ToolsChannelsCog(commands.Cog):
     @app_commands.command(name="delete_voice", description="حذف قناة صوتية")
     @app_commands.check(tools_policy_check)
     @app_commands.checks.has_permissions(manage_channels=True)
-    async def delete_voice(self, interaction: discord.Interaction, channel: discord.VoiceChannel | None = None):
+    async def delete_voice(self, interaction: discord.Interaction, channel: discord.VoiceChannel | None = None, confirm: bool = False):
+        if not confirm:
+            return await self._reply(interaction, "delete_voice", "⚠️ تأكيد حذف القناة الصوتية", "هذا الإجراء نهائي. أعد الأمر مع `confirm: True` للمتابعة.", category="log_channel", ephemeral=True)
         return await self._channel_action(interaction, "delete_voice", "delete", channel)
 
     @app_commands.command(name="rename_voice", description="إعادة تسمية قناة صوتية")

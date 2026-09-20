@@ -83,6 +83,22 @@ class PersistentFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await database.get_user_reminders(700, 55), [])
         self.assertFalse(await database.cancel_reminder(700, 55, reminder_id))
 
+    async def test_step_five_user_reminder_is_due_and_deletable(self):
+        reminder_id = await database.add_reminder(
+            700,
+            55,
+            300,
+            "تذكير جديد",
+            "2000-01-01 00:00:00",
+        )
+        due = await database.get_due_user_reminders("2099-01-01 00:00:00")
+        self.assertEqual(
+            [(row["id"], row["reminder_text"]) for row in due],
+            [(reminder_id, "تذكير جديد")],
+        )
+        self.assertTrue(await database.delete_reminder(reminder_id))
+        self.assertFalse(await database.delete_reminder(reminder_id))
+
     async def test_interactive_views_have_restart_safe_unique_ids(self):
         giveaway = LiveGiveaway("جائزة", 41)
         tournament = TournamentEntryView(42, "بطولة", 8)

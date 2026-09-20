@@ -1307,7 +1307,7 @@
         },
         body: JSON.stringify({ locked }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (r.ok && data.ok) {
         state.lockdown = locked;
         toast(
@@ -1336,7 +1336,7 @@
         },
         body: JSON.stringify({ action, user_id: userId }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (r.ok && data.ok) {
         state.whitelist = data.whitelist || [];
         toast(action === "add" ? "تمت إضافة المشرف إلى القائمة البيضاء" : "تمت الإزالة", "success", 2600);
@@ -1917,7 +1917,7 @@
           allowed_channels: allowedChannels,
         }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok) {
         toast(data.fields ? Object.values(data.fields)[0] : "تعذر تحديث صلاحية الأمر");
         return;
@@ -1952,7 +1952,7 @@
           custom_template: policyExtras.custom_template,
         }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok || !data.command) {
         toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ إعدادات الأمر", "warn");
         return false;
@@ -2020,7 +2020,7 @@
         headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
         body: JSON.stringify({ revision: state.revision, changes: { prefix: value } }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (r.ok && data.revision != null) {
         state.baseline = { ...state.baseline, prefix: data.settings.prefix };
         state.draft = { ...state.draft, prefix: data.settings.prefix };
@@ -2430,7 +2430,7 @@
           headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
           body: JSON.stringify({ command_name: command.command_name, enabled, allowed_roles: [...commandRoles(command)] }),
         });
-        const data = await r.json();
+        const data = await readJson(r, {});
         if (r.ok && data.command) {
           Object.assign(command, data.command);
           changed++;
@@ -2541,7 +2541,7 @@
         headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
         body: JSON.stringify(body),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok) {
         toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ قاعدة الرد");
         return;
@@ -2563,7 +2563,7 @@
         method: "DELETE",
         headers: { "X-CSRF-Token": state.session.csrf },
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok) {
         toast(data.error === "auto_responder_not_found" ? "القاعدة غير موجودة" : "تعذر حذف القاعدة");
         return;
@@ -2628,7 +2628,7 @@
           footer_text: form.elements.footer_text.value.trim(),
         }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok) {
         toast(data.fields ? Object.values(data.fields)[0] : "تعذر نشر لوحة التذاكر");
         return;
@@ -2665,7 +2665,7 @@
           reason: "أُغلقت من لوحة الإدارة",
           ...payload,
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok) {
         toast(data.fields ? Object.values(data.fields)[0] : "تعذر تنفيذ الإجراء");
         return null;
@@ -2690,7 +2690,7 @@
   async function openTicketDetail(ticket) {
     try {
       const r = await api(`api/guild/${state.guild.id}/tickets/detail/${ticket.id}`);
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok || !data.ticket) return toast("تعذر تحميل تفاصيل التذكرة");
       const current = data.ticket;
       const notes = data.notes || [];
@@ -2850,7 +2850,7 @@
         headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
         body: JSON.stringify(body),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (!r.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ الرد الجاهز");
       pulse();
       toast("تم حفظ الرد الجاهز", "success", 2000);
@@ -4493,7 +4493,7 @@
         changes: snap,
       });
       if (guildId !== state.guild.id) return;
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (r.status === 200 && data.ok) {
         // تعديلات أُجريت أثناء الحفظ فقط هي التي تبقى غير محفوظة
         const later = Object.fromEntries(
@@ -4554,7 +4554,7 @@
         changes: snap,
       });
       if (guildId !== state.guild.id) return false;
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (r.ok && data.revision != null) {
         const later = Object.fromEntries(
           onboardingKeys
@@ -4653,7 +4653,7 @@
           template_data: { username: "عضو تجريبي" },
         }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (r.ok && data.ok) toast("تم إرسال رسالة التجربة إلى Discord", "success", 3500);
       else toast(data.fields?.target_channel_id || "تعذر إرسال رسالة التجربة");
     } catch (error) {
@@ -4699,7 +4699,7 @@
           })),
         }),
       });
-      const data = await r.json();
+      const data = await readJson(r, {});
       if (r.ok && data.ok && data.panel) {
         state.onboarding = {
           ...state.onboarding,

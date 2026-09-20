@@ -1459,7 +1459,10 @@ async def api_guild_economy_adjust(req):
     target = guild.get_member(user_id)
     if actor is None or target is None:
         return json_error(404, "member_not_found")
-    if not await economy._is_economy_support(actor):
+    if (
+        not member_allows_dashboard(actor, guild)
+        and not await economy._is_economy_support(actor)
+    ):
         return json_error(403, "forbidden")
     try:
         result = await economy.dashboard_adjust(

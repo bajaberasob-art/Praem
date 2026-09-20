@@ -100,7 +100,10 @@ class RoutedCommandTree(app_commands.CommandTree):
             ),
             None,
         )
-        if group_name and guild is None and guilds is None:
+        global_registration = (
+            guild is None or guild is discord.utils.MISSING
+        ) and (guilds is None or guilds is discord.utils.MISSING)
+        if group_name and global_registration:
             groups = getattr(self, "_slash_groups", {})
             group = groups.get(group_name)
             if group is None:

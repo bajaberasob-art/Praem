@@ -1966,6 +1966,8 @@ def _ticket_role_ids(guild, categories):
         if not label or len(label) > 80:
             return None, f"اسم التصنيف رقم {index + 1} غير صالح"
         role_ids = raw.get("support_role_ids", [])
+        if not role_ids and raw.get("role_id") not in (None, ""):
+            role_ids = [raw.get("role_id")]
         senior_ids = raw.get("senior_role_ids", [])
         if not isinstance(role_ids, list) or not isinstance(senior_ids, list):
             return None, f"رتب التصنيف رقم {index + 1} غير صالحة"
@@ -2007,6 +2009,10 @@ def _ticket_role_ids(guild, categories):
                 "required": bool(field.get("required", False)),
             })
         normalized = dict(raw)
+        normalized["role_id"] = str(role_ids[0]) if role_ids else None
+        normalized["description"] = str(raw.get("description") or "").strip()[:100]
+        normalized["emoji"] = str(raw.get("emoji") or "🎫").strip()[:2]
+        normalized["welcome_msg"] = str(raw.get("welcome_msg") or "").strip()[:2000]
         normalized["intake_fields"] = clean_fields
         clean.append(normalized)
     return clean, None

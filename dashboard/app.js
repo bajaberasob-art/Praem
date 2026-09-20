@@ -1640,17 +1640,7 @@
       target: `/${name}`,
       policyAlias: true,
     }));
-    const legacy = (state.commandStudio.shortcuts || []).filter((shortcut) => {
-      const target = String(shortcut.target || "").trim().toLowerCase();
-      return target.replace(/^[/!]/, "").split(/\s+/)[0] === name;
-    });
-    const seen = new Set();
-    return [...policyAliases, ...legacy].filter((shortcut) => {
-      const key = String(shortcut.trigger || "").toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    return policyAliases;
   }
   function commandPermissionWarnings(command) {
     const raw = [
@@ -3545,7 +3535,6 @@
       commandPanel,
       prefixForm,
       prefixExamples,
-      shortcutWorkbench,
       commandTabs,
       policyPanel,
       autoCard,

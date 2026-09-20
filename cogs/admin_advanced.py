@@ -679,7 +679,7 @@ class AdminAdvancedCog(commands.Cog):
     @app_commands.command(name="bot_list", description="عرض بوتات السيرفر")
     @app_commands.check(admin_policy_check)
     @app_commands.checks.has_permissions(kick_members=True)
-    async def bot_list(self, interaction: discord.Interaction):
+    async def list_bots(self, interaction: discord.Interaction):
         bots = [member for member in interaction.guild.members if member.bot]
         lines = [f"{member.mention} — `{member.id}`" for member in bots]
         return await self._respond(interaction, "bot_list", "🤖 بوتات السيرفر", "\n".join(lines)[:1900] or "لا توجد بوتات أخرى.", category="log_member", color=0x3B82F6, fields=[("العدد", str(len(bots)), True)])

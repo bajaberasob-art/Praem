@@ -4084,8 +4084,10 @@
   function gamingView() {
     const channels = state.meta?.channels || [];
     const channelOptions = channels
-      .filter((channel) => channel.type === "text" || !channel.type)
-      .map((channel) => el("option", { value: channel.id, text: `#${channel.name}` }));
+      .map((channel) => el("option", {
+        value: channel.id,
+        text: `#${channel.name}${channel.type && channel.type !== "text" ? ` (${channel.type})` : ""}`,
+      }));
     const form = el(
       "form",
       { class: "fields gaming-deploy-form" },
@@ -4309,7 +4311,7 @@
       ["log_react", "👍", "سجل التفاعلات", "إضافة التفاعلات على الرسائل", "#EC4899"],
       ["log_roles", "🎭", "سجل الرتب والصلاحيات", "إضافة الرتب وتعديلها", "#8B5CF6"],
     ];
-    const channels = (state.meta?.channels || []).filter((item) => item.type === "text" || !item.type);
+    const channels = state.meta?.channels || [];
     const routeState = state.logRouting?.channels || {};
     const cards = categories.map(([key, icon, title, hint, accent]) => {
       const select = el(

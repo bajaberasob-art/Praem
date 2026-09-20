@@ -1045,13 +1045,13 @@ async def dashboard_channels(guild) -> list[dict]:
 
 async def resolve_text_channel(guild, channel_id: int):
     channel = guild.get_channel(int(channel_id))
-    if isinstance(channel, discord.TextChannel):
+    if isinstance(channel, MESSAGE_CHANNEL_TYPES):
         return channel
     fetch_channels = getattr(guild, "fetch_channels", None)
     if fetch_channels is not None:
         try:
             for fetched in await fetch_channels():
-                if fetched.id == int(channel_id) and isinstance(fetched, discord.TextChannel):
+                if fetched.id == int(channel_id) and isinstance(fetched, MESSAGE_CHANNEL_TYPES):
                     return fetched
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("Unable to fetch channel %s in guild %s", channel_id, guild.id, exc_info=True)
@@ -1240,8 +1240,8 @@ async def api_set_log_channels(req):
             continue
         if channel_id:
             channel = guild.get_channel(channel_id)
-            if channel is None or not isinstance(channel, discord.TextChannel):
-                errors[key] = "اختر قناة نصية من هذا السيرفر"
+            if channel is None or not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+                errors[key] = "اختر قناة صالحة من هذا السيرفر"
                 continue
         clean[key] = channel_id
     if errors:
@@ -1386,8 +1386,8 @@ async def api_guild_economy_config(req):
             return json_error(400, "validation", fields={"leaderboard_channel_id": "القناة غير صالحة"})
         if channel_id:
             channel = guild.get_channel(channel_id)
-            if channel is None or not isinstance(channel, discord.TextChannel):
-                return json_error(400, "validation", fields={"leaderboard_channel_id": "اختر قناة نصية صالحة"})
+            if channel is None or not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+                return json_error(400, "validation", fields={"leaderboard_channel_id": "اختر قناة صالحة"})
         changes["leaderboard_channel_id"] = channel_id
         changes["leaderboard_message_id"] = 0
     try:
@@ -1496,8 +1496,8 @@ async def api_guild_gaming_deploy(req):
     except (TypeError, ValueError):
         return json_error(400, "validation", fields={"target_channel_id": "بيانات غير صالحة"})
     channel = guild.get_channel(channel_id)
-    if channel is None or not isinstance(channel, discord.TextChannel):
-        return json_error(400, "validation", fields={"target_channel_id": "اختر قناة نصية صالحة"})
+    if channel is None or not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+        return json_error(400, "validation", fields={"target_channel_id": "اختر قناة صالحة"})
     if not title or len(title) > 150 or not game_type or len(game_type) > 80:
         return json_error(400, "validation", fields={"title": "أدخل عنواناً ونوع لعبة صالحين"})
     if not 1 <= team_size <= 16 or not 1 <= max_slots <= 128:
@@ -1929,8 +1929,8 @@ async def api_guild_auto_responses_save(req):
             channel = guild.get_channel(int(channel_id))
         except (TypeError, ValueError):
             channel = None
-        if not isinstance(channel, discord.TextChannel):
-            return json_error(400, "validation", fields={"channel_id": "القناة النصية غير موجودة في هذا السيرفر"})
+        if not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+            return json_error(400, "validation", fields={"channel_id": "القناة غير موجودة في هذا السيرفر"})
         channel_id = int(channel.id)
 
     try:
@@ -2132,8 +2132,8 @@ async def api_guild_tickets_deploy(req):
     if isinstance(channel_id, bool) or not str(channel_id).isdigit():
         return json_error(400, "validation", fields={"target_channel_id": "معرف القناة غير صالح"})
     channel = guild.get_channel(int(channel_id))
-    if not isinstance(channel, discord.TextChannel):
-        return json_error(400, "validation", fields={"target_channel_id": "القناة النصية غير موجودة"})
+    if not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+        return json_error(400, "validation", fields={"target_channel_id": "القناة غير موجودة"})
     categories, category_error = _ticket_role_ids(guild, body.get("categories", body.get("options")))
     if category_error:
         return json_error(400, "validation", fields={"categories": category_error})

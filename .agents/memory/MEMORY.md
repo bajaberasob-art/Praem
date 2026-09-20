@@ -19,3 +19,4 @@
 - [Sanctions and voice ownership](sanctions-voice-engine.md) — new sanctions/voice commands stay additive; existing timeout commands remain owned by moderation to avoid duplicate Slash registrations.
 - [Jail restoration safety](jail-restoration-safety.md) — retain jail state until Discord role and private-channel restoration succeeds.
 - [Advanced warning compatibility](advanced-warning-compatibility.md) — preserve legacy warning helpers and mirror manual warnings into separate Step 4 administrative records.
+- [Step 5 tools and reminders](step5-tools-reminders.md) — keep new durable reminders isolated from the legacy reminder API and route tools through shared policy/audit contracts.

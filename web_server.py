@@ -418,7 +418,8 @@ async def callback(request):
     session = None
     owns_session = False
     try:
-        session = getattr(bot_ref, "session", None)
+        bot = request_bot(request)
+        session = getattr(bot, "session", None)
         owns_session = session is None
         if owns_session:
             session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
@@ -472,17 +473,11 @@ async def callback(request):
             if next_after == after:
                 raise ValueError("Invalid pagination")
             after = next_after
-        guilds = []
-        for guild in guild_data:
-            if (int(guild.get("permissions", 0)) & DASHBOARD_PERMISSION_BITS) or guild.get("owner", False):
-                if bot_ref and (bg := bot_ref.get_guild(int(guild["id"]))):
-                    icon = getattr(bg, "icon", None)
-                    guilds.append({
-                        "id": str(bg.id), "name": bg.name,
-                        "members": bg.member_count,
-                        "icon": icon.url if icon else None,
-                        "is_owner": guild.get("owner", False),
-                    })
+        guilds = await verified_dashboard_guilds(
+            bot,
+            int(user_data["id"]),
+            guild_data,
+        )
         user_session = {
             "id": user_data["id"], "username": user_data["username"],
             "avatar": (
@@ -492,14 +487,19 @@ async def callback(request):
             ),
             "guilds": guilds, "expires_at": time.time() + SESSION_TTL,
             "csrf": secrets.token_urlsafe(32),
-            # Keep the empty-state actionable: an installed bot that has not
-            # reached READY cannot appear in bot_ref.guilds yet.
-            "bot_ready": bool(
-                bot_ref
-                and callable(getattr(bot_ref, "is_ready", None))
-                and bot_ref.is_ready()
-            ),
-            "connected_guilds_count": len(getattr(bot_ref, "guilds", ())) if bot_ref else 0,
+            "bot_ready": bot_is_connected(bot),
+            "connected_guilds_count": len(getattr(bot, "guilds", ())) if bot else 0,
+            # Keep the provider's mutual-guild view private so later dashboard
+            # requests can re-check live bot membership and role access.
+            "_oauth_guilds": [
+                {
+                    "id": str(item.get("id")),
+                    "permissions": str(item.get("permissions", 0)),
+                    "owner": item.get("owner") is True,
+                }
+                for item in guild_data
+                if isinstance(item, dict) and item.get("id") is not None
+            ],
         }
     except (
         aiohttp.ClientError,
@@ -539,8 +539,11 @@ async def api_me(req):
     session = current_session(req)
     if not session:
         return web.json_response({"auth": False}, status=401)
+    await sync_session_guilds(req, session)
     public_session = {
-        key: value for key, value in session.items() if key != "expires_at"
+        key: value
+        for key, value in session.items()
+        if key != "expires_at" and not key.startswith("_")
     }
     # This is intentionally derived on every request so a session created
     # before a code update still gets the recovery link.
@@ -1108,7 +1111,8 @@ def broadcast(guild_id: int, payload: dict) -> None:
 async def api_health(req):
     if not current_session(req):
         return json_error(401, "unauthorized")
-    return web.json_response({"ok": True, "online": bool(bot_ref and bot_ref.is_ready())})
+    bot = request_bot(req)
+    return web.json_response({"ok": True, "online": bot_is_connected(bot)})
 
 
 @routes.get('/api/guild/{guild_id}/meta')
@@ -2822,6 +2826,7 @@ async def static_asset(req):
 
 
 @routes.get('/')
+@routes.get('/dashboard')
 async def index(req):
     sess = current_session(req)
 
@@ -3411,6 +3416,10 @@ async def index(req):
         """
         return web.Response(text=html, content_type='text/html')
 
+    # Refresh the server list before returning the shell so the frontend's
+    # first /api/me request sees the live bot guild/member authorization.
+    await sync_session_guilds(req, sess)
+
     # لوحة التحكم التفاعلية (HTML/CSS/JS في مجلد dashboard/)
     page = (DASHBOARD_DIR / "index.html").read_text("utf-8")
     return web.Response(text=page, content_type="text/html", charset="utf-8")
@@ -3420,6 +3429,7 @@ async def start_web_server(bot):
     global bot_ref
     bot_ref = bot
     app = web.Application(middlewares=[private_responses], client_max_size=MAX_BODY)
+    app["bot"] = bot
     app.add_routes(routes)
     # Access logs include callback query strings; do not log authorization codes.
     runner = web.AppRunner(app, access_log=None)

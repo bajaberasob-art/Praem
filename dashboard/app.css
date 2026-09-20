@@ -5180,7 +5180,10 @@ textarea {
   gap: 10px;
 }
 .command-detail-tab-panel[hidden] {
-  display: none;
+  display: none !important;
+}
+.command-detail-tab-panel[style*="display: none"] {
+  display: none !important;
 }
 .command-detail-subsection {
   margin-top: 1px;
@@ -5362,8 +5365,7 @@ textarea {
   line-height: 1.65;
 }
 .command-alias-input {
-  min-height: 64px;
-  resize: vertical;
+  min-height: 42px;
 }
 .command-alias-chips {
   display: flex;
@@ -5372,12 +5374,34 @@ textarea {
   min-height: 22px;
 }
 .command-alias-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: 1px solid #1f7185;
   border-radius: 999px;
   padding: 5px 9px;
   background: #062f3d;
   color: #a5f3fc;
   font: .72rem ui-monospace, monospace;
+}
+.command-alias-remove {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: #10202a;
+  color: #9edce5;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+.command-alias-remove:hover,
+.command-alias-remove:focus-visible {
+  background: #ff0055;
+  color: #fff;
 }
 .alias-count {
   color: #67e8f9;

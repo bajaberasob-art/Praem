@@ -46,8 +46,6 @@
     selectedCommandIds: [],
     commandSimulatorText: "",
     commandDetail: null,
-    shortcutCommandId: "",
-    shortcutInputText: null,
     tickets: {
       active: [],
       archive: [],
@@ -1910,79 +1908,6 @@
   function closeCommandDetail() {
     document.querySelector(".command-detail-back")?.remove();
     state.commandDetail = null;
-  }
-  async function saveCommandShortcuts(command, input, options = {}) {
-    const requested = [...new Set(
-      input.value
-        .split(/[,،\n]+/)
-        .map((value) => value.trim().replace(/^[/!]/, ""))
-        .filter(Boolean),
-    )];
-    if (requested.length > 20) {
-      toast("يمكن إضافة 20 اختصاراً كحد أقصى للأمر", "warn");
-      return false;
-    }
-    if (requested.some((value) => /\s/.test(value) || value.length > 80)) {
-      toast("كل اختصار يجب أن يكون كلمة واحدة وبحد أقصى 80 حرفاً", "warn");
-      return false;
-    }
-    const existing = commandShortcuts(command);
-    const existingByTrigger = new Map(existing.map((item) => [String(item.trigger).toLowerCase(), item]));
-    const wanted = new Set(requested.map((value) => value.toLowerCase()));
-    try {
-      for (const trigger of requested) {
-        const existingShortcut = existingByTrigger.get(trigger.toLowerCase());
-        if (existingShortcut && existingShortcut.target_type === "command") continue;
-        const response = await api(`api/guild/${state.guild.id}/shortcuts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-CSRF-Token": state.session.csrf },
-          body: JSON.stringify({
-            trigger,
-            target_type: "command",
-            target: `/${command.command_name}`,
-          }),
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ الاختصار", "warn");
-          return false;
-        }
-        const shortcutIndex = state.commandStudio.shortcuts.findIndex(
-          (item) => item.id === data.shortcut.id
-            || String(item.trigger).toLowerCase() === trigger.toLowerCase(),
-        );
-        if (shortcutIndex >= 0) {
-          state.commandStudio.shortcuts[shortcutIndex] = data.shortcut;
-        } else {
-          state.commandStudio.shortcuts.push(data.shortcut);
-        }
-      }
-      for (const shortcut of existing) {
-        if (wanted.has(String(shortcut.trigger).toLowerCase())) continue;
-        const response = await api(`api/guild/${state.guild.id}/shortcuts/${shortcut.id}`, {
-          method: "DELETE",
-          headers: { "X-CSRF-Token": state.session.csrf },
-        });
-        if (response.ok) {
-          state.commandStudio.shortcuts = state.commandStudio.shortcuts.filter((item) => item.id !== shortcut.id);
-        }
-      }
-      pulse();
-      toast(`تم حفظ ${requested.length} اختصاراً لـ /${command.command_name}`, "success", 2300);
-      state.shortcutCommandId = command.command_name;
-      state.shortcutInputText = requested.join("، ");
-      if (options.deferRender) return true;
-      if (options.reopen !== false) {
-        closeCommandDetail();
-        openCommandDetail(command);
-      } else {
-        renderPage();
-      }
-      return true;
-    } catch (error) {
-      if (error.message !== "unauth") toast("تعذر الاتصال بالخادم", "warn");
-      return false;
-    }
   }
   function commandChoiceEditor(title, choices, selected, placeholder, icon, formatter) {
     const picked = new Set((selected || []).map(String));
@@ -4567,8 +4492,6 @@
     state.onboarding = null;
     state.commandStudio = { commands: [], roles: [], channels: [], shortcuts: [] };
     state.commandRegistry = { categories: [], commands: [], policies: {}, byKey: {} };
-    state.shortcutCommandId = "";
-    state.shortcutInputText = null;
     state.autoResponses = [];
     state.commandSearch = "";
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };
@@ -4625,7 +4548,6 @@
         commands: commands.commands || [],
         roles: commands.roles || meta.roles || [],
         channels: commands.channels || meta.channels || [],
-        shortcuts: commands.shortcuts || [],
       };
       state.commandRegistry = {
         categories: registry.categories || [],

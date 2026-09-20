@@ -34,6 +34,7 @@
     updated: null,
     onboarding: null,
     commandStudio: { commands: [], roles: [], channels: [], shortcuts: [] },
+    commandRegistry: { categories: [], commands: [], policies: {}, byKey: {} },
     autoResponses: [],
     autoResponderMeta: { roles: [], emojis: [], members: [] },
     commandSearch: "",
@@ -1630,7 +1631,10 @@
   }
   function commandShortcuts(command) {
     const name = String(command.command_name || "").toLowerCase();
-    const policyAliases = (Array.isArray(command.aliases) ? command.aliases : []).map((trigger) => ({
+    const policyAliases = (Array.isArray(command.custom_aliases)
+      ? command.custom_aliases
+      : (Array.isArray(command.aliases) ? command.aliases : [])
+    ).map((trigger) => ({
       trigger: String(trigger),
       target_type: "command",
       target: `/${name}`,
@@ -1686,10 +1690,11 @@
   };
   function commandVisual(command) {
     const name = String(command.command_name || "").toLowerCase().split(/\s+/).pop();
+    const metadata = state.commandRegistry?.byKey?.[name];
     const item = COMMAND_UI_LABELS[name];
     return {
-      name: item?.[0] || `/${name}`,
-      description: item?.[1] || command.description || "إدارة هذا الأمر من إعدادات السيرفر.",
+      name: metadata?.display_name || item?.[0] || `/${name}`,
+      description: metadata?.description || item?.[1] || command.description || "إدارة هذا الأمر من إعدادات السيرفر.",
       icon: item?.[2] || "✦",
       tone: item?.[3] || "slate",
       premium: Boolean(command.premium || command.is_premium || command.pro),

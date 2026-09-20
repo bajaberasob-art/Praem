@@ -412,7 +412,7 @@ class EnterpriseBot(commands.Bot):
             ),
             (
                 discord.ActivityType.listening,
-                f"لوحة التحكم | Port {os.getenv('DASHBOARD_PORT', '8080')} ⚡",
+                f"لوحة التحكم | Port {os.environ.get('PORT', os.environ.get('DASHBOARD_PORT', '8080'))} ⚡",
             ),
         ]
 

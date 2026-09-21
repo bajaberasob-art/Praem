@@ -4985,6 +4985,287 @@ async def delete_reminder(reminder_id: int) -> bool:
     return deleted
 
 
+# -------------------------------------------------------------
+# Clan operations and dashboard ticket dropdown helpers
+# -------------------------------------------------------------
+async def get_clan_applications(
+    guild_id: int,
+    status: str | None = None,
+) -> list[Dict[str, Any]]:
+    query = (
+        "SELECT id, guild_id, user_id, username, kd_ratio, device, notes, "
+        "status, created_at FROM clan_applications WHERE guild_id = ?"
+    )
+    params: list[Any] = [int(guild_id)]
+    if status and status != "all":
+        query += " AND status = ?"
+        params.append(str(status))
+    query += " ORDER BY created_at DESC, id DESC"
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(query, tuple(params)) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def update_clan_application(
+    guild_id: int,
+    application_id: int,
+    status: str,
+) -> Optional[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            UPDATE clan_applications
+            SET status = ?
+            WHERE guild_id = ? AND id = ?
+            """,
+            (str(status), int(guild_id), int(application_id)),
+        )
+        async with db.execute(
+            "SELECT * FROM clan_applications WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(application_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return dict(row) if row else None
+
+
+async def get_clan_roster(guild_id: int) -> list[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, lineup_name, player_id, player_name,
+                   role_title, display_order
+            FROM clan_rosters
+            WHERE guild_id = ?
+            ORDER BY lineup_name ASC, display_order ASC, id ASC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def save_clan_roster_player(
+    guild_id: int,
+    lineup_name: str,
+    player_id: int,
+    player_name: str,
+    role_title: str = "",
+    display_order: int = 0,
+    roster_id: int | None = None,
+) -> Optional[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        if roster_id is None:
+            cur = await db.execute(
+                """
+                INSERT INTO clan_rosters
+                    (guild_id, lineup_name, player_id, player_name,
+                     role_title, display_order)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(guild_id),
+                    str(lineup_name),
+                    int(player_id),
+                    str(player_name)[:100],
+                    str(role_title)[:80],
+                    int(display_order),
+                ),
+            )
+            roster_id = cur.lastrowid
+        else:
+            await db.execute(
+                """
+                UPDATE clan_rosters
+                SET lineup_name = ?, player_id = ?, player_name = ?,
+                    role_title = ?, display_order = ?
+                WHERE guild_id = ? AND id = ?
+                """,
+                (
+                    str(lineup_name),
+                    int(player_id),
+                    str(player_name)[:100],
+                    str(role_title)[:80],
+                    int(display_order),
+                    int(guild_id),
+                    int(roster_id),
+                ),
+            )
+        async with db.execute(
+            "SELECT * FROM clan_rosters WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(roster_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return dict(row) if row else None
+
+
+async def delete_clan_roster_player(guild_id: int, roster_id: int) -> bool:
+    async with connect() as db:
+        cur = await db.execute(
+            "DELETE FROM clan_rosters WHERE guild_id = ? AND id = ?",
+            (int(guild_id), int(roster_id)),
+        )
+        await db.commit()
+    return cur.rowcount > 0
+
+
+async def get_scrim_logs(guild_id: int) -> list[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, opponent_name, score_prime, score_enemy,
+                   map_name, result, logged_by, timestamp
+            FROM scrim_logs
+            WHERE guild_id = ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 200
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def add_scrim_log(
+    guild_id: int,
+    opponent_name: str,
+    score_prime: int,
+    score_enemy: int,
+    map_name: str,
+    result: str,
+    logged_by: int,
+) -> Dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        cur = await db.execute(
+            """
+            INSERT INTO scrim_logs
+                (guild_id, opponent_name, score_prime, score_enemy,
+                 map_name, result, logged_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                str(opponent_name)[:120],
+                int(score_prime),
+                int(score_enemy),
+                str(map_name)[:80],
+                str(result),
+                int(logged_by),
+            ),
+        )
+        async with db.execute(
+            "SELECT * FROM scrim_logs WHERE id = ?",
+            (int(cur.lastrowid),),
+        ) as row_cur:
+            row = await row_cur.fetchone()
+        await db.commit()
+    return dict(row)
+
+
+async def get_ticket_dropdown_config(guild_id: int) -> Optional[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            "SELECT * FROM ticket_dropdown_configs WHERE guild_id = ?",
+            (int(guild_id),),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def save_ticket_dropdown_config(
+    guild_id: int,
+    channel_id: int | None,
+    message_id: int | None,
+    embed_title: str,
+    embed_description: str,
+    embed_color: str,
+    footer_text: str,
+) -> Dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            """
+            INSERT INTO ticket_dropdown_configs
+                (guild_id, channel_id, message_id, embed_title,
+                 embed_description, embed_color, footer_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                message_id = excluded.message_id,
+                embed_title = excluded.embed_title,
+                embed_description = excluded.embed_description,
+                embed_color = excluded.embed_color,
+                footer_text = excluded.footer_text
+            """,
+            (
+                int(guild_id),
+                int(channel_id) if channel_id is not None else None,
+                int(message_id) if message_id is not None else None,
+                str(embed_title)[:256],
+                str(embed_description)[:4096],
+                str(embed_color)[:7],
+                str(footer_text)[:2048],
+            ),
+        )
+        async with db.execute(
+            "SELECT * FROM ticket_dropdown_configs WHERE guild_id = ?",
+            (int(guild_id),),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    return dict(row)
+
+
+async def get_ticket_dropdown_categories(guild_id: int) -> list[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            """
+            SELECT id, guild_id, label, description, emoji, role_id, category_id
+            FROM ticket_dropdown_categories
+            WHERE guild_id = ?
+            ORDER BY id ASC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+async def replace_ticket_dropdown_categories(
+    guild_id: int,
+    categories: list[dict],
+) -> list[Dict[str, Any]]:
+    async with connect(aiosqlite.Row) as db:
+        await db.execute(
+            "DELETE FROM ticket_dropdown_categories WHERE guild_id = ?",
+            (int(guild_id),),
+        )
+        for category in categories[:25]:
+            await db.execute(
+                """
+                INSERT INTO ticket_dropdown_categories
+                    (guild_id, label, description, emoji, role_id, category_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(guild_id),
+                    str(category.get("label") or "")[:80],
+                    str(category.get("description") or "")[:100],
+                    str(category.get("emoji") or "🎫")[:2],
+                    int(category["role_id"]) if category.get("role_id") else None,
+                    int(category["category_id"]) if category.get("category_id") else None,
+                ),
+            )
+        async with db.execute(
+            """
+            SELECT id, guild_id, label, description, emoji, role_id, category_id
+            FROM ticket_dropdown_categories
+            WHERE guild_id = ? ORDER BY id ASC
+            """,
+            (int(guild_id),),
+        ) as cur:
+            rows = [dict(row) for row in await cur.fetchall()]
+        await db.commit()
+    return rows
+
+
 async def get_due_reminders(now: Optional[str] = None) -> list[Dict[str, Any]]:
     rows = await get_due_user_reminders(now)
     return [

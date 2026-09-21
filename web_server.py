@@ -46,6 +46,17 @@ from database import (
     get_ticket_options,
     save_ticket_config,
     replace_ticket_options,
+    get_clan_applications,
+    update_clan_application,
+    get_clan_roster,
+    save_clan_roster_player,
+    delete_clan_roster_player,
+    get_scrim_logs,
+    add_scrim_log,
+    get_ticket_dropdown_config,
+    save_ticket_dropdown_config,
+    get_ticket_dropdown_categories,
+    replace_ticket_dropdown_categories,
 )
 from cogs.command_meta import (
     AUTO_DELETE_PRESETS,

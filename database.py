@@ -919,6 +919,84 @@ async def init_db() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_ticket_options_guild "
                 "ON ticket_options(guild_id, id);"
             )
+            # Step 6 clan operations and the dashboard-owned ticket dropdown
+            # tables are additive. Keep these separate from legacy ticket and
+            # gaming tables so existing commands retain their exact contracts.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS clan_applications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    username TEXT NOT NULL,
+                    kd_ratio TEXT NOT NULL DEFAULT '',
+                    device TEXT NOT NULL DEFAULT '',
+                    notes TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS clan_rosters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    lineup_name TEXT NOT NULL,
+                    player_id INTEGER NOT NULL,
+                    player_name TEXT NOT NULL,
+                    role_title TEXT NOT NULL DEFAULT '',
+                    display_order INTEGER NOT NULL DEFAULT 0
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS scrim_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    opponent_name TEXT NOT NULL,
+                    score_prime INTEGER NOT NULL DEFAULT 0,
+                    score_enemy INTEGER NOT NULL DEFAULT 0,
+                    map_name TEXT NOT NULL DEFAULT '',
+                    result TEXT NOT NULL DEFAULT 'draw',
+                    logged_by INTEGER NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_dropdown_configs (
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER,
+                    message_id INTEGER,
+                    embed_title TEXT NOT NULL DEFAULT '🎫 مركز الدعم والتذاكر',
+                    embed_description TEXT NOT NULL DEFAULT '',
+                    embed_color TEXT NOT NULL DEFAULT '#5865F2',
+                    footer_text TEXT NOT NULL DEFAULT 'Help Desk • اختر تصنيفاً لبدء المحادثة'
+                );
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS ticket_dropdown_categories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    emoji TEXT NOT NULL DEFAULT '🎫',
+                    role_id INTEGER DEFAULT NULL,
+                    category_id INTEGER DEFAULT NULL
+                );
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_clan_applications_guild_status "
+                "ON clan_applications(guild_id, status, created_at DESC);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_clan_rosters_guild_lineup "
+                "ON clan_rosters(guild_id, lineup_name, display_order, id);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scrim_logs_guild_time "
+                "ON scrim_logs(guild_id, timestamp DESC, id DESC);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticket_dropdown_categories_guild "
+                "ON ticket_dropdown_categories(guild_id, id);"
+            )
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS tickets (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

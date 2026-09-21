@@ -6060,3 +6060,238 @@ body {
     font-weight: 800;
   }
 }
+
+/* Clan Ops + ticket dropdown builder */
+.clan-ops-view,
+.clan-ops-view > * {
+  min-width: 0;
+}
+
+.clan-panel,
+.clan-ops-form {
+  display: grid;
+  gap: 18px;
+}
+
+.clan-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.clan-form-grid .form-wide {
+  grid-column: 1 / -1;
+}
+
+.clan-role-picker {
+  display: grid;
+  gap: 7px;
+  max-width: 340px;
+  color: var(--muted, #91a7c5);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.clan-role-picker select {
+  width: 100%;
+}
+
+.clan-list,
+.clan-scrim-list,
+.clan-roster-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.clan-item,
+.clan-lineup {
+  padding: 15px;
+  border: 1px solid #28466e;
+  border-radius: 15px;
+  background: linear-gradient(145deg, #0b1a2c, #091322);
+}
+
+.clan-item-head,
+.clan-roster-player,
+.clan-scrim-row,
+.clan-category-row,
+.clan-category-heading,
+.clan-card-actions,
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.clan-item-head,
+.clan-category-heading {
+  justify-content: space-between;
+}
+
+.clan-item h4,
+.clan-lineup h4 {
+  margin: 3px 0 0;
+}
+
+.clan-item p {
+  margin: 12px 0 5px;
+  color: #c6d7ef;
+}
+
+.clan-card-actions {
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.clan-roster-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.clan-lineup {
+  align-content: start;
+}
+
+.clan-roster-player {
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #ffffff0c;
+}
+
+.clan-roster-player:last-child {
+  border-bottom: 0;
+}
+
+.clan-roster-player span {
+  font-weight: 800;
+}
+
+.clan-roster-player small {
+  margin-inline-start: auto;
+  color: #8da6c7;
+  font-size: 11px;
+}
+
+.clan-scrim-row {
+  flex-wrap: wrap;
+  padding: 13px 0;
+  border-bottom: 1px solid #ffffff0c;
+}
+
+.clan-scrim-row strong {
+  min-width: 250px;
+}
+
+.clan-scrim-row small {
+  margin-inline-start: auto;
+  color: #8da6c7;
+}
+
+.clan-category-heading {
+  margin-top: 2px;
+  padding-top: 15px;
+  border-top: 1px solid #ffffff12;
+}
+
+.clan-category-heading h4 {
+  margin: 0 0 4px;
+}
+
+.clan-category-heading small {
+  color: #8da6c7;
+}
+
+.clan-category-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.clan-category-row {
+  display: grid;
+  grid-template-columns: 34px minmax(120px, 1fr) minmax(140px, 1.2fr) 70px minmax(130px, .9fr) minmax(130px, .9fr) 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #264568;
+  border-radius: 12px;
+  background: #071321;
+}
+
+.clan-category-row .studio-input {
+  min-width: 0;
+}
+
+.ticket-dropdown-form .panel-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.ticket-dropdown-form .panel-heading small {
+  color: #8da6c7;
+}
+
+.status-tag.pending {
+  color: #ffd978;
+  border-color: #9a742a;
+}
+
+.status-tag.approved,
+.status-tag.win {
+  color: #74e5b0;
+  border-color: #297c5d;
+}
+
+.status-tag.rejected,
+.status-tag.loss {
+  color: #ff929b;
+  border-color: #923a48;
+}
+
+@media (max-width: 980px) {
+  .clan-roster-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .clan-category-row {
+    grid-template-columns: 30px repeat(2, minmax(0, 1fr)) 60px;
+  }
+
+  .clan-category-row select,
+  .clan-category-row button {
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .clan-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .clan-form-grid .form-wide {
+    grid-column: auto;
+  }
+
+  .ticket-dropdown-form .panel-heading,
+  .clan-category-heading {
+    display: grid;
+  }
+
+  .clan-category-row {
+    grid-template-columns: 28px 1fr 1fr;
+  }
+
+  .clan-category-row input,
+  .clan-category-row select {
+    width: 100%;
+  }
+
+  .clan-category-row button {
+    grid-column: 3;
+    justify-self: end;
+  }
+
+  .clan-scrim-row strong,
+  .clan-scrim-row small {
+    min-width: 0;
+    margin-inline-start: 0;
+  }
+}

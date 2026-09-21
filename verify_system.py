@@ -27,6 +27,7 @@ STATIC_FILES = (
     ROOT / "dashboard" / "app.css",
     ROOT / "dashboard" / "index.html",
 )
+PYTHON_SOURCE_FILES = tuple(sorted((ROOT / "cogs").glob("*.py")))
 
 EXPECTED_TABLES = (
     "clan_applications",
@@ -57,7 +58,7 @@ class VerificationError(RuntimeError):
 
 def parse_sources() -> dict[Path, ast.AST]:
     trees: dict[Path, ast.AST] = {}
-    for path in STATIC_FILES:
+    for path in (*STATIC_FILES, *PYTHON_SOURCE_FILES):
         if not path.is_file():
             raise VerificationError(f"missing static asset: {path.relative_to(ROOT)}")
         source = path.read_text(encoding="utf-8")

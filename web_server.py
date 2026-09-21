@@ -2130,6 +2130,436 @@ async def api_guild_tickets_config_save(req):
     return web.json_response({"config": saved, "categories": options, "options": options})
 
 
+def _dashboard_snowflake(value, field_name: str) -> tuple[int | None, str | None]:
+    if value in (None, "") or isinstance(value, bool):
+        return None, None
+    raw = str(value).strip()
+    if not raw.isdigit() or not 15 <= len(raw) <= 22:
+        return None, f"{field_name} غير صالح"
+    return int(raw), None
+
+
+def _dropdown_categories(guild, raw_categories):
+    if not isinstance(raw_categories, list) or not 1 <= len(raw_categories) <= 25:
+        return None, "أضف من 1 إلى 25 تصنيفاً"
+    categories = []
+    for index, raw in enumerate(raw_categories):
+        if not isinstance(raw, dict):
+            return None, f"التصنيف رقم {index + 1} غير صالح"
+        label = str(raw.get("label") or "").strip()
+        description = str(raw.get("description") or "").strip()
+        emoji = str(raw.get("emoji") or "🎫").strip()
+        if not label or len(label) > 80:
+            return None, f"اسم التصنيف رقم {index + 1} غير صالح"
+        if len(description) > 100 or len(emoji) > 2:
+            return None, f"بيانات التصنيف رقم {index + 1} طويلة"
+        role_id, error = _dashboard_snowflake(raw.get("role_id"), "معرف الرتبة")
+        if error:
+            return None, error
+        if role_id is not None:
+            role = guild.get_role(role_id)
+            if role is None or role.is_default():
+                return None, f"رتبة التصنيف رقم {index + 1} غير موجودة"
+        category_id, error = _dashboard_snowflake(raw.get("category_id"), "معرف الفئة")
+        if error:
+            return None, error
+        if category_id is not None and not isinstance(
+            guild.get_channel(category_id), discord.CategoryChannel
+        ):
+            return None, f"فئة التصنيف رقم {index + 1} غير موجودة"
+        categories.append({
+            "label": label,
+            "description": description,
+            "emoji": emoji or "🎫",
+            "role_id": role_id,
+            "category_id": category_id,
+        })
+    return categories, None
+
+
+def _dropdown_embed_config(body: dict, existing: dict | None = None):
+    existing = existing or {}
+    raw = dict(body)
+    if "embed_color" not in raw:
+        raw["embed_color"] = existing.get("embed_color") or "#5865F2"
+    config, error = _ticket_embed_config(raw, existing)
+    if error:
+        return None, error
+    return {
+        **config,
+        "embed_color": f"#{int(config['embed_color']):06X}",
+    }, None
+
+
+@routes.get('/api/guild/{guild_id}/clan/applications')
+async def api_clan_applications(req):
+    _, guild = await authorize(req)
+    status = str(req.query.get("status", "all")).strip().lower()
+    if status not in {"all", "pending", "approved", "rejected", "reviewed"}:
+        return json_error(400, "validation", fields={"status": "حالة الطلب غير صالحة"})
+    try:
+        applications = await get_clan_applications(guild.id, status)
+        return web.json_response({"applications": applications, "status": status})
+    except Exception:
+        logger.exception("Clan applications read failed for guild %s", guild.id)
+        return json_error(500, "clan_applications_unavailable")
+
+
+@routes.post('/api/guild/{guild_id}/clan/applications/{application_id}/action')
+async def api_clan_application_action(req):
+    session, guild = await authorize(req, write=True)
+    try:
+        application_id = int(req.match_info["application_id"])
+    except (KeyError, TypeError, ValueError):
+        return json_error(400, "validation", fields={"application_id": "معرف الطلب غير صالح"})
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    action = str(body.get("action") or "").strip().lower()
+    if action not in {"approve", "reject"}:
+        return json_error(400, "validation", fields={"action": "الإجراء يجب أن يكون approve أو reject"})
+    try:
+        application_rows = await get_clan_applications(guild.id, "all")
+        application = next(
+            (item for item in application_rows if int(item["id"]) == application_id),
+            None,
+        )
+    except (TypeError, ValueError):
+        application = None
+    if not application:
+        return json_error(404, "clan_application_not_found")
+
+    role = None
+    if action == "approve":
+        role_id, error = _dashboard_snowflake(
+            body.get("clan_member_role_id", body.get("role_id")),
+            "معرف رتبة الكلان",
+        )
+        if error or role_id is None:
+            return json_error(
+                400,
+                "validation",
+                fields={"clan_member_role_id": error or "اختر رتبة أعضاء الكلان"},
+            )
+        role = guild.get_role(role_id)
+        me = getattr(guild, "me", None)
+        if role is None or role.is_default():
+            return json_error(400, "validation", fields={"clan_member_role_id": "رتبة الكلان غير موجودة"})
+        if getattr(role, "managed", False) or (me and role >= me.top_role):
+            return json_error(400, "validation", fields={"clan_member_role_id": "لا يستطيع البوت إدارة هذه الرتبة"})
+        member = guild.get_member(int(application["user_id"]))
+        if member is None:
+            try:
+                member = await guild.fetch_member(int(application["user_id"]))
+            except discord.NotFound:
+                return json_error(404, "member_not_found")
+            except (discord.Forbidden, discord.HTTPException, asyncio.TimeoutError):
+                return json_error(503, "member_lookup_unavailable")
+        try:
+            await member.add_roles(role, reason=f"Clan application approved by {session['id']}")
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "Could not assign clan role %s to member %s in guild %s",
+                role.id,
+                member.id,
+                guild.id,
+                exc_info=True,
+            )
+            return json_error(503, "clan_role_assignment_failed")
+
+    try:
+        updated = await update_clan_application(
+            guild.id,
+            application_id,
+            "approved" if action == "approve" else "rejected",
+        )
+        if not updated:
+            return json_error(404, "clan_application_not_found")
+        logger.info(
+            "Clan application %s marked %s in guild %s by %s",
+            application_id,
+            action,
+            guild.id,
+            session["id"],
+        )
+        return web.json_response({"ok": True, "application": updated, "role_id": str(role.id) if role else None})
+    except Exception:
+        logger.exception("Clan application action failed for guild %s", guild.id)
+        return json_error(500, "clan_application_action_failed")
+
+
+@routes.get('/api/guild/{guild_id}/clan/roster')
+async def api_clan_roster_get(req):
+    _, guild = await authorize(req)
+    try:
+        return web.json_response({"roster": await get_clan_roster(guild.id)})
+    except Exception:
+        logger.exception("Clan roster read failed for guild %s", guild.id)
+        return json_error(500, "clan_roster_unavailable")
+
+
+@routes.post('/api/guild/{guild_id}/clan/roster')
+async def api_clan_roster_save(req):
+    _, guild = await authorize(req, write=True)
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    if body.get("action") == "delete":
+        try:
+            roster_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return json_error(400, "validation", fields={"id": "معرف اللاعب غير صالح"})
+        deleted = await delete_clan_roster_player(guild.id, roster_id)
+        return web.json_response({"ok": deleted, "deleted": deleted}, status=200 if deleted else 404)
+    lineup = str(body.get("lineup_name") or "").strip()
+    if lineup not in {"Lineup A", "Lineup B", "Subs"}:
+        return json_error(400, "validation", fields={"lineup_name": "اختر Lineup A أو Lineup B أو Subs"})
+    player_id, error = _dashboard_snowflake(body.get("player_id"), "معرف اللاعب")
+    if error or player_id is None:
+        return json_error(400, "validation", fields={"player_id": error or "معرف اللاعب مطلوب"})
+    player_name = str(body.get("player_name") or "").strip()
+    role_title = str(body.get("role_title") or "").strip()
+    if not player_name or len(player_name) > 100:
+        return json_error(400, "validation", fields={"player_name": "اسم اللاعب مطلوب وبحد أقصى 100 حرف"})
+    if len(role_title) > 80:
+        return json_error(400, "validation", fields={"role_title": "المسمى يتجاوز 80 حرفاً"})
+    try:
+        display_order = max(0, min(999, int(body.get("display_order", 0))))
+        roster_id = int(body["id"]) if body.get("id") not in (None, "") else None
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"display_order": "ترتيب اللاعب غير صالح"})
+    try:
+        player = await save_clan_roster_player(
+            guild.id,
+            lineup,
+            player_id,
+            player_name,
+            role_title,
+            display_order,
+            roster_id,
+        )
+        if not player:
+            return json_error(404, "clan_roster_player_not_found")
+        return web.json_response({"ok": True, "player": player, "roster": await get_clan_roster(guild.id)})
+    except Exception:
+        logger.exception("Clan roster save failed for guild %s", guild.id)
+        return json_error(500, "clan_roster_save_failed")
+
+
+@routes.post('/api/guild/{guild_id}/clan/roster/publish')
+async def api_clan_roster_publish(req):
+    _, guild = await authorize(req, write=True)
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    channel_id, error = _dashboard_snowflake(body.get("target_channel_id", body.get("channel_id")), "معرف قناة الكلان")
+    if error or channel_id is None:
+        return json_error(400, "validation", fields={"target_channel_id": error or "اختر قناة النشر"})
+    channel = guild.get_channel(channel_id)
+    if not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+        return json_error(400, "validation", fields={"target_channel_id": "قناة النشر غير موجودة"})
+    roster = await get_clan_roster(guild.id)
+    if not roster:
+        return json_error(400, "validation", fields={"roster": "أضف لاعباً واحداً على الأقل قبل النشر"})
+    embed = discord.Embed(
+        title=str(body.get("title") or "PR1ME TEAM · Clan Roster")[:256],
+        description=str(body.get("description") or "التشكيلات الحالية للكلان")[:4096],
+        color=0x5865F2,
+    )
+    groups = {"Lineup A": [], "Lineup B": [], "Subs": []}
+    for player in roster:
+        groups.setdefault(player["lineup_name"], []).append(player)
+    for lineup, label in (("Lineup A", "التشكيلة A"), ("Lineup B", "التشكيلة B"), ("Subs", "البدلاء")):
+        players = groups.get(lineup) or []
+        value = "\n".join(
+            f"`{index + 1}.` **{item['player_name']}**"
+            + (f" · {item['role_title']}" if item.get("role_title") else "")
+            + f" · <@{item['player_id']}>"
+            for index, item in enumerate(players)
+        ) or "لا يوجد لاعبون"
+        embed.add_field(name=label, value=value[:1024], inline=False)
+    embed.set_footer(text=str(body.get("footer_text") or "PR1ME TEAM · Clan Operations")[:2048])
+    message = None
+    message_id, _ = _dashboard_snowflake(body.get("message_id"), "معرف الرسالة")
+    if message_id:
+        try:
+            message = await channel.fetch_message(message_id)
+            await message.edit(embed=embed)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            message = None
+    if message is None:
+        try:
+            message = await channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Clan roster publish failed in guild %s", guild.id, exc_info=True)
+            return json_error(503, "clan_roster_publish_failed")
+    return web.json_response({"ok": True, "channel_id": str(channel.id), "message_id": str(message.id)})
+
+
+@routes.get('/api/guild/{guild_id}/clan/scrims')
+async def api_clan_scrims_get(req):
+    _, guild = await authorize(req)
+    try:
+        return web.json_response({"scrims": await get_scrim_logs(guild.id)})
+    except Exception:
+        logger.exception("Clan scrim log read failed for guild %s", guild.id)
+        return json_error(500, "clan_scrims_unavailable")
+
+
+@routes.post('/api/guild/{guild_id}/clan/scrims')
+async def api_clan_scrims_save(req):
+    session, guild = await authorize(req, write=True)
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    opponent = str(body.get("opponent_name") or "").strip()
+    map_name = str(body.get("map_name") or "").strip()
+    result = str(body.get("result") or "").strip().lower()
+    if not opponent or len(opponent) > 120:
+        return json_error(400, "validation", fields={"opponent_name": "اسم الخصم مطلوب"})
+    if len(map_name) > 80 or result not in {"win", "loss", "draw"}:
+        return json_error(400, "validation", fields={"result": "اختر فوز أو خسارة أو تعادل"})
+    try:
+        score_prime = int(body.get("score_prime"))
+        score_enemy = int(body.get("score_enemy"))
+    except (TypeError, ValueError):
+        return json_error(400, "validation", fields={"score_prime": "النتيجة يجب أن تكون أرقاماً"})
+    if not 0 <= score_prime <= 999 or not 0 <= score_enemy <= 999:
+        return json_error(400, "validation", fields={"score_prime": "النتيجة خارج النطاق"})
+    try:
+        item = await add_scrim_log(
+            guild.id,
+            opponent,
+            score_prime,
+            score_enemy,
+            map_name,
+            result,
+            int(session["id"]),
+        )
+        return web.json_response({"ok": True, "scrim": item, "scrims": await get_scrim_logs(guild.id)})
+    except Exception:
+        logger.exception("Clan scrim log save failed for guild %s", guild.id)
+        return json_error(500, "clan_scrim_save_failed")
+
+
+@routes.get('/api/guild/{guild_id}/tickets/dropdown-config')
+async def api_ticket_dropdown_config_get(req):
+    _, guild = await authorize(req)
+    config = await get_ticket_dropdown_config(guild.id)
+    categories = await get_ticket_dropdown_categories(guild.id)
+    if not categories:
+        legacy = await get_ticket_options(guild.id)
+        categories = normalize_ticket_categories(legacy) if legacy else []
+    if not config:
+        legacy = await get_ticket_config(guild.id) or {}
+        config = {
+            "guild_id": guild.id,
+            "channel_id": legacy.get("channel_id"),
+            "message_id": legacy.get("message_id"),
+            "embed_title": legacy.get("embed_title", "🎫 مركز الدعم والتذاكر"),
+            "embed_description": legacy.get("embed_description", ""),
+            "embed_color": f"#{int(legacy.get('embed_color', 0x5865F2)):06X}",
+            "footer_text": legacy.get("footer_text", "Help Desk • اختر تصنيفاً لبدء المحادثة"),
+        }
+    return web.json_response({"config": config, "categories": categories})
+
+
+@routes.post('/api/guild/{guild_id}/tickets/dropdown-config')
+async def api_ticket_dropdown_config_save(req):
+    _, guild = await authorize(req, write=True)
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    categories, category_error = _dropdown_categories(guild, body.get("categories"))
+    if category_error:
+        return json_error(400, "validation", fields={"categories": category_error})
+    current = await get_ticket_dropdown_config(guild.id) or {}
+    config, config_error = _dropdown_embed_config(body, current)
+    if config_error:
+        return json_error(400, "validation", fields=config_error)
+    channel_id, channel_error = _dashboard_snowflake(
+        body.get("channel_id", current.get("channel_id")),
+        "معرف القناة",
+    )
+    if channel_error:
+        return json_error(400, "validation", fields={"channel_id": channel_error})
+    if channel_id is not None and not isinstance(guild.get_channel(channel_id), MESSAGE_CHANNEL_TYPES):
+        return json_error(400, "validation", fields={"channel_id": "القناة غير موجودة"})
+    message_id, message_error = _dashboard_snowflake(
+        body.get("message_id", current.get("message_id")),
+        "معرف الرسالة",
+    )
+    if message_error:
+        return json_error(400, "validation", fields={"message_id": message_error})
+    saved = await save_ticket_dropdown_config(
+        guild.id,
+        channel_id,
+        message_id,
+        config["embed_title"],
+        config["embed_description"],
+        config["embed_color"],
+        config["footer_text"],
+    )
+    saved_categories = await replace_ticket_dropdown_categories(guild.id, categories)
+    return web.json_response({"ok": True, "config": saved, "categories": saved_categories})
+
+
+@routes.post('/api/guild/{guild_id}/tickets/dropdown-config/publish')
+async def api_ticket_dropdown_config_publish(req):
+    _, guild = await authorize(req, write=True)
+    community = _community_cog()
+    if community is None:
+        return json_error(503, "community_unavailable")
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError):
+        return json_error(400, "invalid_json")
+    current = await get_ticket_dropdown_config(guild.id) or {}
+    categories = await get_ticket_dropdown_categories(guild.id)
+    if body.get("categories") is not None:
+        categories, category_error = _dropdown_categories(guild, body.get("categories"))
+        if category_error:
+            return json_error(400, "validation", fields={"categories": category_error})
+    if not categories:
+        return json_error(400, "validation", fields={"categories": "أضف تصنيفاً واحداً على الأقل"})
+    config, config_error = _dropdown_embed_config(body, current)
+    if config_error:
+        return json_error(400, "validation", fields=config_error)
+    channel_id, channel_error = _dashboard_snowflake(
+        body.get("channel_id", body.get("target_channel_id", current.get("channel_id"))),
+        "معرف القناة",
+    )
+    if channel_error or channel_id is None:
+        return json_error(400, "validation", fields={"channel_id": channel_error or "اختر قناة النشر"})
+    channel = guild.get_channel(channel_id)
+    if not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+        return json_error(400, "validation", fields={"channel_id": "القناة غير موجودة"})
+    try:
+        panel = await community.deploy_ticket_panel(channel.id, categories, config)
+        saved = await save_ticket_dropdown_config(
+            guild.id,
+            channel.id,
+            panel.get("message_id"),
+            config["embed_title"],
+            config["embed_description"],
+            config["embed_color"],
+            config["footer_text"],
+        )
+        saved_categories = await replace_ticket_dropdown_categories(guild.id, categories)
+        return web.json_response({"ok": True, "config": saved, "categories": saved_categories, "panel": panel})
+    except (ValueError, discord.Forbidden, discord.HTTPException):
+        logger.warning("Ticket dropdown publish failed in guild %s", guild.id, exc_info=True)
+        return json_error(400, "ticket_dropdown_publish_failed")
+    except Exception:
+        logger.exception("Ticket dropdown publish crashed in guild %s", guild.id)
+        return json_error(500, "ticket_dropdown_publish_failed")
+
+
 @routes.post('/api/guild/{guild_id}/tickets/deploy')
 async def api_guild_tickets_deploy(req):
     session, guild = await authorize(req, write=True)

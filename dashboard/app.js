@@ -583,7 +583,7 @@
     const moreButton = el(
       "button",
       {
-         class: `nav-item ${["onboarding", "gaming", "security", "moderation", "analytics", "economy", "community", "ai", "settings", "system"].includes(state.activeView) ? "active" : ""}`,
+         class: `nav-item ${["onboarding", "gaming", "clan", "security", "moderation", "analytics", "economy", "community", "ai", "settings", "system"].includes(state.activeView) ? "active" : ""}`,
         type: "button",
         "aria-expanded": "false",
         onClick: () => {
@@ -4218,6 +4218,320 @@
     } catch (error) {
       if (error.message !== "unauth") toast("تعذر إرسال بيانات الغرفة", "warn");
     }
+  }
+  function channelOptions(includeEmpty = true) {
+    const channels = state.meta?.channels || [];
+    return [
+      ...(includeEmpty ? [el("option", { value: "", text: "اختر قناة" })] : []),
+      ...channels.map((channel) => el("option", {
+        value: channel.id,
+        text: `#${channel.name}`,
+      })),
+    ];
+  }
+  function roleOptions(includeEmpty = true) {
+    const roles = state.meta?.roles || [];
+    return [
+      ...(includeEmpty ? [el("option", { value: "", text: "اختر رتبة" })] : []),
+      ...roles.map((role) => el("option", { value: role.id, text: role.name })),
+    ];
+  }
+  async function refreshClanOps() {
+    if (!state.guild?.id) return;
+    const id = state.guild.id;
+    const fallback = [
+      { applications: [] },
+      { roster: [] },
+      { scrims: [] },
+      { config: {}, categories: [] },
+    ];
+    try {
+      const results = await Promise.allSettled([
+        optionalJson(`api/guild/${id}/clan/applications?status=all`, fallback[0]),
+        optionalJson(`api/guild/${id}/clan/roster`, fallback[1]),
+        optionalJson(`api/guild/${id}/clan/scrims`, fallback[2]),
+        optionalJson(`api/guild/${id}/tickets/dropdown-config`, fallback[3]),
+      ]);
+      if (state.guild?.id !== id) return;
+      const value = (index) => results[index].status === "fulfilled" ? results[index].value : fallback[index];
+      const applications = value(0);
+      const roster = value(1);
+      const scrims = value(2);
+      const dropdown = value(3);
+      state.clanOps = {
+        applications: applications.applications || [],
+        roster: roster.roster || [],
+        scrims: scrims.scrims || [],
+        dropdown: { config: dropdown.config || {}, categories: dropdown.categories || [] },
+      };
+      state.ticketDropdown = {
+        config: { ...state.ticketDropdown.config, ...(dropdown.config || {}) },
+        categories: Array.isArray(dropdown.categories) && dropdown.categories.length
+          ? dropdown.categories
+          : state.ticketCategories.map((item) => ({ ...item })),
+      };
+      if (state.activeView === "clan" || state.activeView === "tickets") renderPage();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر تحديث عمليات الكلان");
+    }
+  }
+  async function clanApplicationAction(application, action, roleId) {
+    if (action === "approve" && !roleId) return toast("اختر رتبة أعضاء الكلان", "warn");
+    try {
+      const response = await writeApi(
+        `api/guild/${state.guild.id}/clan/applications/${application.id}/action`,
+        { action, clan_member_role_id: roleId || null },
+      );
+      const data = await readJson(response, {});
+      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر تحديث الطلب", "warn");
+      toast(action === "approve" ? "تم قبول الطلب وإسناد الرتبة" : "تم رفض طلب الانضمام", "success", 2600);
+      await refreshClanOps();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر تنفيذ إجراء طلب الكلان");
+    }
+  }
+  async function saveClanRoster(form) {
+    const body = Object.fromEntries(new FormData(form).entries());
+    body.display_order = Number(body.display_order || 0);
+    try {
+      const response = await writeApi(`api/guild/${state.guild.id}/clan/roster`, body);
+      const data = await readJson(response, {});
+      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ اللاعب", "warn");
+      toast("تم حفظ اللاعب في التشكيلة", "success", 2200);
+      form.reset();
+      await refreshClanOps();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال لحفظ التشكيلة");
+    }
+  }
+  async function deleteClanRosterPlayer(player) {
+    if (!confirm(`حذف ${player.player_name} من التشكيلة؟`)) return;
+    try {
+      const response = await writeApi(`api/guild/${state.guild.id}/clan/roster`, { action: "delete", id: player.id });
+      if (!response.ok) return toast("تعذر حذف اللاعب", "warn");
+      toast("تم حذف اللاعب", "success", 1800);
+      await refreshClanOps();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر حذف اللاعب");
+    }
+  }
+  async function publishClanRoster(form) {
+    const body = Object.fromEntries(new FormData(form).entries());
+    if (!body.target_channel_id) return toast("اختر قناة نشر التشكيلة", "warn");
+    try {
+      const response = await writeApi(`api/guild/${state.guild.id}/clan/roster/publish`, body);
+      const data = await readJson(response, {});
+      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر نشر التشكيلة", "warn");
+      form.elements.message_id.value = data.message_id || "";
+      toast("تم نشر التشكيلة في Discord", "success", 2800);
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر نشر التشكيلة");
+    }
+  }
+  async function saveScrimLog(form) {
+    const body = Object.fromEntries(new FormData(form).entries());
+    body.score_prime = Number(body.score_prime);
+    body.score_enemy = Number(body.score_enemy);
+    try {
+      const response = await writeApi(`api/guild/${state.guild.id}/clan/scrims`, body);
+      const data = await readJson(response, {});
+      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ نتيجة السكريم", "warn");
+      form.reset();
+      toast("تم حفظ نتيجة السكريم", "success", 2200);
+      await refreshClanOps();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر حفظ نتيجة السكريم");
+    }
+  }
+  function ticketDropdownCategoriesEditor() {
+    const wrap = el("div", { class: "clan-category-editor" });
+    const categories = state.ticketDropdown.categories;
+    categories.forEach((category, index) => {
+      const row = el("div", { class: "clan-category-row" });
+      const label = el("input", { class: "studio-input", name: "label", maxlength: "80", value: category.label || "", placeholder: "اسم التصنيف" });
+      const description = el("input", { class: "studio-input", name: "description", maxlength: "100", value: category.description || "", placeholder: "وصف مختصر" });
+      const emoji = el("input", { class: "studio-input", name: "emoji", maxlength: "2", value: category.emoji || "🎫", placeholder: "🎫" });
+      const role = el("select", { class: "studio-input", name: "role_id" }, roleOptions());
+      role.value = category.role_id || "";
+      const parent = el("select", { class: "studio-input", name: "category_id" }, [
+        el("option", { value: "", text: "بدون فئة أب" }),
+        ...(state.meta?.categories || []).map((item) => el("option", { value: item.id, text: item.name })),
+      ]);
+      parent.value = category.category_id || "";
+      const update = () => {
+        Object.assign(categories[index], {
+          label: label.value,
+          description: description.value,
+          emoji: emoji.value,
+          role_id: role.value || null,
+          category_id: parent.value || null,
+        });
+      };
+      [label, description, emoji, role, parent].forEach((node) => node.addEventListener(node.tagName === "SELECT" ? "change" : "input", update));
+      row.append(
+        el("span", { class: "ticket-category-index", text: String(index + 1).padStart(2, "0") }),
+        label,
+        description,
+        emoji,
+        role,
+        parent,
+        el("button", {
+          class: "icon-action danger",
+          type: "button",
+          text: "×",
+          title: "حذف التصنيف",
+          disabled: categories.length <= 1,
+          onClick: () => {
+            if (categories.length <= 1) return;
+            categories.splice(index, 1);
+            renderPage();
+          },
+        }),
+      );
+      wrap.append(row);
+    });
+    return wrap;
+  }
+  async function saveTicketDropdownConfig(form, publish = false) {
+    const body = {
+      channel_id: form.elements.channel_id.value || null,
+      message_id: form.elements.message_id.value || null,
+      embed_title: form.elements.embed_title.value.trim(),
+      embed_description: form.elements.embed_description.value.trim(),
+      embed_color: form.elements.embed_color.value,
+      footer_text: form.elements.footer_text.value.trim(),
+      categories: state.ticketDropdown.categories,
+    };
+    const endpoint = publish
+      ? `api/guild/${state.guild.id}/tickets/dropdown-config/publish`
+      : `api/guild/${state.guild.id}/tickets/dropdown-config`;
+    try {
+      const response = await writeApi(endpoint, body);
+      const data = await readJson(response, {});
+      if (!response.ok) return toast(data.fields ? Object.values(data.fields)[0] : "تعذر حفظ لوحة التذاكر", "warn");
+      state.ticketDropdown = { config: data.config || body, categories: data.categories || body.categories };
+      form.elements.message_id.value = data.config?.message_id || "";
+      pulse();
+      toast(publish ? "تم نشر لوحة التذاكر الجديدة" : "تم حفظ إعدادات لوحة التذاكر", "success", 2800);
+      renderPage();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بحفظ لوحة التذاكر");
+    }
+  }
+  function ticketDropdownBuilder() {
+    const config = state.ticketDropdown.config || {};
+    const categories = state.ticketDropdown.categories.length
+      ? state.ticketDropdown.categories
+      : (state.ticketCategories || []).map((item) => ({ ...item }));
+    state.ticketDropdown.categories = categories;
+    const form = el("form", { class: "clan-ops-form ticket-dropdown-form" },
+      el("div", { class: "panel-heading" },
+        el("div", {}, el("span", { class: "eyebrow", text: "TICKET BUILDER / PERSISTENT DROPDOWN" }), el("h3", { text: "باني لوحة التذاكر" })),
+        el("small", { text: "يحفظ إعدادات اللوحة الجديدة دون حذف اللوحات القديمة." }),
+      ),
+      el("div", { class: "fields clan-form-grid" },
+        el("label", {}, el("span", { text: "قناة النشر" }), el("select", { name: "channel_id", required: true }, channelOptions())),
+        el("label", {}, el("span", { text: "معرف الرسالة للتحديث (اختياري)" }), el("input", { name: "message_id", class: "studio-input", inputmode: "numeric", value: config.message_id || "" })),
+        el("label", {}, el("span", { text: "عنوان اللوحة" }), el("input", { name: "embed_title", class: "studio-input", maxlength: "256", required: true, value: config.embed_title || "🎫 مركز الدعم والتذاكر" })),
+        el("label", {}, el("span", { text: "لون اللوحة" }), el("input", { name: "embed_color", type: "color", class: "studio-input", value: config.embed_color || "#5865F2" })),
+        el("label", { class: "form-wide" }, el("span", { text: "وصف اللوحة" }), el("textarea", { name: "embed_description", class: "studio-textarea", maxlength: "4096", rows: "2" })),
+        el("label", { class: "form-wide" }, el("span", { text: "التذييل" }), el("input", { name: "footer_text", class: "studio-input", maxlength: "2048", value: config.footer_text || "" })),
+      ),
+      el("div", { class: "clan-category-heading" }, el("div", {}, el("h4", { text: "تصنيفات الـ Dropdown" }), el("small", { text: "حتى 25 تصنيفاً مع رتبة وفئة قنوات اختيارية." })),
+        el("button", { class: "btn ghost", type: "button", text: "＋ إضافة تصنيف", onClick: () => {
+          if (state.ticketDropdown.categories.length >= 25) return toast("الحد الأقصى 25 تصنيفاً", "warn");
+          state.ticketDropdown.categories.push({ label: "تصنيف جديد", description: "", emoji: "🎫", role_id: null, category_id: null });
+          renderPage();
+        } }),
+      ),
+      ticketDropdownCategoriesEditor(),
+      el("div", { class: "form-actions" },
+        el("button", { class: "btn ghost", type: "submit", text: "حفظ الإعدادات" }),
+        el("button", { class: "btn primary", type: "button", text: "حفظ ونشر اللوحة 🚀", onClick: () => saveTicketDropdownConfig(form, true) }),
+      ),
+    );
+    form.elements.channel_id.value = config.channel_id || "";
+    form.elements.embed_description.value = config.embed_description || "";
+    form.onsubmit = (event) => { event.preventDefault(); saveTicketDropdownConfig(form); };
+    return card("Ticket Builder", form);
+  }
+  function clanOpsView() {
+    const applications = el("div", { class: "clan-list" });
+    const roleSelect = el("select", { class: "studio-input", "aria-label": "رتبة أعضاء الكلان" }, roleOptions());
+    if (!state.clanOps.applications.length) applications.append(el("div", { class: "empty studio-empty", text: "لا توجد طلبات انضمام حالياً" }));
+    state.clanOps.applications.forEach((application) => {
+      const actions = el("div", { class: "clan-card-actions" });
+      if (application.status === "pending") {
+        actions.append(
+          el("button", { class: "btn primary", type: "button", text: "قبول وإسناد الرتبة", onClick: () => clanApplicationAction(application, "approve", roleSelect.value) }),
+          el("button", { class: "btn danger", type: "button", text: "رفض", onClick: () => clanApplicationAction(application, "reject") }),
+        );
+      }
+      applications.append(el("article", { class: "overview-panel clan-item" },
+        el("div", { class: "clan-item-head" }, el("div", {}, el("span", { class: "eyebrow", text: `APPLICATION #${application.id}` }), el("h4", { text: application.username })), el("span", { class: `status-tag ${application.status}`, text: application.status })),
+        el("p", { text: `K/D: ${application.kd_ratio || "—"} · الجهاز: ${application.device || "—"} · Discord: ${application.user_id}` }),
+        el("small", { class: "muted", text: application.notes || "بدون ملاحظات" }),
+        actions,
+      ));
+    });
+    const rosterForm = el("form", { class: "clan-ops-form" },
+      el("div", { class: "fields clan-form-grid" },
+        el("label", {}, el("span", { text: "التشكيلة" }), el("select", { name: "lineup_name" }, el("option", { value: "Lineup A", text: "Lineup A" }), el("option", { value: "Lineup B", text: "Lineup B" }), el("option", { value: "Subs", text: "Subs" }))),
+        el("label", {}, el("span", { text: "Discord ID" }), el("input", { name: "player_id", class: "studio-input", inputmode: "numeric", required: true, placeholder: "123456789012345678" })),
+        el("label", {}, el("span", { text: "اسم اللاعب" }), el("input", { name: "player_name", class: "studio-input", maxlength: "100", required: true })),
+        el("label", {}, el("span", { text: "المركز" }), el("input", { name: "role_title", class: "studio-input", maxlength: "80", placeholder: "IGL / Fragger / Support" })),
+        el("label", {}, el("span", { text: "الترتيب" }), el("input", { name: "display_order", class: "studio-input", type: "number", min: "0", max: "999", value: "0" })),
+      ),
+      el("button", { class: "btn primary", type: "submit", text: "إضافة لاعب للتشكيلة" }),
+    );
+    rosterForm.onsubmit = (event) => { event.preventDefault(); saveClanRoster(rosterForm); };
+    const rosterList = el("div", { class: "clan-roster-grid" });
+    ["Lineup A", "Lineup B", "Subs"].forEach((lineup) => {
+      const players = state.clanOps.roster.filter((item) => item.lineup_name === lineup);
+      rosterList.append(el("section", { class: "clan-lineup" },
+        el("div", { class: "panel-heading" }, el("h4", { text: lineup }), el("small", { text: `${players.length} لاعبين` })),
+        players.length ? players.map((player) => el("div", { class: "clan-roster-player" },
+          el("span", { text: player.player_name }),
+          el("small", { text: `${player.role_title || "لاعب"} · ${player.player_id}` }),
+          el("button", { class: "icon-action danger", type: "button", text: "×", title: "حذف", onClick: () => deleteClanRosterPlayer(player) }),
+        )) : el("div", { class: "empty studio-empty", text: "لا يوجد لاعبون" }),
+      ));
+    });
+    const publishForm = el("form", { class: "clan-ops-form" },
+      el("div", { class: "fields clan-form-grid" },
+        el("label", {}, el("span", { text: "قناة التشكيلة" }), el("select", { name: "target_channel_id", required: true }, channelOptions())),
+        el("label", {}, el("span", { text: "معرف الرسالة (للتحديث)" }), el("input", { name: "message_id", class: "studio-input", inputmode: "numeric" })),
+        el("label", {}, el("span", { text: "عنوان النشر" }), el("input", { name: "title", class: "studio-input", value: "PR1ME TEAM · Clan Roster" })),
+      ),
+      el("button", { class: "btn ghost", type: "submit", text: "نشر التشكيلة في Discord" }),
+    );
+    publishForm.onsubmit = (event) => { event.preventDefault(); publishClanRoster(publishForm); };
+    const scrimForm = el("form", { class: "clan-ops-form" },
+      el("div", { class: "fields clan-form-grid" },
+        el("label", {}, el("span", { text: "الخصم" }), el("input", { name: "opponent_name", class: "studio-input", required: true })),
+        el("label", {}, el("span", { text: "نتيجة PRIME" }), el("input", { name: "score_prime", class: "studio-input", type: "number", min: "0", max: "999", required: true })),
+        el("label", {}, el("span", { text: "نتيجة الخصم" }), el("input", { name: "score_enemy", class: "studio-input", type: "number", min: "0", max: "999", required: true })),
+        el("label", {}, el("span", { text: "الخريطة" }), el("input", { name: "map_name", class: "studio-input", maxlength: "80" })),
+        el("label", {}, el("span", { text: "النتيجة" }), el("select", { name: "result" }, el("option", { value: "win", text: "فوز" }), el("option", { value: "loss", text: "خسارة" }), el("option", { value: "draw", text: "تعادل" }))),
+      ),
+      el("button", { class: "btn primary", type: "submit", text: "حفظ نتيجة السكريم" }),
+    );
+    scrimForm.onsubmit = (event) => { event.preventDefault(); saveScrimLog(scrimForm); };
+    const scrims = el("div", { class: "clan-scrim-list" });
+    if (!state.clanOps.scrims.length) scrims.append(el("div", { class: "empty studio-empty", text: "لا توجد نتائج سكريم محفوظة" }));
+    state.clanOps.scrims.forEach((scrim) => scrims.append(el("div", { class: "clan-scrim-row" },
+      el("strong", { text: `PRIME ${scrim.score_prime} — ${scrim.score_enemy} ${scrim.opponent_name}` }),
+      el("span", { class: `status-tag ${scrim.result}`, text: scrim.result }),
+      el("small", { text: `${scrim.map_name || "بدون خريطة"} · ${scrim.timestamp || ""}` }),
+    )));
+    roleSelect.classList.add("clan-application-role");
+    return el("section", { id: "view-clan", class: "clan-ops-view" },
+      el("div", { class: "section-intro" }, el("div", { class: "eyebrow", text: `${state.guild.name} / CLAN OPS` }), el("h1", { text: "الكلان والتنافس" }), el("p", { text: "راجع طلبات الانضمام، أدر التشكيلات، وسجل تاريخ السكريمات من مركز واحد." })),
+      card("طلبات الانضمام", el("div", { class: "clan-panel" }, el("label", { class: "clan-role-picker" }, el("span", { text: "رتبة القبول" }), roleSelect), applications)),
+      card("منشئ التشكيلات", rosterForm, rosterList),
+      card("نشر التشكيلة", publishForm),
+      card("سجل السكريمات", scrimForm, scrims),
+    );
   }
   function economyView() {
     const snapshot = state.economy.settings || { settings: {} };

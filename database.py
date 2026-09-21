@@ -183,7 +183,7 @@ class _Connection:
         await _db_semaphore.acquire()
         try:
             self._db = await aiosqlite.connect(
-                ensure_db_directory(),
+                DB_NAME,
                 timeout=DB_TIMEOUT,
             )
             if self._row_factory:
@@ -371,6 +371,7 @@ async def _migrate_auto_responder_uniqueness(db: aiosqlite.Connection) -> None:
 
 async def init_db() -> None:
     """تهيئة الجداول، العلاقات، والفهارس مع تفعيل قيود المفاتيح الخارجية."""
+    ensure_db_directory()
     try:
         async with connect() as db:
 
@@ -1075,9 +1076,51 @@ async def init_db() -> None:
                         "UPDATE user_reminders SET reminder_text = text "
                         "WHERE reminder_text = ''"
                     )
+            if "status" not in user_reminder_columns:
+                await db.execute(
+                    "ALTER TABLE user_reminders ADD COLUMN status "
+                    "TEXT NOT NULL DEFAULT 'pending'"
+                )
+            if "claimed_at" not in user_reminder_columns:
+                await db.execute(
+                    "ALTER TABLE user_reminders ADD COLUMN claimed_at "
+                    "DATETIME DEFAULT NULL"
+                )
+            # Preserve reminders from the legacy table without deleting or
+            # changing that table. The second insert handles id collisions
+            # with existing user_reminders rows.
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO user_reminders
+                    (id, guild_id, user_id, channel_id, reminder_text,
+                     remind_at, status, created_at)
+                SELECT id, guild_id, user_id, channel_id, reminder, due_at,
+                       status, created_at
+                FROM reminders
+                """
+            )
+            await db.execute(
+                """
+                INSERT INTO user_reminders
+                    (guild_id, user_id, channel_id, reminder_text,
+                     remind_at, status, created_at)
+                SELECT r.guild_id, r.user_id, r.channel_id, r.reminder,
+                       r.due_at, r.status, r.created_at
+                FROM reminders r
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM user_reminders u
+                    WHERE u.guild_id = r.guild_id
+                      AND u.user_id = r.user_id
+                      AND u.channel_id = r.channel_id
+                      AND u.reminder_text = r.reminder
+                      AND u.remind_at = r.due_at
+                )
+                """
+            )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_user_reminders_due "
-                "ON user_reminders(remind_at, id);"
+                "ON user_reminders(status, remind_at, id);"
             )
             # Gaming & esports additions are intentionally isolated from the
             # existing tournament, giveaway, and ticket tables.

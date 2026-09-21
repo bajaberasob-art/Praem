@@ -990,10 +990,17 @@ async def init_db() -> None:
                     message_type TEXT,
                     title TEXT,
                     content TEXT,
+                    description TEXT,
                     color TEXT,
                     sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+            async with db.execute("PRAGMA table_info(broadcast_logs)") as cur:
+                broadcast_columns = {row[1] for row in await cur.fetchall()}
+            if "description" not in broadcast_columns:
+                await db.execute(
+                    "ALTER TABLE broadcast_logs ADD COLUMN description TEXT DEFAULT ''"
+                )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_clan_applications_guild_status "
                 "ON clan_applications(guild_id, status, created_at DESC);"
@@ -5291,13 +5298,15 @@ async def add_broadcast_log(
     title: str,
     content: str,
     color: str,
+    description: str = "",
 ) -> Dict[str, Any]:
     async with connect(aiosqlite.Row) as db:
         cursor = await db.execute(
             """
             INSERT INTO broadcast_logs
-                (guild_id, channel_id, author_id, message_type, title, content, color)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (guild_id, channel_id, author_id, message_type, title, content,
+                 description, color)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(guild_id),
@@ -5306,6 +5315,7 @@ async def add_broadcast_log(
                 str(message_type)[:20],
                 str(title)[:256],
                 str(content)[:4000],
+                str(description)[:4096],
                 str(color)[:7],
             ),
         )
@@ -5327,7 +5337,7 @@ async def get_recent_broadcast_logs(
         async with db.execute(
             f"""
             SELECT id, guild_id, channel_id, author_id, message_type, title,
-                   content, color, sent_at
+                   content, description, color, sent_at
             FROM broadcast_logs
             WHERE guild_id = ?
             ORDER BY sent_at DESC, id DESC

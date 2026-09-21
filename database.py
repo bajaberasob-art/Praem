@@ -4868,6 +4868,7 @@ async def get_due_user_reminders(
         ) as cursor:
             rows = [dict(row) for row in await cursor.fetchall()]
         if rows:
+            claim_time = _utc_now()
             placeholders = ", ".join("?" for _ in rows)
             await db.execute(
                 f"""
@@ -4885,10 +4886,11 @@ async def get_due_user_reminders(
                       )
                   )
                 """,
-                (str(_utc_now()), *(int(row["id"]) for row in rows)),
+                (claim_time, *(int(row["id"]) for row in rows)),
             )
             for row in rows:
                 row["status"] = "processing"
+                row["claimed_at"] = claim_time
         await db.commit()
         return rows
 

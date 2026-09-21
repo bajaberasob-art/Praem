@@ -5581,6 +5581,7 @@
       state.incidents = incidents.incidents || [];
       state.whitelist = incidents.whitelist || [];
       state.lockdown = Boolean(incidents.locked);
+      state.protectedChannels = incidents.protected_channels || [];
       state.stats = stats;
       state.actions = actions.actions || [];
       state.gaming = gaming.scrims || [];

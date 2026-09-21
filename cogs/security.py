@@ -263,6 +263,16 @@ class Security(commands.Cog):
         channels = []
         for channel in guild.text_channels:
             try:
+                channel_name = str(getattr(channel, "name", "")).casefold()
+                category_name = str(
+                    getattr(getattr(channel, "category", None), "name", "")
+                ).casefold()
+                staff_markers = (
+                    "staff", "admin", "management", "moderator", "mod-only",
+                    "logs", "audit", "إدارة", "مشرف", "خاص", "سجل",
+                )
+                if any(marker in f"{channel_name} {category_name}" for marker in staff_markers):
+                    continue
                 if channel.permissions_for(everyone).view_channel:
                     channels.append(channel.id)
             except (AttributeError, discord.DiscordException):

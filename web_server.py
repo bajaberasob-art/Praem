@@ -2962,6 +2962,7 @@ async def api_security_incidents(req):
     })
 
 
+@routes.post('/api/guilds/{guild_id}/security/lockdown')
 @routes.post('/api/guild/{guild_id}/security/lockdown')
 async def api_security_lockdown(req):
     session, guild = await authorize(req, write=True)
@@ -2974,7 +2975,13 @@ async def api_security_lockdown(req):
         return json_error(400, "invalid_json")
     if not isinstance(body, dict):
         return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
-    locked = body.get("locked", True)
+    action = body.get("action")
+    if action is not None:
+        if action not in {"lock", "unlock"}:
+            return json_error(400, "validation", fields={"action": "الإجراء يجب أن يكون lock أو unlock"})
+        locked = action == "lock"
+    else:
+        locked = body.get("locked", True)
     if not isinstance(locked, bool):
         return json_error(400, "validation", fields={"locked": "القيمة يجب أن تكون تشغيل/إيقاف"})
     result = await security.emergency_lockdown(guild.id, locked)

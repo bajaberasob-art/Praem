@@ -6488,6 +6488,22 @@ body {
   padding: 18px;
   text-align: center;
 }
+.lockdown-protected-note {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid rgba(245, 158, 11, .2);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, .06);
+  color: var(--muted);
+  font-size: .72rem;
+}
+.lockdown-protected-note strong {
+  color: #fbbf24;
+  font-size: .68rem;
+  letter-spacing: .04em;
+}
 @media (max-width: 900px) {
   .broadcast-studio-grid {
     grid-template-columns: 1fr;

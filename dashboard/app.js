@@ -5344,6 +5344,7 @@
       state.incidents = data.incidents || [];
       state.whitelist = data.whitelist || [];
       state.lockdown = Boolean(data.locked);
+      state.protectedChannels = data.protected_channels || [];
       if (redraw) {
         if (lockChanged) {
           const view = $("#view-security");

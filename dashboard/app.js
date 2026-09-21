@@ -27,6 +27,7 @@
     stats: null,
     whitelist: [],
     lockdown: false,
+    protectedChannels: [],
     incidentTimer: null,
     baseline: null,
     draft: null,

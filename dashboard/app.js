@@ -4984,6 +4984,7 @@
     else if (view === "commands") main.append(commandsView());
     else if (view === "gaming") main.append(gamingView());
     else if (view === "clan") main.append(clanOpsView());
+    else if (view === "broadcast") main.append(broadcastView());
     else if (view === "onboarding") main.append(onboardingView());
     else if (view === "security") main.append(securityView());
     else if (view === "analytics") main.append(analyticsView());

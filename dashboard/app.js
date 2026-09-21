@@ -12,9 +12,10 @@
     });
     children
       .flat()
-      .forEach((c) =>
-        n.append(c instanceof Node ? c : document.createTextNode(c)),
-      );
+      .forEach((c) => {
+        if (c == null || c === false) return;
+        n.append(c instanceof Node ? c : document.createTextNode(c));
+      });
     return n;
   };
   // State

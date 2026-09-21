@@ -4795,24 +4795,13 @@ async def create_reminder(
     reminder: str,
     due_at: str,
 ) -> int:
-    async with connect() as db:
-        cur = await db.execute(
-            """
-            INSERT INTO reminders
-                (guild_id, user_id, channel_id, reminder, due_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                int(guild_id),
-                int(user_id),
-                int(channel_id),
-                str(reminder).strip()[:1000],
-                str(due_at),
-            ),
-        )
-        reminder_id = cur.lastrowid
-        await db.commit()
-    return int(reminder_id)
+    return await add_reminder(
+        guild_id,
+        user_id,
+        channel_id,
+        reminder,
+        due_at,
+    )
 
 
 async def add_reminder(
@@ -4850,20 +4839,56 @@ async def add_reminder(
 async def get_due_user_reminders(
     now: Optional[str] = None,
 ) -> list[Dict[str, Any]]:
-    """Return pending Step 5 reminders whose due time has arrived."""
+    """Atomically claim due user reminders for one delivery worker."""
     current = now or _utc_now()
     async with connect(aiosqlite.Row) as db:
+        await db.execute("BEGIN IMMEDIATE")
         async with db.execute(
             """
-            SELECT id, guild_id, user_id, channel_id, reminder_text, remind_at, created_at
+            SELECT id, guild_id, user_id, channel_id, reminder_text, remind_at,
+                   status, claimed_at, created_at
             FROM user_reminders
             WHERE remind_at <= ?
+              AND (
+                  status = 'pending'
+                  OR (
+                      status = 'processing'
+                      AND (
+                          claimed_at IS NULL
+                          OR claimed_at <= datetime('now', '-5 minutes')
+                      )
+                  )
+              )
             ORDER BY remind_at ASC, id ASC
             LIMIT 100
             """,
             (str(current),),
         ) as cursor:
-            return [dict(row) for row in await cursor.fetchall()]
+            rows = [dict(row) for row in await cursor.fetchall()]
+        if rows:
+            placeholders = ", ".join("?" for _ in rows)
+            await db.execute(
+                f"""
+                UPDATE user_reminders
+                SET status = 'processing', claimed_at = ?
+                WHERE id IN ({placeholders})
+                  AND (
+                      status = 'pending'
+                      OR (
+                          status = 'processing'
+                          AND (
+                              claimed_at IS NULL
+                              OR claimed_at <= datetime('now', '-5 minutes')
+                          )
+                      )
+                  )
+                """,
+                (str(_utc_now()), *(int(row["id"]) for row in rows)),
+            )
+            for row in rows:
+                row["status"] = "processing"
+        await db.commit()
+        return rows
 
 
 async def delete_reminder(reminder_id: int) -> bool:
@@ -4879,19 +4904,18 @@ async def delete_reminder(reminder_id: int) -> bool:
 
 
 async def get_due_reminders(now: Optional[str] = None) -> list[Dict[str, Any]]:
-    current = now or _utc_now()
-    async with connect(aiosqlite.Row) as db:
-        async with db.execute(
-            """
-            SELECT id, guild_id, user_id, channel_id, reminder, due_at
-            FROM reminders
-            WHERE status = 'pending' AND due_at <= ?
-            ORDER BY due_at ASC, id ASC
-            LIMIT 100
-            """,
-            (current,),
-        ) as cur:
-            return [dict(row) for row in await cur.fetchall()]
+    rows = await get_due_user_reminders(now)
+    return [
+        {
+            "id": row["id"],
+            "guild_id": row["guild_id"],
+            "user_id": row["user_id"],
+            "channel_id": row["channel_id"],
+            "reminder": row["reminder_text"],
+            "due_at": row["remind_at"],
+        }
+        for row in rows
+    ]
 
 
 async def get_user_reminders(
@@ -4903,10 +4927,11 @@ async def get_user_reminders(
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
             """
-            SELECT id, channel_id, reminder, due_at, status
-            FROM reminders
+            SELECT id, channel_id, reminder_text AS reminder,
+                   remind_at AS due_at, status
+            FROM user_reminders
             WHERE guild_id = ? AND user_id = ? AND status = 'pending'
-            ORDER BY due_at ASC
+            ORDER BY remind_at ASC
             LIMIT ?
             """,
             (int(guild_id), int(user_id), limit),
@@ -4918,7 +4943,7 @@ async def cancel_reminder(guild_id: int, user_id: int, reminder_id: int) -> bool
     async with connect() as db:
         cur = await db.execute(
             """
-            UPDATE reminders SET status = 'cancelled'
+            UPDATE user_reminders SET status = 'cancelled', claimed_at = NULL
             WHERE id = ? AND guild_id = ? AND user_id = ? AND status = 'pending'
             """,
             (int(reminder_id), int(guild_id), int(user_id)),
@@ -4932,8 +4957,8 @@ async def complete_reminder(reminder_id: int) -> bool:
     async with connect() as db:
         cur = await db.execute(
             """
-            UPDATE reminders SET status = 'completed'
-            WHERE id = ? AND status = 'pending'
+            UPDATE user_reminders SET status = 'completed', claimed_at = NULL
+            WHERE id = ? AND status IN ('pending', 'processing')
             """,
             (int(reminder_id),),
         )

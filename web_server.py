@@ -2970,6 +2970,7 @@ async def api_security_incidents(req):
         "incidents": security.get_incidents(guild.id),
         "whitelist": security.get_whitelist(guild.id),
         "locked": security.is_locked(guild.id),
+        "protected_channels": security.get_lockdown_exemptions(guild.id),
     })
 
 

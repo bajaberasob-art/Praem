@@ -4172,13 +4172,16 @@ async def get_active_tickets(guild_id: int) -> list[dict[str, Any]]:
 
 async def claim_ticket(guild_id: int, ticket_id: int, staff_id: int) -> dict[str, Any] | None:
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             UPDATE tickets SET claimed_by = ?, status = 'active', waiting_since = NULL
             WHERE guild_id = ? AND id = ? AND status != 'closed'
             """,
             (int(staff_id), int(guild_id), int(ticket_id)),
         )
+        if cursor.rowcount <= 0:
+            await db.rollback()
+            return None
         async with db.execute(
             "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
@@ -4192,7 +4195,7 @@ async def unclaim_ticket(
     guild_id: int, ticket_id: int, staff_id: int
 ) -> dict[str, Any] | None:
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             UPDATE tickets
             SET claimed_by = NULL,
@@ -4202,6 +4205,9 @@ async def unclaim_ticket(
             """,
             (int(guild_id), int(ticket_id), int(staff_id)),
         )
+        if cursor.rowcount <= 0:
+            await db.rollback()
+            return None
         async with db.execute(
             "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
@@ -4217,13 +4223,16 @@ async def escalate_ticket(
     priority: str,
 ) -> dict[str, Any] | None:
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             UPDATE tickets SET priority = ?, escalated_at = CURRENT_TIMESTAMP
             WHERE guild_id = ? AND id = ? AND status != 'closed'
             """,
             (str(priority), int(guild_id), int(ticket_id)),
         )
+        if cursor.rowcount <= 0:
+            await db.rollback()
+            return None
         async with db.execute(
             "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
@@ -4275,7 +4284,7 @@ async def set_ticket_status(
     if status not in allowed:
         raise ValueError("invalid ticket status")
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             UPDATE tickets
             SET status = ?,
@@ -4291,6 +4300,9 @@ async def set_ticket_status(
                 int(ticket_id),
             ),
         )
+        if cursor.rowcount <= 0:
+            await db.rollback()
+            return None
         async with db.execute(
             "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
@@ -4307,7 +4319,7 @@ async def set_ticket_priority(
     if priority not in allowed:
         raise ValueError("invalid ticket priority")
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             UPDATE tickets SET priority = ?,
                 escalated_at = CASE WHEN ? = 'management' THEN CURRENT_TIMESTAMP ELSE escalated_at END
@@ -4315,6 +4327,9 @@ async def set_ticket_priority(
             """,
             (priority, priority, int(guild_id), int(ticket_id)),
         )
+        if cursor.rowcount <= 0:
+            await db.rollback()
+            return None
         async with db.execute(
             "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
@@ -4328,7 +4343,7 @@ async def reopen_ticket(
     guild_id: int, ticket_id: int, staff_id: int
 ) -> dict[str, Any] | None:
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             UPDATE tickets
             SET status = 'active', closed_at = NULL, closed_by = NULL,
@@ -4337,6 +4352,9 @@ async def reopen_ticket(
             """,
             (int(staff_id), int(guild_id), int(ticket_id)),
         )
+        if cursor.rowcount <= 0:
+            await db.rollback()
+            return None
         async with db.execute(
             "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
@@ -4394,7 +4412,7 @@ async def close_ticket(
     reason: str,
 ) -> dict[str, Any] | None:
     async with connect(aiosqlite.Row) as db:
-        await db.execute(
+        cursor = await db.execute(
             """
             UPDATE tickets
             SET status = 'closed', closed_at = CURRENT_TIMESTAMP,
@@ -4403,6 +4421,9 @@ async def close_ticket(
             """,
             (int(staff_id), str(reason)[:1000], int(guild_id), int(ticket_id)),
         )
+        if cursor.rowcount <= 0:
+            await db.rollback()
+            return None
         async with db.execute(
             "SELECT * FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
@@ -4513,13 +4534,16 @@ async def save_ticket_rating(
     user_id: int,
     stars: int,
     feedback: str = "",
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
-            "SELECT closed_by FROM tickets WHERE guild_id = ? AND id = ?",
+            "SELECT closed_by, status FROM tickets WHERE guild_id = ? AND id = ?",
             (int(guild_id), int(ticket_id)),
         ) as cur:
             ticket = await cur.fetchone()
+        if not ticket or ticket["status"] != "closed":
+            await db.rollback()
+            return None
         staff_id = ticket["closed_by"] if ticket else None
         cursor = await db.execute(
             """

@@ -2556,7 +2556,11 @@ async def api_ticket_dropdown_config_publish(req):
             **config,
             "embed_color": int(str(config["embed_color"]).lstrip("#"), 16),
         }
-        panel = await community.deploy_ticket_panel(channel.id, categories, deploy_config)
+        panel = await community.deploy_persistent_dropdown_panel(
+            channel.id,
+            categories,
+            deploy_config,
+        )
         saved = await save_ticket_dropdown_config(
             guild.id,
             channel.id,
@@ -2574,6 +2578,131 @@ async def api_ticket_dropdown_config_publish(req):
     except Exception:
         logger.exception("Ticket dropdown publish crashed in guild %s", guild.id)
         return json_error(500, "ticket_dropdown_publish_failed")
+
+
+def _broadcast_color(value) -> tuple[int | None, str | None]:
+    raw = str(value or "#6366F1").strip().lstrip("#")
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", raw):
+        return None, "اللون يجب أن يكون HEX من ست خانات"
+    return int(raw, 16), f"#{raw.upper()}"
+
+
+def _broadcast_url(value: str, field: str) -> tuple[str | None, str | None]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None, None
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or len(raw) > 1000:
+        return None, f"{field} يجب أن يكون رابط HTTP صالحاً"
+    return raw, None
+
+
+@routes.get('/api/guilds/{guild_id}/broadcast/history')
+@routes.get('/api/guild/{guild_id}/broadcast/history')
+async def api_broadcast_history(req):
+    _, guild = await authorize(req)
+    try:
+        history = await get_recent_broadcast_logs(guild.id, 10)
+        return web.json_response({"history": history})
+    except Exception:
+        logger.exception("Broadcast history read failed for guild %s", guild.id)
+        return json_error(500, "broadcast_history_unavailable")
+
+
+@routes.post('/api/guilds/{guild_id}/broadcast/send')
+@routes.post('/api/guild/{guild_id}/broadcast/send')
+async def api_broadcast_send(req):
+    session, guild = await authorize(req, write=True)
+    try:
+        body = await read_json_body(req)
+    except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
+        return json_error(400, "invalid_json")
+    if not isinstance(body, dict):
+        return json_error(400, "validation", fields={"_": "صيغة الطلب غير صالحة"})
+    mode = str(body.get("mode") or "embed").strip().lower()
+    if mode not in {"embed", "text"}:
+        return json_error(400, "validation", fields={"mode": "اختر رسالة عادية أو إعلاناً مدمجاً"})
+    channel_id, channel_error = _dashboard_snowflake(body.get("channel_id"), "معرف القناة")
+    if channel_error or channel_id is None:
+        return json_error(400, "validation", fields={"channel_id": channel_error or "اختر قناة النشر"})
+    channel = guild.get_channel(channel_id)
+    if channel is None or not hasattr(channel, "send") or isinstance(
+        channel,
+        (discord.VoiceChannel, discord.StageChannel, discord.CategoryChannel),
+    ):
+        return json_error(400, "validation", fields={"channel_id": "القناة لا تدعم إرسال الرسائل"})
+    bot_member = guild.me
+    permissions = channel.permissions_for(bot_member) if bot_member else None
+    if permissions is not None and not permissions.send_messages:
+        return json_error(403, "missing_send_permission")
+    mention_type = str(body.get("mention_type") or "none").strip().lower()
+    if mention_type not in {"none", "everyone", "here"}:
+        return json_error(400, "validation", fields={"mention_type": "نوع المنشن غير صالح"})
+    content = str(body.get("content") or "").strip()
+    title = str(body.get("title") or "").strip()
+    description = str(body.get("description") or "").strip()
+    footer = str(body.get("footer") or "").strip()
+    if len(content) > 4000 or len(title) > 256 or len(description) > 4096 or len(footer) > 2048:
+        return json_error(400, "validation", fields={"content": "تجاوز أحد الحقول الحد المسموح"})
+    if mode == "text" and not content:
+        return json_error(400, "validation", fields={"content": "اكتب نص الرسالة أولاً"})
+    if mode == "embed" and not any((content, title, description)):
+        return json_error(400, "validation", fields={"description": "أضف محتوى أو عنواناً للإعلان"})
+    thumbnail_url, thumbnail_error = _broadcast_url(body.get("thumbnail_url"), "رابط الصورة المصغرة")
+    image_url, image_error = _broadcast_url(body.get("image_url"), "رابط الصورة الرئيسية")
+    if thumbnail_error or image_error:
+        return json_error(400, "validation", fields={"image_url": thumbnail_error or image_error})
+    color, color_text = _broadcast_color(body.get("color"))
+    if color is None:
+        return json_error(400, "validation", fields={"color": color_text})
+    mention_content = f"@{mention_type}" if mention_type != "none" else ""
+    send_content = " ".join(item for item in (mention_content, content) if item).strip() or None
+    allowed_mentions = discord.AllowedMentions(
+        everyone=mention_type != "none",
+        users=False,
+        roles=False,
+    )
+    try:
+        if mode == "text":
+            message = await channel.send(
+                content=send_content,
+                allowed_mentions=allowed_mentions,
+            )
+        else:
+            embed = discord.Embed(
+                title=title[:256] or discord.Embed.Empty,
+                description=description[:4096] or discord.Embed.Empty,
+                color=color,
+            )
+            if thumbnail_url:
+                embed.set_thumbnail(url=thumbnail_url)
+            if image_url:
+                embed.set_image(url=image_url)
+            if footer:
+                embed.set_footer(text=footer[:2048])
+            message = await channel.send(
+                content=send_content,
+                embed=embed,
+                allowed_mentions=allowed_mentions,
+            )
+    except discord.Forbidden:
+        return json_error(403, "discord_forbidden")
+    except discord.HTTPException:
+        logger.warning("Broadcast send failed in guild %s", guild.id, exc_info=True)
+        return json_error(502, "discord_unavailable")
+    try:
+        await add_broadcast_log(
+            guild.id,
+            channel.id,
+            int(session["id"]),
+            mode,
+            title,
+            content or description,
+            color_text,
+        )
+    except Exception:
+        logger.exception("Broadcast log write failed after message %s", message.id)
+    return web.json_response({"success": True, "message_id": str(message.id)})
 
 
 @routes.post('/api/guild/{guild_id}/tickets/deploy')

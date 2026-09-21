@@ -891,7 +891,10 @@ class Utilities(commands.Cog):
         arguments: str,
     ) -> bool:
         """Resolve and invoke a registered Slash command from message text."""
-        requested = str(command_name).strip().lstrip("!/").split()[-1].casefold()
+        # Keep the complete qualified name.  Reducing ``/chat lock`` to
+        # ``lock`` can resolve a different top-level command (or its synonym)
+        # and bypass the grouped Slash command the dashboard configured.
+        requested = str(command_name).strip().lstrip("!/").casefold()
         command = self._registered_command(requested)
         if command is None:
             await self._send_alias_error(
@@ -1495,11 +1498,13 @@ class Utilities(commands.Cog):
         return False
 
     def _command_for_target(self, target: str):
-        command_name = str(target).strip().lstrip("!/").split()[0].lower()
+        command_target = str(target).strip().lstrip("!/").lower()
+        command_name = command_target.split()[0] if command_target else ""
         if not command_name:
             return None
-        tree = getattr(self.bot, "tree", None)
-        slash_command = self._registered_command(command_name)
+        slash_command = self._registered_command(command_target)
+        if slash_command is None and command_target != command_name:
+            slash_command = self._registered_command(command_name)
         prefix_command = self.bot.get_command(command_name) if hasattr(self.bot, "get_command") else None
         return slash_command or prefix_command
 
@@ -1517,7 +1522,11 @@ class Utilities(commands.Cog):
 
     async def _send_command_help(self, message: discord.Message, target: str):
         command = self._command_for_target(target)
-        command_name = str(target).strip().lstrip("!/").split()[0].lower()
+        target_name = str(target).strip().lstrip("!/").casefold()
+        command_name = target_name.split()[0] if target_name else ""
+        resolved_name = str(
+            getattr(command, "qualified_name", "") or target_name or command_name
+        ).casefold()
         if command is None:
             await message.channel.send(f"⚠️ الأمر `{command_name}` غير موجود حالياً.")
             return
@@ -1533,7 +1542,7 @@ class Utilities(commands.Cog):
             str(item["trigger"])
             for item in self.shortcuts.get(int(message.guild.id), [])
             if item.get("target_type") == "help"
-            and str(item.get("target", "")).lstrip("!/").split()[0].lower() == command_name
+            and str(item.get("target", "")).lstrip("!/").casefold() == resolved_name
             and str(item.get("trigger", "")).casefold() != current_alias.casefold()
         ]
         aliases.extend(str(item) for item in getattr(command, "aliases", []) if item)

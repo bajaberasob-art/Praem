@@ -231,6 +231,34 @@ class UtilitiesOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(message.channel.sent), 1)
         self.assertEqual(message.channel.sent[0][0], "نفّذ الأمر فعلياً")
 
+    async def test_grouped_command_alias_keeps_the_qualified_slash_target(self):
+        executed = []
+
+        async def callback(interaction):
+            executed.append(interaction.command.qualified_name)
+            await interaction.response.send_message("نفّذ الأمر المجمع فعلياً")
+
+        async def check_can_run(interaction):
+            return True
+
+        command = SimpleNamespace(
+            name="lock",
+            qualified_name="chat lock",
+            callback=callback,
+            binding=None,
+            parameters=[],
+            _check_can_run=check_can_run,
+        )
+        self.bot.tree.get_command = lambda name: command if name == "chat lock" else None
+        self.bot.tree.walk_commands = lambda: [command]
+        await self.cog.toggle_command(700, "chat lock", True, aliases=["قفل_المحادثة"])
+
+        message = FakeMessage("قفل_المحادثة")
+        await self.cog.on_message(message)
+
+        self.assertEqual(executed, ["chat lock"])
+        self.assertEqual(message.channel.sent[0][0], "نفّذ الأمر المجمع فعلياً")
+
     async def test_command_shortcut_executes_prefix_command_with_context(self):
         executed = []
 

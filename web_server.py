@@ -1644,6 +1644,21 @@ def _command_aliases(aliases):
     return clean, None
 
 
+def _qualified_command_target(target, known_commands):
+    """Return the longest loaded command name at the start of a target."""
+    normalized = str(target or "").strip().lstrip("!/").casefold()
+    if not normalized:
+        return ""
+    matches = [
+        command_name
+        for command_name in known_commands
+        if normalized == command_name or normalized.startswith(f"{command_name} ")
+    ]
+    if matches:
+        return max(matches, key=len)
+    return normalized.split()[0]
+
+
 @routes.get('/api/guild/{guild_id}/commands')
 async def api_guild_commands(req):
     _, guild = await authorize(req)
@@ -1827,7 +1842,6 @@ async def api_guild_shortcut_save(req):
         return json_error(400, "validation", fields={"trigger": "الاختصار يجب أن يكون كلمة واحدة من 1 إلى 80 حرفاً"})
     if target_type not in {"command", "help"} or not target:
         return json_error(400, "validation", fields={"target": "أمر الهدف غير صالح"})
-    command_name = target.lstrip("!/").split()[0].lower()
     utilities = _utilities_cog()
     command_bot = getattr(utilities, "bot", None) or bot_ref
     prefix_commands = getattr(command_bot, "commands", []) if command_bot else []
@@ -1843,6 +1857,7 @@ async def api_guild_shortcut_save(req):
         for command in slash_commands
         if not getattr(command, "hidden", False)
     )
+    command_name = _qualified_command_target(target, known)
     if known and command_name not in known:
         return json_error(400, "validation", fields={"target": "الأمر الهدف غير موجود"})
     try:

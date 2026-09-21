@@ -2191,6 +2191,7 @@ def _dropdown_embed_config(body: dict, existing: dict | None = None):
     }, None
 
 
+@routes.get('/api/guilds/{guild_id}/clan/applications')
 @routes.get('/api/guild/{guild_id}/clan/applications')
 async def api_clan_applications(req):
     _, guild = await authorize(req)
@@ -2205,6 +2206,7 @@ async def api_clan_applications(req):
         return json_error(500, "clan_applications_unavailable")
 
 
+@routes.post('/api/guilds/{guild_id}/clan/applications/{application_id}/action')
 @routes.post('/api/guild/{guild_id}/clan/applications/{application_id}/action')
 async def api_clan_application_action(req):
     session, guild = await authorize(req, write=True)
@@ -2289,6 +2291,7 @@ async def api_clan_application_action(req):
         return json_error(500, "clan_application_action_failed")
 
 
+@routes.get('/api/guilds/{guild_id}/clan/roster')
 @routes.get('/api/guild/{guild_id}/clan/roster')
 async def api_clan_roster_get(req):
     _, guild = await authorize(req)
@@ -2299,6 +2302,7 @@ async def api_clan_roster_get(req):
         return json_error(500, "clan_roster_unavailable")
 
 
+@routes.post('/api/guilds/{guild_id}/clan/roster')
 @routes.post('/api/guild/{guild_id}/clan/roster')
 async def api_clan_roster_save(req):
     _, guild = await authorize(req, write=True)
@@ -2348,6 +2352,7 @@ async def api_clan_roster_save(req):
         return json_error(500, "clan_roster_save_failed")
 
 
+@routes.post('/api/guilds/{guild_id}/clan/roster/publish')
 @routes.post('/api/guild/{guild_id}/clan/roster/publish')
 async def api_clan_roster_publish(req):
     _, guild = await authorize(req, write=True)
@@ -2399,6 +2404,7 @@ async def api_clan_roster_publish(req):
     return web.json_response({"ok": True, "channel_id": str(channel.id), "message_id": str(message.id)})
 
 
+@routes.get('/api/guilds/{guild_id}/clan/scrims')
 @routes.get('/api/guild/{guild_id}/clan/scrims')
 async def api_clan_scrims_get(req):
     _, guild = await authorize(req)
@@ -2409,6 +2415,7 @@ async def api_clan_scrims_get(req):
         return json_error(500, "clan_scrims_unavailable")
 
 
+@routes.post('/api/guilds/{guild_id}/clan/scrims')
 @routes.post('/api/guild/{guild_id}/clan/scrims')
 async def api_clan_scrims_save(req):
     session, guild = await authorize(req, write=True)
@@ -2446,6 +2453,7 @@ async def api_clan_scrims_save(req):
         return json_error(500, "clan_scrim_save_failed")
 
 
+@routes.get('/api/guilds/{guild_id}/tickets/dropdown-config')
 @routes.get('/api/guild/{guild_id}/tickets/dropdown-config')
 async def api_ticket_dropdown_config_get(req):
     _, guild = await authorize(req)
@@ -2468,6 +2476,7 @@ async def api_ticket_dropdown_config_get(req):
     return web.json_response({"config": config, "categories": categories})
 
 
+@routes.post('/api/guilds/{guild_id}/tickets/dropdown-config')
 @routes.post('/api/guild/{guild_id}/tickets/dropdown-config')
 async def api_ticket_dropdown_config_save(req):
     _, guild = await authorize(req, write=True)
@@ -2509,6 +2518,7 @@ async def api_ticket_dropdown_config_save(req):
     return web.json_response({"ok": True, "config": saved, "categories": saved_categories})
 
 
+@routes.post('/api/guilds/{guild_id}/tickets/dropdown-config/publish')
 @routes.post('/api/guild/{guild_id}/tickets/dropdown-config/publish')
 async def api_ticket_dropdown_config_publish(req):
     _, guild = await authorize(req, write=True)

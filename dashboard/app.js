@@ -1159,6 +1159,14 @@
             ? "الإغلاق قيد التنفيذ عبر طابور القنوات العامة."
             : "أوقف الكتابة العامة فوراً عند الاشتباه بغارة أو تخريب منسق.",
         }),
+        el("div", { class: "lockdown-protected-note" },
+          el("strong", { text: "القنوات المحمية تلقائياً" }),
+          el("span", {
+            text: state.protectedChannels.length
+              ? state.protectedChannels.map((channel) => `#${channel.name}`).join("، ")
+              : "لا توجد قنوات إدارية معروفة بالأسماء الحالية",
+          }),
+        ),
       ),
       lockButton,
     );

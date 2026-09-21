@@ -263,15 +263,7 @@ class Security(commands.Cog):
         channels = []
         for channel in guild.text_channels:
             try:
-                channel_name = str(getattr(channel, "name", "")).casefold()
-                category_name = str(
-                    getattr(getattr(channel, "category", None), "name", "")
-                ).casefold()
-                staff_markers = (
-                    "staff", "admin", "management", "moderator", "mod-only",
-                    "logs", "audit", "إدارة", "مشرف", "خاص", "سجل",
-                )
-                if any(marker in f"{channel_name} {category_name}" for marker in staff_markers):
+                if self.is_lockdown_exempt(channel):
                     continue
                 if channel.permissions_for(everyone).view_channel:
                     channels.append(channel.id)
@@ -294,6 +286,29 @@ class Security(commands.Cog):
             f"queued:{'locked' if locked else 'unlocked'}:{len(channels)}",
         )
         return {"queued": True, "channels": len(channels), "locked": bool(locked)}
+
+    @staticmethod
+    def is_lockdown_exempt(channel) -> bool:
+        """Keep obviously administrative channels available during a lockdown."""
+        channel_name = str(getattr(channel, "name", "")).casefold()
+        category_name = str(
+            getattr(getattr(channel, "category", None), "name", "")
+        ).casefold()
+        staff_markers = (
+            "staff", "admin", "management", "moderator", "mod-only",
+            "logs", "audit", "إدارة", "مشرف", "خاص", "سجل",
+        )
+        return any(marker in f"{channel_name} {category_name}" for marker in staff_markers)
+
+    def get_lockdown_exemptions(self, guild_id: int) -> list[dict[str, str]]:
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return []
+        return [
+            {"id": str(channel.id), "name": str(channel.name)}
+            for channel in guild.text_channels
+            if self.is_lockdown_exempt(channel)
+        ]
 
     async def _lockdown_worker_loop(self) -> None:
         assert self._lockdown_queue is not None

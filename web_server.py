@@ -2710,6 +2710,7 @@ async def api_broadcast_send(req):
             title,
             content or description,
             color_text,
+            description,
         )
     except Exception:
         logger.exception("Broadcast log write failed after message %s", message.id)

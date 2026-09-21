@@ -4733,7 +4733,15 @@
     if (!historyRows.length) history.append(el("div", { class: "empty studio-empty", text: "لا توجد إعلانات أو مسودات بعد." }));
     historyRows.forEach((item) => history.append(el("article", { class: "broadcast-history-row" },
       el("div", {}, el("strong", { text: item.title || (item.message_type === "text" ? "رسالة عادية" : "إعلان بدون عنوان") }), el("small", { text: `${item.message_type === "draft" ? "مسودة محلية" : item.message_type} · ${item.sent_at || item.saved_at || ""}` })),
-      el("button", { class: "btn ghost", type: "button", text: "نسخ إلى المحرر", onClick: () => loadBroadcastDraft(item) }),
+      el("button", {
+        class: "btn ghost",
+        type: "button",
+        text: "نسخ إلى المحرر",
+        onClick: () => loadBroadcastDraft({
+          ...item,
+          description: item.description || (item.message_type === "embed" && !item.content ? item.content : ""),
+        }),
+      }),
     )));
     return el("section", { id: "view-broadcast", class: "broadcast-view" },
       el("div", { class: "section-intro" },

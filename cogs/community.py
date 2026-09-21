@@ -2003,6 +2003,27 @@ async def setup(bot: commands.Bot):
                 TicketPanelView(panel["categories"]),
                 message_id=panel["message_id"],
             )
+    # Restore dashboard-owned static-custom-id dropdowns after every restart.
+    for guild in getattr(bot, "guilds", ()) or ():
+        try:
+            config = await get_ticket_dropdown_config(guild.id)
+            if not config or not config.get("channel_id") or not config.get("message_id"):
+                continue
+            channel = bot.get_channel(int(config["channel_id"]))
+            if channel is None:
+                continue
+            categories = await get_ticket_dropdown_categories(guild.id)
+            if categories:
+                bot.add_view(
+                    PersistentDropdownTicketView(categories, guild.id),
+                    message_id=int(config["message_id"]),
+                )
+        except (TypeError, ValueError, discord.HTTPException):
+            logger.warning(
+                "Unable to restore dashboard ticket dropdown for guild %s",
+                getattr(guild, "id", "unknown"),
+                exc_info=True,
+            )
     community = Community(bot)
     await bot.add_cog(community)
     logger.info(

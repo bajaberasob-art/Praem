@@ -57,6 +57,8 @@ from database import (
     save_ticket_dropdown_config,
     get_ticket_dropdown_categories,
     replace_ticket_dropdown_categories,
+    add_broadcast_log,
+    get_recent_broadcast_logs,
 )
 from cogs.command_meta import (
     AUTO_DELETE_PRESETS,
@@ -64,7 +66,7 @@ from cogs.command_meta import (
     RESPONSE_STYLES,
     grouped_command_registry,
 )
-from cogs.community import normalize_ticket_categories
+from cogs.community import PersistentDropdownTicketView, normalize_ticket_categories
 
 routes = web.RouteTableDef()
 PROJECT_DIR = Path(__file__).parent.resolve()

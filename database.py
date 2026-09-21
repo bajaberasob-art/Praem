@@ -1062,6 +1062,8 @@ async def init_db() -> None:
                     channel_id INTEGER NOT NULL,
                     reminder_text TEXT NOT NULL,
                     remind_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    claimed_at DATETIME DEFAULT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
             """)

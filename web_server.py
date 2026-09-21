@@ -2680,11 +2680,11 @@ async def api_broadcast_send(req):
                 allowed_mentions=allowed_mentions,
             )
         else:
-            embed = discord.Embed(
-                title=title[:256] or discord.Embed.Empty,
-                description=description[:4096] or discord.Embed.Empty,
-                color=color,
-            )
+            embed = discord.Embed(color=color)
+            if title:
+                embed.title = title[:256]
+            if description:
+                embed.description = description[:4096]
             if thumbnail_url:
                 embed.set_thumbnail(url=thumbnail_url)
             if image_url:

@@ -6295,3 +6295,217 @@ body {
     margin-inline-start: 0;
   }
 }
+
+/* Broadcast Studio */
+.broadcast-view {
+  --studio-border: rgba(148, 163, 184, .18);
+}
+.broadcast-studio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, .86fr);
+  gap: 18px;
+  align-items: start;
+}
+.broadcast-studio-form .card,
+.broadcast-preview-card {
+  min-width: 0;
+}
+.broadcast-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.broadcast-form-grid label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 700;
+}
+.broadcast-form-grid .form-wide {
+  grid-column: 1 / -1;
+}
+.studio-input,
+.studio-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--studio-border);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, .72);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+}
+.studio-input:focus,
+.studio-textarea:focus {
+  outline: 2px solid rgba(99, 102, 241, .6);
+  outline-offset: 1px;
+}
+.studio-input[type="color"] {
+  height: 42px;
+  padding: 4px;
+  cursor: pointer;
+}
+.broadcast-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+.broadcast-preview-card {
+  position: sticky;
+  top: 18px;
+}
+.broadcast-preview-shell {
+  overflow: hidden;
+  border: 1px solid rgba(99, 102, 241, .24);
+  border-radius: 14px;
+  background: #313338;
+  color: #dbdee1;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, .22);
+}
+.broadcast-preview-label {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  color: #a5b4fc;
+  font: 700 .68rem/1.2 var(--mono, monospace);
+  letter-spacing: .12em;
+}
+.broadcast-discord-message {
+  display: flex;
+  gap: 12px;
+  padding: 18px 16px 22px;
+}
+.broadcast-avatar,
+.broadcast-avatar-fallback {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.broadcast-avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: #5865f2;
+  color: #fff;
+  font-size: 1.25rem;
+}
+.broadcast-message-copy {
+  min-width: 0;
+  flex: 1;
+}
+.broadcast-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0 5px;
+}
+.broadcast-author strong {
+  color: #fff;
+}
+.broadcast-author small {
+  color: #949ba4;
+  font-size: .68rem;
+}
+.broadcast-bot-badge {
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #5865f2;
+  color: #fff;
+  font-size: .55rem;
+  font-weight: 800;
+}
+.broadcast-content-preview {
+  margin: 0 0 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #f2f3f5;
+}
+.broadcast-embed-preview {
+  position: relative;
+  overflow: hidden;
+  border-inline-start: 4px solid var(--broadcast-color, #6366f1);
+  border-radius: 4px;
+  background: #2b2d31;
+  padding: 14px;
+  min-height: 70px;
+}
+.broadcast-embed-preview h4 {
+  margin: 0 0 7px;
+  color: #fff;
+  font-size: 1rem;
+}
+.broadcast-embed-preview p {
+  margin: 0 0 10px;
+  color: #dbdee1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.broadcast-thumb-preview {
+  float: right;
+  width: 52px;
+  height: 52px;
+  margin-inline-start: 10px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.broadcast-image-preview {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+.broadcast-footer-preview {
+  display: block;
+  margin-top: 12px;
+  color: #949ba4;
+}
+.broadcast-history-list {
+  display: grid;
+  gap: 8px;
+}
+.broadcast-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--studio-border);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, .35);
+}
+.broadcast-history-row strong,
+.broadcast-history-row small {
+  display: block;
+}
+.broadcast-history-row small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+.studio-empty {
+  padding: 18px;
+  text-align: center;
+}
+@media (max-width: 900px) {
+  .broadcast-studio-grid {
+    grid-template-columns: 1fr;
+  }
+  .broadcast-preview-card {
+    position: static;
+  }
+}
+@media (max-width: 560px) {
+  .broadcast-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .broadcast-form-grid .form-wide {
+    grid-column: auto;
+  }
+  .broadcast-actions,
+  .broadcast-history-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

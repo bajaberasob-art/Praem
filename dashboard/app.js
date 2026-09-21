@@ -3281,6 +3281,7 @@
         el("p", { text: "انشر لوحة الدعم، راقب سرعة الفريق، وافتح المحادثات المغلقة داخل لوحة AMOLED نفسها." }),
       ),
       card("استوديو لوحة الدعم", launchForm),
+       ticketDropdownBuilder(),
       el("section", { class: "ticket-kpi-section" }, el("div", { class: "section-heading" }, el("div", {}, el("div", { class: "eyebrow", text: "STAFF VELOCITY" }), el("h3", { text: "مؤشرات فريق الدعم" })), el("span", { class: "live-dot", text: `${kpis.length} موظفين` })), kpiCards),
        el("section", { class: "ticket-radar-section" }, el("div", { class: "section-heading" }, el("div", {}, el("div", { class: "eyebrow", text: "ACTIVE RADAR" }), el("h3", { text: "التذاكر النشطة" })), el("span", { class: "live-dot", text: `${state.tickets.active.length} مفتوحة` })), active),
        card("خزينة السجلات", el("div", { class: "ticket-vault" }, archiveSearch, archiveRows)),
@@ -4778,6 +4779,7 @@
     else if (view === "tickets") main.append(ticketsView());
     else if (view === "commands") main.append(commandsView());
     else if (view === "gaming") main.append(gamingView());
+    else if (view === "clan") main.append(clanOpsView());
     else if (view === "onboarding") main.append(onboardingView());
     else if (view === "security") main.append(securityView());
     else if (view === "analytics") main.append(analyticsView());

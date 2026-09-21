@@ -981,6 +981,19 @@ async def init_db() -> None:
                     category_id INTEGER DEFAULT NULL
                 );
             """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS broadcast_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER,
+                    channel_id INTEGER,
+                    author_id INTEGER,
+                    message_type TEXT,
+                    title TEXT,
+                    content TEXT,
+                    color TEXT,
+                    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_clan_applications_guild_status "
                 "ON clan_applications(guild_id, status, created_at DESC);"
@@ -996,6 +1009,10 @@ async def init_db() -> None:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ticket_dropdown_categories_guild "
                 "ON ticket_dropdown_categories(guild_id, id);"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_broadcast_logs_guild_time "
+                "ON broadcast_logs(guild_id, sent_at DESC, id DESC);"
             )
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS tickets (

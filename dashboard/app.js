@@ -5411,6 +5411,18 @@
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };
     state.gaming = [];
     state.clanOps = { applications: [], roster: [], scrims: [], dropdown: { config: {}, categories: [] } };
+    state.broadcast = {
+      history: [],
+      draft: {
+        ...state.broadcast.draft,
+        channel_id: "",
+        content: "",
+        title: "",
+        description: "",
+        thumbnail_url: "",
+        image_url: "",
+      },
+    };
     state.ticketDropdown = {
       config: {
         embed_title: "🎫 مركز الدعم والتذاكر",
@@ -5460,6 +5472,7 @@
         { roster: [] },
         { scrims: [] },
         { config: {}, categories: [] },
+        { history: [] },
       ];
       const urls = [
         null,
@@ -5482,6 +5495,7 @@
         `api/guild/${id}/clan/roster`,
         `api/guild/${id}/clan/scrims`,
         `api/guild/${id}/tickets/dropdown-config`,
+        `api/guild/${id}/broadcast/history`,
       ];
       const results = await Promise.allSettled(
         urls.map((url, index) =>
@@ -5520,9 +5534,11 @@
         clanRoster,
         clanScrims,
         ticketDropdown,
+        broadcastHistory,
       ] = urls.map((_, index) => payload(index));
       if (state.guild.id !== id) return;
       state.meta = meta;
+      state.broadcast.history = broadcastHistory.history || [];
       state.commandStudio = {
         commands: commands.commands || [],
         roles: commands.roles || meta.roles || [],

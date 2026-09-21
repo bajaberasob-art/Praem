@@ -5205,6 +5205,18 @@
     state.commandSearch = "";
     state.tickets = { active: [], archive: [], kpis: [], canned: [] };
     state.gaming = [];
+    state.clanOps = { applications: [], roster: [], scrims: [], dropdown: { config: {}, categories: [] } };
+    state.ticketDropdown = {
+      config: {
+        embed_title: "🎫 مركز الدعم والتذاكر",
+        embed_description: "",
+        embed_color: "#5865F2",
+        footer_text: "",
+        channel_id: null,
+        message_id: null,
+      },
+      categories: [],
+    };
     state.economy = { wealth: [], levels: [], settings: null, multipliers: {} };
     state.ticketSearch = "";
     state.ticketStatusFilter = "all";
@@ -5239,6 +5251,10 @@
         { scrims: [] },
         { wealth: [], levels: [], settings: { settings: {} }, multipliers: {} },
         { channels: {} },
+        { applications: [] },
+        { roster: [] },
+        { scrims: [] },
+        { config: {}, categories: [] },
       ];
       const urls = [
         null,
@@ -5257,6 +5273,10 @@
         `api/guild/${id}/gaming`,
         `api/guild/${id}/economy`,
         `api/guild/${id}/logs/channels`,
+        `api/guild/${id}/clan/applications?status=all`,
+        `api/guild/${id}/clan/roster`,
+        `api/guild/${id}/clan/scrims`,
+        `api/guild/${id}/tickets/dropdown-config`,
       ];
       const results = await Promise.allSettled(
         urls.map((url, index) =>
@@ -5291,6 +5311,10 @@
         gaming,
         economy,
         logRouting,
+        clanApplications,
+        clanRoster,
+        clanScrims,
+        ticketDropdown,
       ] = urls.map((_, index) => payload(index));
       if (state.guild.id !== id) return;
       state.meta = meta;
@@ -5329,6 +5353,15 @@
       state.stats = stats;
       state.actions = actions.actions || [];
       state.gaming = gaming.scrims || [];
+      state.clanOps = {
+        applications: clanApplications.applications || [],
+        roster: clanRoster.roster || [],
+        scrims: clanScrims.scrims || [],
+        dropdown: {
+          config: ticketDropdown.config || {},
+          categories: ticketDropdown.categories || [],
+        },
+      };
       state.economy = {
         wealth: economy.wealth || [],
         levels: economy.levels || [],
@@ -5350,6 +5383,12 @@
       if (Array.isArray(ticketConfigData.categories) && ticketConfigData.categories.length) {
         state.ticketCategories = ticketConfigData.categories;
       }
+      state.ticketDropdown = {
+        config: { ...state.ticketDropdown.config, ...(ticketDropdown.config || {}) },
+        categories: Array.isArray(ticketDropdown.categories) && ticketDropdown.categories.length
+          ? ticketDropdown.categories
+          : state.ticketCategories.map((item) => ({ ...item })),
+      };
       renderPage();
       openSSE(id);
       startIncidentRefresh(id);

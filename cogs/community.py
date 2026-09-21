@@ -28,6 +28,8 @@ from database import (
     get_ticket_config,
     get_ticket_options,
     replace_ticket_options,
+    get_ticket_dropdown_config,
+    get_ticket_dropdown_categories,
     save_ticket_config,
     get_active_ticket_for_user_category,
     get_ticket_transcripts,
@@ -318,6 +320,63 @@ class TicketSelectView(discord.ui.View):
             await itx.response.send_modal(TicketCategoryModal(category))
 
         mark_modal_callback(callback)
+        select.callback = callback
+        self.add_item(select)
+
+
+class PersistentDropdownTicketView(discord.ui.View):
+    """Restart-safe ticket dropdown used by the dashboard-owned panel."""
+
+    CUSTOM_ID = "ticket_dropdown_select"
+
+    def __init__(self, categories_config=None, guild_id: int | None = None):
+        super().__init__(timeout=None)
+        self.categories = normalize_ticket_categories(categories_config)
+        self.guild_id = int(guild_id) if guild_id is not None else None
+        select = discord.ui.Select(
+            placeholder="اختر القسم المناسب لفتح تذكرة 📋",
+            min_values=1,
+            max_values=1,
+            custom_id=self.CUSTOM_ID,
+            options=[
+                discord.SelectOption(
+                    label=category["label"][:100],
+                    description=(category.get("description") or "فتح تذكرة مع فريق الدعم")[:100],
+                    emoji=category.get("emoji") or "🎫",
+                    value=category["key"][:100],
+                )
+                for category in self.categories[:25]
+            ],
+        )
+
+        async def callback(itx: discord.Interaction):
+            selected_key = (getattr(select, "values", None) or [None])[0]
+            category = next(
+                (item for item in self.categories if item["key"] == selected_key),
+                None,
+            )
+            if category is None:
+                return await itx.response.send_message(
+                    "تعذر تحميل هذا القسم. أعد نشر لوحة التذاكر من لوحة التحكم.",
+                    ephemeral=True,
+                )
+            cog = itx.client.get_cog("Community")
+            if cog is None:
+                return await itx.response.send_message(
+                    "نظام التذاكر غير متاح حالياً.",
+                    ephemeral=True,
+                )
+            # The normal open_ticket path performs the per-user/category
+            # duplicate check and creates the private channel atomically
+            # enough for Discord's channel API, while preserving legacy
+            # ticket storage and control buttons.
+            await cog.open_ticket(
+                itx,
+                category,
+                f"طلب {category['label']}"[:200],
+                "تم فتح الطلب من لوحة التذاكر المنسدلة.",
+            )
+
         select.callback = callback
         self.add_item(select)
 
@@ -750,6 +809,59 @@ class Community(commands.Cog):
             message.id,
             categories,
         )
+
+    async def deploy_persistent_dropdown_panel(
+        self,
+        channel_id: int,
+        categories_config: list[dict] | None = None,
+        embed_config: dict | None = None,
+    ) -> dict:
+        """Publish the static-custom-id dropdown without replacing legacy panels."""
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None or not hasattr(channel, "send"):
+            raise ValueError("ticket dropdown channel was not found")
+        categories = normalize_ticket_categories(categories_config)
+        guild_id = int(channel.guild.id)
+        config = dict(embed_config or {})
+        try:
+            color = int(config.get("embed_color") or 0x5865F2)
+        except (TypeError, ValueError):
+            color = 0x5865F2
+        embed = discord.Embed(
+            title=str(config.get("embed_title") or "🎫 مركز الدعم والتذاكر")[:256],
+            description=str(config.get("embed_description") or "اختر التصنيف لفتح تذكرة خاصة مع فريق الدعم.")[:4096],
+            color=max(0, min(color, 0xFFFFFF)),
+        )
+        embed.set_footer(text=str(config.get("footer_text") or "Help Desk • PR1ME TEAM")[:2048])
+        view = PersistentDropdownTicketView(categories, guild_id)
+        message = None
+        previous_message_id = config.get("message_id")
+        previous_channel_id = config.get("channel_id")
+        if previous_message_id and int(previous_channel_id or channel.id) == channel.id:
+            try:
+                message = await channel.fetch_message(int(previous_message_id))
+                await message.edit(embed=embed, view=view)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logger.info("Persistent ticket dropdown message %s is unavailable.", previous_message_id)
+        if message is None:
+            message = await channel.send(embed=embed, view=view)
+        self.bot.add_view(view, message_id=message.id)
+        await replace_ticket_options(guild_id, categories)
+        await save_ticket_config(
+            guild_id,
+            channel.id,
+            message.id,
+            embed_title=str(config.get("embed_title") or "🎫 مركز الدعم والتذاكر"),
+            embed_description=str(config.get("embed_description") or "اختر التصنيف لفتح تذكرة خاصة مع فريق الدعم."),
+            embed_color=max(0, min(color, 0xFFFFFF)),
+            footer_text=str(config.get("footer_text") or "Help Desk • PR1ME TEAM"),
+        )
+        return {
+            "guild_id": guild_id,
+            "channel_id": channel.id,
+            "message_id": message.id,
+            "categories": categories,
+        }
 
     async def get_ticket_config(self, guild_id: int) -> dict:
         return {

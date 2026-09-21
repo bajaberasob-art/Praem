@@ -5283,6 +5283,61 @@ async def replace_ticket_dropdown_categories(
     return rows
 
 
+async def add_broadcast_log(
+    guild_id: int,
+    channel_id: int,
+    author_id: int,
+    message_type: str,
+    title: str,
+    content: str,
+    color: str,
+) -> Dict[str, Any]:
+    async with connect(aiosqlite.Row) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO broadcast_logs
+                (guild_id, channel_id, author_id, message_type, title, content, color)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(guild_id),
+                int(channel_id),
+                int(author_id),
+                str(message_type)[:20],
+                str(title)[:256],
+                str(content)[:4000],
+                str(color)[:7],
+            ),
+        )
+        async with db.execute(
+            "SELECT * FROM broadcast_logs WHERE id = ?",
+            (int(cursor.lastrowid),),
+        ) as row_cursor:
+            row = await row_cursor.fetchone()
+        await db.commit()
+    return dict(row)
+
+
+async def get_recent_broadcast_logs(
+    guild_id: int,
+    limit: int = 10,
+) -> list[Dict[str, Any]]:
+    safe_limit = max(1, min(int(limit), 50))
+    async with connect(aiosqlite.Row) as db:
+        async with db.execute(
+            f"""
+            SELECT id, guild_id, channel_id, author_id, message_type, title,
+                   content, color, sent_at
+            FROM broadcast_logs
+            WHERE guild_id = ?
+            ORDER BY sent_at DESC, id DESC
+            LIMIT {safe_limit}
+            """,
+            (int(guild_id),),
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+
 async def get_due_reminders(now: Optional[str] = None) -> list[Dict[str, Any]]:
     rows = await get_due_user_reminders(now)
     return [

@@ -1032,7 +1032,7 @@
     );
   }
   // Page rendering
-  function card(title, content) {
+  function card(title, ...content) {
     return el(
       "section",
       { class: "card" },
@@ -1042,7 +1042,7 @@
         el("h2", { text: title }),
         el("small", { text: "إعدادات مباشرة" }),
       ),
-      content,
+      ...content,
     );
   }
   function incidentBody() {

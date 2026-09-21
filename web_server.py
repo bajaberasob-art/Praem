@@ -2540,7 +2540,11 @@ async def api_ticket_dropdown_config_publish(req):
     if not isinstance(channel, MESSAGE_CHANNEL_TYPES):
         return json_error(400, "validation", fields={"channel_id": "القناة غير موجودة"})
     try:
-        panel = await community.deploy_ticket_panel(channel.id, categories, config)
+        deploy_config = {
+            **config,
+            "embed_color": int(str(config["embed_color"]).lstrip("#"), 16),
+        }
+        panel = await community.deploy_ticket_panel(channel.id, categories, deploy_config)
         saved = await save_ticket_dropdown_config(
             guild.id,
             channel.id,

@@ -42,3 +42,12 @@ leaf at the root prevents startup and leaves the dashboard with no connected gui
 
 **How to apply:** Keep grouped leaf callbacks discoverable through walk_commands,
 resolve shortcuts by leaf name, and count tree.get_commands() before syncing.
+
+Qualified grouped targets such as `/chat lock` must remain intact through dashboard validation,
+policy-alias resolution, and help lookup; never reduce them to the leaf token.
+
+**Why:** A leaf token can resolve to another top-level command or synonym, so truncating a
+grouped target can execute the wrong handler even when the dashboard saved the intended command.
+
+**How to apply:** Resolve the longest matching qualified command name from the live tree and
+pass that full name to `get_command`, while retaining the leaf only for display labels.

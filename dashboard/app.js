@@ -4551,6 +4551,193 @@
       card("سجل السكريمات", scrimForm, scrims),
     );
   }
+  function broadcastPreview(draft) {
+    const bot = state.meta?.bot || { name: "PR1ME TEAM", avatar: "" };
+    const messageBody = el("div", { class: "broadcast-discord-message" },
+      bot.avatar
+        ? el("img", { class: "broadcast-avatar", src: bot.avatar, alt: bot.name })
+        : el("span", { class: "broadcast-avatar-fallback", text: "✦" }),
+      el("div", { class: "broadcast-message-copy" },
+        el("div", { class: "broadcast-author" },
+          el("strong", { text: bot.name }),
+          el("span", { class: "broadcast-bot-badge", text: "BOT" }),
+          el("small", { text: "اليوم في 12:00" }),
+        ),
+        draft.content
+          ? el("p", { class: "broadcast-content-preview", text: draft.content })
+          : null,
+        draft.mode === "embed"
+          ? el("article", {
+              class: "broadcast-embed-preview",
+              style: `--broadcast-color: ${draft.color || "#6366F1"}`,
+            },
+            draft.title ? el("h4", { text: draft.title }) : null,
+            draft.description ? el("p", { text: draft.description }) : null,
+            draft.thumbnail_url
+              ? el("img", { class: "broadcast-thumb-preview", src: draft.thumbnail_url, alt: "" })
+              : null,
+            draft.image_url
+              ? el("img", { class: "broadcast-image-preview", src: draft.image_url, alt: "" })
+              : null,
+            draft.footer ? el("small", { class: "broadcast-footer-preview", text: draft.footer }) : null,
+          )
+          : null,
+      ),
+    );
+    return el("div", { class: "broadcast-preview-shell" },
+      el("div", { class: "broadcast-preview-label", text: "LIVE DISCORD PREVIEW" }),
+      messageBody,
+    );
+  }
+  async function refreshBroadcastHistory() {
+    if (!state.guild?.id) return;
+    try {
+      const response = await api(`api/guild/${state.guild.id}/broadcast/history`);
+      const data = await readJson(response, { history: [] });
+      if (response.ok) {
+        state.broadcast.history = data.history || [];
+        if (state.activeView === "broadcast") renderPage();
+      }
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر تحميل سجل الإعلانات", "warn");
+    }
+  }
+  async function sendBroadcast(form) {
+    const draft = { ...state.broadcast.draft };
+    if (!draft.channel_id) return toast("اختر قناة النشر أولاً", "warn");
+    if (draft.mode === "text" && !draft.content.trim()) return toast("اكتب نص الرسالة أولاً", "warn");
+    if (draft.mode === "embed" && ![draft.content, draft.title, draft.description].some((value) => String(value || "").trim())) {
+      return toast("أضف عنواناً أو وصفاً للإعلان", "warn");
+    }
+    if (!confirm("هل تريد نشر هذا الإعلان الآن في Discord؟")) return;
+    const button = form.querySelector(".broadcast-send-button");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "جارٍ النشر…";
+    }
+    try {
+      const response = await writeApi(`api/guild/${state.guild.id}/broadcast/send`, draft);
+      const data = await readJson(response, {});
+      if (!response.ok) {
+        return toast(data.fields ? Object.values(data.fields)[0] : "تعذر نشر الإعلان", "warn");
+      }
+      toast("تم نشر الإعلان بنجاح", "success", 3000);
+      await refreshBroadcastHistory();
+    } catch (error) {
+      if (error.message !== "unauth") toast("تعذر الاتصال بنشر الإعلان", "warn");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "إرسال الإعلان الآن";
+      }
+    }
+  }
+  function saveBroadcastDraft() {
+    if (!state.guild?.id) return;
+    const key = `prime-broadcast-drafts:${state.guild.id}`;
+    const drafts = JSON.parse(localStorage.getItem(key) || "[]");
+    drafts.unshift({ ...state.broadcast.draft, saved_at: new Date().toISOString() });
+    localStorage.setItem(key, JSON.stringify(drafts.slice(0, 10)));
+    toast("تم حفظ المسودة على هذا الجهاز", "success", 2200);
+  }
+  function loadBroadcastDraft(draft) {
+    state.broadcast.draft = { ...state.broadcast.draft, ...draft };
+    renderPage();
+  }
+  function broadcastView() {
+    const draft = state.broadcast.draft;
+    const form = el("form", { class: "broadcast-studio-form" });
+    const preview = el("div", { class: "broadcast-preview-slot" });
+    const updateDraft = (field, event) => {
+      state.broadcast.draft[field] = event.target.value;
+      preview.replaceChildren(broadcastPreview(state.broadcast.draft));
+      if (field === "mode") form.classList.toggle("broadcast-text-mode", event.target.value === "text");
+    };
+    const input = (field, label, type = "text", props = {}) => {
+      const node = el("input", {
+        class: "studio-input",
+        type,
+        name: field,
+        value: draft[field] || "",
+        ...props,
+      });
+      node.addEventListener("input", (event) => updateDraft(field, event));
+      return el("label", {}, el("span", { text: label }), node);
+    };
+    const textarea = (field, label, props = {}) => {
+      const node = el("textarea", {
+        class: "studio-textarea",
+        name: field,
+        rows: "4",
+        ...props,
+      });
+      node.value = draft[field] || "";
+      node.addEventListener("input", (event) => updateDraft(field, event));
+      return el("label", { class: "form-wide" }, el("span", { text: label }), node);
+    };
+    const mode = el("select", { class: "studio-input", name: "mode" },
+      el("option", { value: "embed", text: "إعلان مدمج (Rich Embed)" }),
+      el("option", { value: "text", text: "رسالة عادية (Text)" }),
+    );
+    mode.value = draft.mode;
+    mode.addEventListener("change", (event) => updateDraft("mode", event));
+    const channel = el("select", { class: "studio-input", name: "channel_id" },
+      el("option", { value: "", text: "اختر قناة النشر" }),
+      ...(state.meta?.channels || []).map((item) => el("option", { value: item.id, text: `#${item.name}` })),
+    );
+    channel.value = draft.channel_id || "";
+    channel.addEventListener("change", (event) => updateDraft("channel_id", event));
+    const mention = el("select", { class: "studio-input", name: "mention_type" },
+      el("option", { value: "none", text: "بدون منشن" }),
+      el("option", { value: "everyone", text: "@everyone" }),
+      el("option", { value: "here", text: "@here" }),
+    );
+    mention.value = draft.mention_type || "none";
+    mention.addEventListener("change", (event) => updateDraft("mention_type", event));
+    form.append(
+      el("div", { class: "broadcast-form-grid" },
+        el("label", {}, el("span", { text: "نوع الرسالة" }), mode),
+        el("label", {}, el("span", { text: "قناة النشر" }), channel),
+        el("label", {}, el("span", { text: "المنشن" }), mention),
+        input("color", "لون الـ Embed", "color", { value: draft.color || "#6366F1" }),
+        input("title", "عنوان الإعلان", "text", { maxlength: "256", placeholder: "إعلان مهم من PR1ME TEAM" }),
+        textarea("description", "الوصف / متن الإعلان", { maxlength: "4096", placeholder: "اكتب تفاصيل الإعلان هنا…" }),
+        textarea("content", "نص الرسالة أو محتوى المنشن", { maxlength: "4000", rows: "3", placeholder: "يمكن تركه فارغاً عند استخدام Embed فقط." }),
+        input("thumbnail_url", "رابط الصورة المصغرة", "url", { placeholder: "https://..." }),
+        input("image_url", "رابط الصورة الرئيسية", "url", { placeholder: "https://..." }),
+        input("footer", "التذييل", "text", { maxlength: "2048" }),
+      ),
+      el("div", { class: "broadcast-actions" },
+        el("button", { class: "btn ghost", type: "button", text: "حفظ كمسودة", onClick: saveBroadcastDraft }),
+        el("button", { class: "btn primary broadcast-send-button", type: "submit", text: "إرسال الإعلان الآن" }),
+      ),
+    );
+    form.onsubmit = (event) => { event.preventDefault(); sendBroadcast(form); };
+    preview.append(broadcastPreview(draft));
+    const savedDrafts = (() => {
+      try { return JSON.parse(localStorage.getItem(`prime-broadcast-drafts:${state.guild.id}`) || "[]"); }
+      catch { return []; }
+    })();
+    const historyRows = [...(state.broadcast.history || []), ...savedDrafts.map((item) => ({ ...item, message_type: "draft", id: `draft-${item.saved_at}` }))];
+    const history = el("div", { class: "broadcast-history-list" });
+    if (!historyRows.length) history.append(el("div", { class: "empty studio-empty", text: "لا توجد إعلانات أو مسودات بعد." }));
+    historyRows.forEach((item) => history.append(el("article", { class: "broadcast-history-row" },
+      el("div", {}, el("strong", { text: item.title || (item.message_type === "text" ? "رسالة عادية" : "إعلان بدون عنوان") }), el("small", { text: `${item.message_type === "draft" ? "مسودة محلية" : item.message_type} · ${item.sent_at || item.saved_at || ""}` })),
+      el("button", { class: "btn ghost", type: "button", text: "نسخ إلى المحرر", onClick: () => loadBroadcastDraft(item) }),
+    )));
+    return el("section", { id: "view-broadcast", class: "broadcast-view" },
+      el("div", { class: "section-intro" },
+        el("div", { class: "eyebrow", text: `${state.guild.name} / BROADCAST STUDIO` }),
+        el("h1", { text: "صانع الرسائل والإعلانات" }),
+        el("p", { text: "أنشئ رسالة عادية أو Embed غني، شاهد المعاينة مباشرة، ثم انشرها إلى قناة Discord بصلاحيات آمنة." }),
+      ),
+      el("div", { class: "broadcast-studio-grid" },
+        card("إعداد الإعلان", form),
+        el("section", { class: "card broadcast-preview-card" }, preview),
+      ),
+      card("سجل الإعلانات السابقة والمسودات", history),
+    );
+  }
   function economyView() {
     const snapshot = state.economy.settings || { settings: {} };
     const config = snapshot.settings || {};

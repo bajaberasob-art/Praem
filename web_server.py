@@ -1000,6 +1000,17 @@ async def guild_meta(guild) -> dict:
     return {
         "guild": {"id": str(guild.id), "name": guild.name, "icon": icon.url if icon else None,
                   "members": guild.member_count},
+        "bot": {
+            "name": getattr(getattr(bot_ref, "user", None), "display_name", None)
+            or getattr(getattr(bot_ref, "user", None), "name", "PR1ME TEAM"),
+            "avatar": str(
+                getattr(
+                    getattr(getattr(bot_ref, "user", None), "display_avatar", None),
+                    "url",
+                    "",
+                )
+            ),
+        },
         "channels": channels,
         "categories": categories,
         "roles": roles,

@@ -44,7 +44,7 @@ DEFAULT_CONTROLS = {
         "showProgress": True,
         "embed": True,
         "embedTitle": "🏆 PRIME TOP",
-        "embedMessage": "ترتيب XP للفترة المحددة.",
+        "embedMessage": "ترتيب XP الدائم حسب النمط المختار.",
         "embedColor": "#12D6FF",
     },
     "notifications": {

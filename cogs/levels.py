@@ -685,7 +685,7 @@ class Levels(EngagementXP, commands.Cog):
                 logger.warning("Cannot manage %s reward role %s in guild %s", reward_type, role.id, member.guild.id)
                 continue
             try:
-                await member.add_roles(role, reason=f"PRIME {reward_type} level reward")
+                await member.add_roles(role, reason=f"Lona {reward_type} level reward")
                 held.add(role.id)
                 granted_roles.append(role)
                 highest_granted = True
@@ -708,7 +708,7 @@ class Levels(EngagementXP, commands.Cog):
                 role = member.guild.get_role(role_id)
                 if role and role_id in held and self._manageable(member.guild, role):
                     try:
-                        await member.remove_roles(role, reason=f"PRIME highest {reward_type} reward")
+                        await member.remove_roles(role, reason=f"Lona highest {reward_type} reward")
                     except discord.HTTPException:
                         logger.warning("Cannot remove %s reward role %s", reward_type, role_id, exc_info=True)
         return granted_roles

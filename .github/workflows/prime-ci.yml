@@ -5,9 +5,12 @@ on:
     branches: ["**"]
   pull_request:
 
+concurrency:
+  group: prime-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  test:    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout

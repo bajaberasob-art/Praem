@@ -7446,24 +7446,47 @@
     );
   };
   function lvTabMessages() {
-    const mk = (key, title, vars) => lvCard(
-      title,
-      `يدعم: ${vars}`,
-      el("div", { class: "leveling-message-toolbar" },
-        lvSwitch(["messages", key, "on"], "تفعيل الإشعار", "يتزامن مع إعداد PRIME الفعلي", (value) => lvMessageSet(key, "on", value)),
-      ),
-      lvMessageManager(key),
-      lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"),
-        state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", () => lvMessageSet(key, "channel", lvGet(["messages", key, "channel"]))),
-      lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف", (value) => lvMessageSet(key, "tpl", value)),
-      el("div", { class: "leveling-template-vars" }, ...LV_TEMPLATE_VARS.map((token) =>
-        el("button", { type: "button", class: "leveling-chip", text: token, title: "نسخ المتغير" ,
-          onClick: async () => {
-            await navigator.clipboard?.writeText(token);
-            toast(`تم نسخ ${token}`, "info", 1600);
-          } })),
-      el("div", { class: "leveling-msg-preview", "data-msg-key": key }),
-    );
+    const mk = (key, title, vars) => {
+      const primePath = key === "levelup"
+        ? ["prime", "levelup"]
+        : ["prime", "notifications", key];
+      const advanced = key === "levelup"
+        ? null
+        : el("div", { class: "leveling-stack" },
+            lvSwitch([...primePath, "sendAsEmbed"], "إرسال كـ Embed"),
+            lvSwitch([...primePath, "mentionUser"], "منشن العضو"),
+            lvSelect([...primePath, "mentionRole"], "منشن رتبة إضافية", lvRoleOpts("بدون رتبة")),
+            lvGrid(
+              lvText([...primePath, "embedTitle"], "عنوان الإمبد"),
+              lvText([...primePath, "embedColor"], "لون الإمبد", { type: "color" }),
+            ),
+            lvArea([...primePath, "embedDescription"], "وصف الإمبد", "يمكن استخدام {message} وباقي متغيرات PRIME"),
+            lvGrid(
+              lvText([...primePath, "embedFooter"], "تذييل الإمبد"),
+              lvText([...primePath, "embedImage"], "رابط صورة الإمبد", { dir: "ltr", placeholder: "https://..." }),
+            ),
+            lvSwitch([...primePath, "timestamp"], "إضافة توقيت"),
+          );
+      return lvCard(
+        title,
+        `يدعم: ${vars}`,
+        el("div", { class: "leveling-message-toolbar" },
+          lvSwitch(["messages", key, "on"], "تفعيل الإشعار", "يتزامن مع إعداد PRIME الفعلي", (value) => lvMessageSet(key, "on", value)),
+        ),
+        lvMessageManager(key),
+        lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"),
+          state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", () => lvMessageSet(key, "channel", lvGet(["messages", key, "channel"]))),
+        lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف", (value) => lvMessageSet(key, "tpl", value)),
+        el("div", { class: "leveling-template-vars" }, ...LV_TEMPLATE_VARS.map((token) =>
+          el("button", { type: "button", class: "leveling-chip", text: token, title: "نسخ المتغير",
+            onClick: async () => {
+              await navigator.clipboard?.writeText(token);
+              toast(`تم نسخ ${token}`, "info", 1600);
+            } })),
+        advanced,
+        el("div", { class: "leveling-msg-preview", "data-msg-key": key }),
+      );
+    };
     return el(
       "div",
       { class: "leveling-stack" },

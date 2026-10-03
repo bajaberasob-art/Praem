@@ -567,18 +567,20 @@ class Levels(EngagementXP, commands.Cog):
 
     async def apply_text_rewards(self, member: discord.Member, level: int, settings: dict):
         try:
-            await self._apply_text_rewards(member, level, settings)
+            return await self._apply_text_rewards(member, level, settings)
         except Exception:
             logger.exception("Text reward failure guild=%s member=%s", member.guild.id, member.id)
+            return []
 
     async def _apply_text_rewards(self, member: discord.Member, level: int, settings: dict):
-        await self._apply_level_rewards(member, level, settings, "text")
+        return await self._apply_level_rewards(member, level, settings, "text")
 
     async def apply_voice_rewards(self, member: discord.Member, level: int, settings: dict):
         try:
-            await self._apply_level_rewards(member, level, settings, "voice")
+            return await self._apply_level_rewards(member, level, settings, "voice")
         except Exception:
             logger.exception("Voice reward failure guild=%s member=%s", member.guild.id, member.id)
+            return []
 
     async def _apply_level_rewards(self, member, level, settings, reward_type):
         all_rewards = await database.get_level_rewards(member.guild.id)

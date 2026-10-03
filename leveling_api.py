@@ -119,11 +119,13 @@ def _id_list(guild, values, name, *, kind):
 def _format_template(value, key):
     if not isinstance(value, str) or not value.strip() or len(value) > 500:
         raise ValueError(f"{key} template must contain 1-500 characters")
+    allowed = TEMPLATE_FIELDS.get(key, set(TEMPLATE_VARIABLES))
     try:
         parsed = string.Formatter().parse(value)
         for _, field, spec, conversion in parsed:
             if field is not None and (
                 not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field)
+                or field not in allowed
                 or spec or conversion
             ):
                 raise ValueError(f"invalid placeholder in {key} template")

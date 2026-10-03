@@ -6626,6 +6626,7 @@
       levelup: { on: true, channel: "", tpl: "مبروك {user}! وصلت إلى المستوى {level} في {server}." },
       milestone: { on: true, channel: "", tpl: "{user} حقق إنجازاً جديداً عند المستوى {level}." },
       overtake: { on: false, channel: "", tpl: "{passer} تجاوز {passed} وأصبح في المركز {rank}." },
+      role_promotion: { on: false, channel: "", tpl: "مبروك {mention}! حصلت على رتبة {role}." },
     },
   });
   const lvMerge = (base, src) => {
@@ -7307,12 +7308,57 @@
       }
     }, 300);
   }
+  const LV_TEMPLATE_VARS = [
+    "{user}", "{username}", "{mention}", "{level}", "{old_level}", "{xp}",
+    "{required_xp}", "{progress}", "{rank}", "{total_members}", "{messages}",
+    "{voice_time}", "{streak}", "{server}", "{period}", "{role}", "{passer}", "{passed}",
+  ];
+  const lvMessageSet = (key, field, value) => {
+    const s = lvState();
+    if (!s.draft.messages[key]) s.draft.messages[key] = { on: false, channel: "", tpl: "" };
+    s.draft.messages[key][field] = value;
+    const p = s.draft.prime || (s.draft.prime = {});
+    if (key === "levelup") {
+      p.levelup = p.levelup || {};
+      if (field === "on") p.levelup.sendNotification = Boolean(value);
+      if (field === "channel") p.levelup.channel = String(value || "");
+      if (field === "tpl") p.levelup.message = String(value || "");
+    } else {
+      p.notifications = p.notifications || {};
+      p.notifications[key] = p.notifications[key] || {};
+      if (field === "on") p.notifications[key].enabled = Boolean(value);
+      if (field === "channel") p.notifications[key].channel = String(value || "");
+      if (field === "tpl") p.notifications[key].message = String(value || "");
+    }
+    lvTouch();
+  };
   function lvTabMessages() {
-    const mk = (key, title, vars) => lvCard(title, `المتغيرات: ${vars}`, lvSwitch(["messages", key, "on"], "تفعيل الإشعار"),
-      lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"), state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", lvPreviews),
+    const mk = (key, title, vars) => lvCard(
+      title,
+      `يدعم: ${vars}`,
+      el("div", { class: "leveling-message-toolbar" },
+        lvSwitch(["messages", key, "on"], "تفعيل الإشعار", "يتزامن مع إعداد PRIME الفعلي"),
+      ),
+      lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"),
+        state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", () => lvMessageSet(key, "channel", lvGet(["messages", key, "channel"]))),
       lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف"),
-      el("div", { class: "leveling-msg-preview", "data-msg-key": key }));
-    return el("div", { class: "leveling-stack" }, lvDemoTag("قوالب توضيحية محلية"), mk("levelup", "رسالة رفع المستوى", "{user} {level} {server}"), mk("milestone", "رسالة الإنجاز (توضيحية محلية فقط)", "{user} {level}"), mk("overtake", "رسالة التجاوز", "{passer} {passed} {rank}"));
+      el("div", { class: "leveling-template-vars" }, ...LV_TEMPLATE_VARS.map((token) =>
+        el("button", { type: "button", class: "leveling-chip", text: token, title: "نسخ المتغير" ,
+          onClick: async () => {
+            await navigator.clipboard?.writeText(token);
+            toast(`تم نسخ ${token}`, "info", 1600);
+          } })),
+      el("div", { class: "leveling-msg-preview", "data-msg-key": key }),
+    );
+    return el(
+      "div",
+      { class: "leveling-stack" },
+      lvDemoTag("الإعدادات هنا تُكتب إلى PRIME runtime وتبقى متوافقة مع الحقول القديمة"),
+      mk("levelup", "إشعار رفع المستوى", "{user} {mention} {level} {old_level} {xp} {server}"),
+      mk("milestone", "إشعار الإنجاز", "{user} {level} {xp} {progress}"),
+      mk("overtake", "إشعار التجاوز", "{passer} {passed} {rank} {user}"),
+      mk("role_promotion", "إشعار ترقية الرتبة", "{mention} {role} {level} {old_level}"),
+    );
   }
   function lvTabPrime() {
     const periodicPanel = (period, title, defaults) => {

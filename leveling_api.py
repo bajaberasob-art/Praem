@@ -518,6 +518,18 @@ def _validate_draft(guild, draft, current_settings):
             prime_item["enabled"] = enabled
             prime_item["channel"] = str(channel_id or "")
             prime_item["message"] = template
+    settings["prime_controls"] = validate_controls(
+        prime_draft,
+        current_settings,
+        validate_channel=lambda raw, messageable=False: _owned_channel(
+            guild, raw, messageable=messageable,
+        ),
+        validate_role=lambda raw: _owned_role(guild, raw),
+        validate_assignable_role=lambda raw: _owned_role(
+            guild, raw, assignable=True,
+        ),
+    )
+    settings["command_rank_channels"] = settings["prime_controls"]["rank"]["channels"]
     return settings, clean_rewards, multipliers, blacklist
 
 

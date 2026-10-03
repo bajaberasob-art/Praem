@@ -655,7 +655,7 @@ class Levels(EngagementXP, commands.Cog):
             if row["reward_type"] == reward_type and row["level_required"] <= level
         ]
         if not rewards:
-            return
+            return []
         rewards.sort(key=lambda row: (row["level_required"], row["id"]))
         single = bool(settings["rewards_single_highest"])
         selected = rewards[-1:] if single else rewards

@@ -1234,7 +1234,16 @@ class Levels(EngagementXP, commands.Cog):
             member = guild.get_member(key[1])
             if member:
                 if award["voice_level"] > award["old_voice_level"]:
-                    await self.apply_voice_rewards(member, award["voice_level"], settings)
+                    granted_roles = await self.apply_voice_rewards(
+                        member, award["voice_level"], settings
+                    )
+                    for role in granted_roles:
+                        promotion = RolePromotionEvent(
+                            guild, member, role, award["old_voice_level"],
+                            award["voice_level"], award["voice_xp"],
+                        )
+                        self.bot.dispatch("lona_role_promotion", promotion)
+                        self.bot.dispatch("prime_role_promotion", promotion)
                     self.bot.dispatch("lona_voice_level_up", VoiceLevelUp(
                         guild, member, award["old_voice_level"], award["voice_level"], award["voice_xp"]))
                 if text_xp:

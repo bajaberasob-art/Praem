@@ -967,8 +967,9 @@ class Levels(EngagementXP, commands.Cog):
         if channel is None or not callable(getattr(channel, "send", None)):
             logger.warning("Periodic TOP channel missing guild=%s period=%s", guild.id, period)
             return
+        mode = str(config.get("mode") or "both")
         rows = await database.get_level_periodic_top_leaderboard(
-            guild.id, list(humans), "text",
+            guild.id, list(humans), mode,
             start_local.astimezone(timezone.utc),
             end_local.astimezone(timezone.utc),
             limit=int(config["winners"]),
@@ -988,17 +989,23 @@ class Levels(EngagementXP, commands.Cog):
                 name = member.mention if config["mentionWinners"] else discord.utils.escape_markdown(
                     getattr(member, "display_name", getattr(member, "name", "عضو"))
                 )
+                level = int(row.get("level") or 0)
+                total_xp = int(row.get("total_xp") or 0)
+                progress = text_progress(total_xp)
                 values = {
                     "user": getattr(member, "display_name", getattr(member, "name", "")),
                     "username": getattr(member, "name", ""),
                     "mention": member.mention if config["mentionWinners"] else name,
-                    "level": int(row.get("level") or 0),
+                    "level": level,
+                    "old_level": max(0, level - 1),
                     "xp": int(row.get("xp") or 0),
+                    "required_xp": int(progress["xp_required"]),
+                    "progress": int(progress["percentage"]),
                     "rank": position,
                     "total_members": len(humans),
-                    "messages": "",
-                    "voice_time": "",
-                    "streak": "",
+                    "messages": int(row.get("total_messages") or 0),
+                    "voice_time": int(row.get("total_voice_seconds") or 0),
+                    "streak": int(row.get("current_streak") or 0),
                     "server": guild.name,
                     "period": period,
                 }

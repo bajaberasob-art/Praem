@@ -8,7 +8,7 @@ TEMPLATE_VARIABLES = frozenset({
     "user", "username", "mention", "level", "old_level", "xp",
     "required_xp", "progress", "rank", "total_members", "messages",
     "voice_time", "streak", "server", "period", "message",
-    "passer", "passed",
+    "passer", "passed", "role",
 })
 
 DEFAULT_CONTROLS = {

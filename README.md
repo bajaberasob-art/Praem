@@ -96,3 +96,13 @@ Add additional slash commands next to the starter commands in the loaded cogs. K
 privileged intents disabled unless a feature explicitly needs them, and request only the
 permissions required by that feature. The security and moderation cogs are loaded from
 `main.py` before slash commands are synced.
+
+## PRIME Leveling
+
+The leveling system is managed from the authenticated dashboard at `/api/dashboard/`. PRIME separates lifetime leveling from scheduled Daily/Weekly/Monthly TOP periods.
+
+Manual commands include `/rank`, `/lvl`, `لفل`, and `rank`; `/rank` defaults to a single PRIME PNG card. `/top` and `توب` show the lifetime server leaderboard with Text/Voice modes. Scheduled Daily/Weekly/Monthly TOP use only XP earned inside their configured period and do not reset lifetime XP or levels.
+
+Dashboard notification settings are stored in PRIME controls and are applied through the leveling settings API. Legacy leveling fields remain as compatibility storage for existing installations.
+
+Runtime SQLite files are ignored by Git via `*.db`, `*.sqlite`, and `*.sqlite3`. Existing deployments that intentionally use a tracked legacy database should migrate that data to their persistent `DB_PATH` before removing the legacy file from the repository; do not delete a live production database blindly.

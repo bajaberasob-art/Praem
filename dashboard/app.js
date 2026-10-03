@@ -592,7 +592,6 @@
         type: "button",
         "data-nav-view": view,
         "aria-current": state.activeView === view ? "page" : "false",
-        onPointerDown: closeNavigationOverlays,
         onClick: () => navigateView(view),
       },
       el("span", { class: "nav-icon", text: meta.icon, "aria-hidden": "true" }),
@@ -6626,6 +6625,7 @@
       levelup: { on: true, channel: "", tpl: "مبروك {user}! وصلت إلى المستوى {level} في {server}." },
       milestone: { on: true, channel: "", tpl: "{user} حقق إنجازاً جديداً عند المستوى {level}." },
       overtake: { on: false, channel: "", tpl: "{passer} تجاوز {passed} وأصبح في المركز {rank}." },
+      role_promotion: { on: false, channel: "", tpl: "مبروك {mention}! حصلت على رتبة {role}." },
     },
   });
   const lvMerge = (base, src) => {
@@ -6761,10 +6761,15 @@
     target.id = id;
     return el("div", { class: "leveling-field" }, el("label", { for: id, text: label }), control, hint ? el("small", { text: hint }) : null);
   }
-  function lvSwitch(path, label, hint) {
+  function lvSwitch(path, label, hint, onChange) {
     const id = lvId();
     const b = el("button", { class: "leveling-switch", id, type: "button", role: "switch", "aria-checked": String(Boolean(lvGet(path))), "aria-labelledby": `${id}-l` }, el("i"));
-    b.addEventListener("click", () => { const v = !lvGet(path); lvSet(path, v); b.setAttribute("aria-checked", String(v)); });
+    b.addEventListener("click", () => {
+      const v = !lvGet(path);
+      lvSet(path, v);
+      b.setAttribute("aria-checked", String(v));
+      onChange?.(v);
+    });
     return el("div", { class: "leveling-row" }, el("span", { class: "leveling-row-copy" }, el("b", { id: `${id}-l`, text: label }), hint ? el("small", { text: hint }) : null), b);
   }
   function lvNum(path, label, min, max, hint, slider) {
@@ -6781,10 +6786,13 @@
     n.addEventListener("input", () => lvSet(path, n.value));
     return lvField(label, n, hint);
   }
-  function lvArea(path, label, hint) {
+  function lvArea(path, label, hint, onChange) {
     const n = el("textarea", { rows: 3, maxlength: 500, dir: "auto" });
     n.value = lvGet(path);
-    n.addEventListener("input", () => lvSet(path, n.value));
+    n.addEventListener("input", () => {
+      lvSet(path, n.value);
+      onChange?.(n.value);
+    });
     return lvField(label, n, hint);
   }
   function lvSelect(path, label, opts, hint, onChange) {
@@ -6911,7 +6919,13 @@
   }
   function lvPreviews() {
     const d = lvState().draft, me = state.session?.username || "عضو تجريبي";
-    const vars = { user: me, level: "12", server: state.guild?.name || "السيرفر", passer: me, passed: "ياسر", rank: "3" };
+    const vars = {
+      user: me, username: me, mention: `<@${state.session?.id || "123"}>`,
+      level: "12", old_level: "11", xp: "1,250", required_xp: "2,000",
+      progress: "62", rank: "3", total_members: "250", messages: "84",
+      voice_time: "3.5 س", streak: "7", server: state.guild?.name || "السيرفر",
+      period: "weekly", role: "Elite", passer: me, passed: "ياسر",
+    };
     document.querySelectorAll(".leveling-msg-preview").forEach((box) => {
       const m = d.messages[box.dataset.msgKey];
       if (!m) return;
@@ -7307,12 +7321,180 @@
       }
     }, 300);
   }
+  const LV_TEMPLATE_VARS = [
+    "{user}", "{username}", "{mention}", "{level}", "{old_level}", "{xp}",
+    "{required_xp}", "{progress}", "{rank}", "{total_members}", "{messages}",
+    "{voice_time}", "{streak}", "{server}", "{period}", "{role}", "{passer}", "{passed}",
+  ];
+  const LV_DEFAULT_MESSAGE_TEXTS = {
+    levelup: "مبروك {mention}! وصلت إلى المستوى {level} في {server}.",
+    milestone: "{mention} حقق إنجازاً جديداً عند المستوى {level}.",
+    overtake: "{mention} تجاوز {passed} وأصبح في المركز {rank}.",
+    role_promotion: "مبروك {mention}! حصلت على رتبة {role}.",
+  };
+  const lvPrimeMessageConfig = (key) => {
+    const s = lvState();
+    s.draft.prime ||= {};
+    const cfg = key === "levelup"
+      ? (s.draft.prime.levelup ||= {})
+      : ((s.draft.prime.notifications ||= {})[key] ||= {});
+    const fallback = LV_DEFAULT_MESSAGE_TEXTS[key] || "{message}";
+    cfg.message = typeof cfg.message === "string" ? cfg.message : fallback;
+    cfg.messages = Array.isArray(cfg.messages) && cfg.messages.length
+      ? cfg.messages : [{ id: "default", name: "الافتراضي", template: cfg.message }];
+    cfg.activeMessageId = cfg.activeMessageId || cfg.messages[0]?.id || "default";
+    return cfg;
+  };
+  const lvSyncActiveMessage = (key) => {
+    const cfg = lvPrimeMessageConfig(key);
+    let active = cfg.messages.find((item) => String(item.id) === String(cfg.activeMessageId));
+    if (!active) {
+      active = cfg.messages[0];
+      cfg.activeMessageId = active.id;
+    }
+    cfg.message = String(active.template || "");
+    const s = lvState();
+    if (!s.draft.messages[key]) s.draft.messages[key] = { on: false, channel: "", tpl: "" };
+    s.draft.messages[key].tpl = cfg.message;
+  };
+  const lvMessageSet = (key, field, value) => {
+    const s = lvState();
+    if (!s.draft.messages[key]) s.draft.messages[key] = { on: false, channel: "", tpl: "" };
+    s.draft.messages[key][field] = value;
+    const cfg = lvPrimeMessageConfig(key);
+    if (field === "on") {
+      if (key === "levelup") cfg.sendNotification = Boolean(value);
+      else cfg.enabled = Boolean(value);
+    }
+    if (field === "channel") cfg.channel = String(value || "");
+    if (field === "tpl") {
+      cfg.message = String(value || "");
+      const active = cfg.messages.find((item) => String(item.id) === String(cfg.activeMessageId));
+      if (active) active.template = cfg.message;
+    }
+    lvTouch();
+  };
+  const lvMessageManager = (key) => {
+    const cfg = lvPrimeMessageConfig(key);
+    const currentId = String(cfg.activeMessageId || cfg.messages[0]?.id || "default");
+    const select = el("select", {});
+    cfg.messages.forEach((item) => {
+      select.append(el("option", { value: String(item.id), text: String(item.name || item.id) }));
+    });
+    select.value = currentId;
+    select.addEventListener("change", () => {
+      cfg.activeMessageId = select.value;
+      lvSyncActiveMessage(key);
+      lvTouch();
+    });
+    const button = (label, handler, title) => el("button", {
+      type: "button", class: "btn leveling-msg-manager-btn", text: label, title,
+      onClick: handler,
+    });
+    return el("div", { class: "leveling-message-manager" },
+      el("div", { class: "leveling-manager-row" },
+        el("strong", { text: "مدير الرسائل" }),
+        select,
+        button("＋ إضافة", () => {
+          const name = window.prompt("اسم الرسالة الجديدة:");
+          if (!name?.trim()) return;
+          const template = window.prompt("نص الرسالة:", cfg.message || LV_DEFAULT_MESSAGE_TEXTS[key]);
+          if (template === null || !template.trim()) return;
+          if (cfg.messages.length >= 20) {
+            toast("الحد الأقصى 20 رسالة محفوظة.", "warn");
+            return;
+          }
+          const id = `m-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          cfg.messages.push({ id, name: name.trim().slice(0, 80), template: template.trim().slice(0, 500) });
+          cfg.activeMessageId = id;
+          lvSyncActiveMessage(key);
+          lvTouch();
+        }, "إضافة رسالة محفوظة"),
+        button("✎ تعديل الاسم", () => {
+          const active = cfg.messages.find((item) => String(item.id) === String(select.value));
+          if (!active) return;
+          const name = window.prompt("الاسم الجديد:", active.name || "");
+          if (!name?.trim()) return;
+          active.name = name.trim().slice(0, 80);
+          lvTouch();
+        }, "تعديل اسم الرسالة الحالية"),
+        button("🗑 حذف", () => {
+          if (select.value === "default") {
+            toast("لا يمكن حذف الرسالة الافتراضية.", "warn");
+            return;
+          }
+          if (!window.confirm("حذف الرسالة المحفوظة؟")) return;
+          cfg.messages = cfg.messages.filter((item) => String(item.id) !== String(select.value));
+          cfg.activeMessageId = cfg.messages[0]?.id || "default";
+          lvSyncActiveMessage(key);
+          lvTouch();
+        }, "حذف الرسالة الحالية"),
+        button("↩ الافتراضي", () => {
+          const defaultText = LV_DEFAULT_MESSAGE_TEXTS[key];
+          let active = cfg.messages.find((item) => String(item.id) === "default");
+          if (!active) {
+            active = { id: "default", name: "الافتراضي", template: defaultText };
+            cfg.messages.unshift(active);
+          }
+          active.template = defaultText;
+          cfg.activeMessageId = "default";
+          lvSyncActiveMessage(key);
+          lvTouch();
+        }, "استعادة الرسالة الافتراضية"),
+      ),
+    );
+  };
   function lvTabMessages() {
-    const mk = (key, title, vars) => lvCard(title, `المتغيرات: ${vars}`, lvSwitch(["messages", key, "on"], "تفعيل الإشعار"),
-      lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"), state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", lvPreviews),
-      lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف"),
-      el("div", { class: "leveling-msg-preview", "data-msg-key": key }));
-    return el("div", { class: "leveling-stack" }, lvDemoTag("قوالب توضيحية محلية"), mk("levelup", "رسالة رفع المستوى", "{user} {level} {server}"), mk("milestone", "رسالة الإنجاز (توضيحية محلية فقط)", "{user} {level}"), mk("overtake", "رسالة التجاوز", "{passer} {passed} {rank}"));
+    const mk = (key, title, vars) => {
+      const primePath = key === "levelup"
+        ? ["prime", "levelup"]
+        : ["prime", "notifications", key];
+      const advanced = key === "levelup"
+        ? null
+        : el("div", { class: "leveling-stack" },
+            lvSwitch([...primePath, "sendAsEmbed"], "إرسال كـ Embed"),
+            lvSwitch([...primePath, "mentionUser"], "منشن العضو"),
+            lvSelect([...primePath, "mentionRole"], "منشن رتبة إضافية", lvRoleOpts("بدون رتبة")),
+            lvGrid(
+              lvText([...primePath, "embedTitle"], "عنوان الإمبد"),
+              lvText([...primePath, "embedColor"], "لون الإمبد", { type: "color" }),
+            ),
+            lvArea([...primePath, "embedDescription"], "وصف الإمبد", "يمكن استخدام {message} وباقي متغيرات PRIME"),
+            lvGrid(
+              lvText([...primePath, "embedFooter"], "تذييل الإمبد"),
+              lvText([...primePath, "embedImage"], "رابط صورة الإمبد", { dir: "ltr", placeholder: "https://..." }),
+            ),
+            lvSwitch([...primePath, "timestamp"], "إضافة توقيت"),
+          );
+      return lvCard(
+        title,
+        `يدعم: ${vars}`,
+        el("div", { class: "leveling-message-toolbar" },
+          lvSwitch(["messages", key, "on"], "تفعيل الإشعار", "يتزامن مع إعداد PRIME الفعلي", (value) => lvMessageSet(key, "on", value)),
+        ),
+        lvMessageManager(key),
+        lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"),
+          state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", () => lvMessageSet(key, "channel", lvGet(["messages", key, "channel"]))),
+        lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف", (value) => lvMessageSet(key, "tpl", value)),
+        el("div", { class: "leveling-template-vars" }, ...LV_TEMPLATE_VARS.map((token) =>
+          el("button", { type: "button", class: "leveling-chip", text: token, title: "نسخ المتغير",
+            onClick: async () => {
+              await navigator.clipboard?.writeText(token);
+              toast(`تم نسخ ${token}`, "info", 1600);
+            } })),
+        advanced,
+        el("div", { class: "leveling-msg-preview", "data-msg-key": key }),
+      );
+    };
+    return el(
+      "div",
+      { class: "leveling-stack" },
+      lvDemoTag("الإعدادات هنا تُكتب إلى PRIME runtime وتبقى متوافقة مع الحقول القديمة"),
+      mk("levelup", "إشعار رفع المستوى", "{user} {mention} {level} {old_level} {xp} {server}"),
+      mk("milestone", "إشعار الإنجاز", "{user} {level} {xp} {progress}"),
+      mk("overtake", "إشعار التجاوز", "{passer} {passed} {rank} {user}"),
+      mk("role_promotion", "إشعار ترقية الرتبة", "{mention} {role} {level} {old_level}"),
+    );
   }
   function lvTabPrime() {
     const periodicPanel = (period, title, defaults) => {
@@ -7322,6 +7504,7 @@
         lvGrid(
           lvSelect([...key, "channel"], "قناة النشر", lvChanOpts("اختر قناة")),
           lvSelect([...key, "rewardRole"], "رتبة الفائزين", lvRoleOpts("بدون مكافأة")),
+          lvSelect([...key, "mode"], "مصدر XP للفترة", [["both", "النص + الصوت"], ["text", "النص فقط"], ["voice", "الصوت فقط"]]),
           lvText([...key, "time"], "وقت النشر", { type: "time" }),
           lvText([...key, "timezone"], "المنطقة الزمنية", { dir: "ltr", placeholder: "UTC" }),
           lvNum([...key, "winners"], "عدد الفائزين", 1, 20),
@@ -7459,10 +7642,10 @@
     if (d.public.slug && !PUBLIC_SLUG_RE.test(d.public.slug)) e.push("أدخل معرّف رابط من 3 إلى 40 حرفاً: أحرف إنجليزية صغيرة وأرقام وشرطة مفردة بين الكلمات.");
     if (d.public.enabled && !d.public.slug) e.push("أدخل معرّف الرابط قبل إتاحة اللوحة للعامة.");
     if (!lvBgOk(String(d.card.bg).trim())) e.push("رابط الخلفية يجب أن يبدأ بـ https://.");
-    const allowed = { levelup: ["user", "level", "server"], milestone: ["user", "level"], overtake: ["passer", "passed", "rank"] };
+    const allowed = new Set(LV_TEMPLATE_VARS.map((token) => token.slice(1, -1)));
     Object.entries(d.messages).forEach(([k, m]) => {
       if (!String(m.tpl).trim() || m.tpl.length > 500) e.push("قوالب الرسائل مطلوبة وبحد أقصى 500 حرف.");
-      (String(m.tpl).match(/\{[^{}]*\}/g) || []).forEach((t) => { if (!allowed[k].includes(t.slice(1, -1))) e.push(`متغير غير مدعوم ${t} في قالب ${k}.`); });
+      (String(m.tpl).match(/\{[^{}]*\}/g) || []).forEach((t) => { if (!allowed.has(t.slice(1, -1))) e.push(`متغير غير مدعوم ${t} في قالب ${k}.`); });
     });
     return [...new Set(e)];
   }

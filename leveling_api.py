@@ -14,7 +14,7 @@ import database
 from cogs.card_generator import generate_rank_card
 from cogs.card_images import validate_url
 from level_progression import text_progress, xp_required
-from prime_level_controls import controls_with_defaults, validate_controls
+from prime_level_controls import TEMPLATE_VARIABLES, controls_with_defaults, validate_controls
 
 
 SNOWFLAKE_RE = re.compile(r"^\d{15,22}$")
@@ -22,9 +22,10 @@ PUBLIC_SLUG_RE = re.compile(r"^(?=.{3,40}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYOUTS = {"vertical", "stats", "minimal", "ring", "classic"}
 PARTICLES = {"none", "sparks", "shine", "embers", "snow", "petals", "neon"}
 TEMPLATE_FIELDS = {
-    "levelup": {"user", "level", "server"},
-    "milestone": {"user", "level"},
-    "overtake": {"passer", "passed", "rank"},
+    "levelup": set(TEMPLATE_VARIABLES),
+    "milestone": set(TEMPLATE_VARIABLES),
+    "overtake": set(TEMPLATE_VARIABLES),
+    "role_promotion": set(TEMPLATE_VARIABLES),
 }
 BOOL_FIELDS = {
     "enabled", "text", "reaction", "streak",
@@ -118,11 +119,13 @@ def _id_list(guild, values, name, *, kind):
 def _format_template(value, key):
     if not isinstance(value, str) or not value.strip() or len(value) > 500:
         raise ValueError(f"{key} template must contain 1-500 characters")
+    allowed = TEMPLATE_FIELDS.get(key, set(TEMPLATE_VARIABLES))
     try:
         parsed = string.Formatter().parse(value)
         for _, field, spec, conversion in parsed:
             if field is not None and (
                 not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", field)
+                or field not in allowed
                 or spec or conversion
             ):
                 raise ValueError(f"invalid placeholder in {key} template")
@@ -305,7 +308,20 @@ async def _dashboard_snapshot(guild_id):
         },
     }
     draft["prime"] = controls_with_defaults(settings.get("prime_controls"), settings)
-    draft["prime"] = controls_with_defaults(settings.get("prime_controls"), settings)
+    prime = draft["prime"]
+    levelup = prime["levelup"]
+    draft["messages"]["levelup"] = {
+        "on": bool(levelup.get("sendNotification", True)),
+        "channel": str(levelup.get("channel") or ""),
+        "tpl": str(levelup.get("message") or ""),
+    }
+    for key in ("milestone", "overtake", "role_promotion"):
+        item = prime["notifications"].get(key, {})
+        draft["messages"][key] = {
+            "on": bool(item.get("enabled", False)),
+            "channel": str(item.get("channel") or ""),
+            "tpl": str(item.get("message") or ""),
+        }
     return {
         "revision": int(settings.get("revision", 0) or 0),
         "draft": draft,
@@ -376,18 +392,6 @@ def _validate_draft(guild, draft, current_settings):
         "card_animated_bar": int(_bool(card.get("animated"), "animated")),
         "card_show_stats": int(_bool(card.get("showStats"), "showStats")),
     }
-    settings["prime_controls"] = validate_controls(
-        draft.get("prime"),
-        current_settings,
-        validate_channel=lambda raw, messageable=False: _owned_channel(
-            guild, raw, messageable=messageable,
-        ),
-        validate_role=lambda raw: _owned_role(guild, raw),
-        validate_assignable_role=lambda raw: _owned_role(
-            guild, raw, assignable=True,
-        ),
-    )
-    settings["command_rank_channels"] = settings["prime_controls"]["rank"]["channels"]
     minimum, maximum = settings["text_xp_min"], settings["text_xp_max"]
     if minimum > maximum:
         raise ValueError("minXp cannot exceed maxXp")
@@ -485,10 +489,12 @@ def _validate_draft(guild, draft, current_settings):
     settings["timed_xp_boosts"] = _parse_boosts(
         current_settings, points.get("boosts"), now
     )
+    prime_draft = controls_with_defaults(draft.get("prime"), current_settings)
     message_fields = (
         ("levelup", "levelup_enabled", "levelup_channel_id", "levelup_template"),
         ("milestone", "milestone_alert_enabled", "milestone_channel_id", "milestone_template"),
         ("overtake", "overtake_alert_enabled", "overtake_channel_id", "overtake_template"),
+        ("role_promotion", None, None, None),
     )
     for key, enabled_field, channel_field, template_field in message_fields:
         item = messages.get(key)
@@ -500,9 +506,31 @@ def _validate_draft(guild, draft, current_settings):
             _owned_channel(guild, channel, messageable=True) if channel else None
         )
         template = _format_template(item.get("tpl"), key)
-        settings[enabled_field] = int(enabled)
-        settings[channel_field] = channel_id
-        settings[template_field] = template
+        if enabled_field:
+            settings[enabled_field] = int(enabled)
+            settings[channel_field] = channel_id
+            settings[template_field] = template
+        if key == "levelup":
+            prime_draft["levelup"]["sendNotification"] = enabled
+            prime_draft["levelup"]["channel"] = str(channel_id or "")
+            prime_draft["levelup"]["message"] = template
+        else:
+            prime_item = prime_draft["notifications"][key]
+            prime_item["enabled"] = enabled
+            prime_item["channel"] = str(channel_id or "")
+            prime_item["message"] = template
+    settings["prime_controls"] = validate_controls(
+        prime_draft,
+        current_settings,
+        validate_channel=lambda raw, messageable=False: _owned_channel(
+            guild, raw, messageable=messageable,
+        ),
+        validate_role=lambda raw: _owned_role(guild, raw),
+        validate_assignable_role=lambda raw: _owned_role(
+            guild, raw, assignable=True,
+        ),
+    )
+    settings["command_rank_channels"] = settings["prime_controls"]["rank"]["channels"]
     return settings, clean_rewards, multipliers, blacklist
 
 

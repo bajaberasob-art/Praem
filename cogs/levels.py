@@ -108,6 +108,16 @@ class OvertakeEvent:
     previous_rank: int
 
 
+@dataclass(frozen=True)
+class RolePromotionEvent:
+    guild: Any
+    member: Any
+    role: Any
+    old_level: int
+    new_level: int
+    xp: int
+
+
 def bounded_multiplier(value: Any) -> float:
     try:
         value = float(value)
@@ -268,7 +278,16 @@ class Levels(EngagementXP, commands.Cog):
         """Common post-commit text rewards/events for every XP source."""
         progress = text_progress(award["text_xp"])
         if award["text_level"] > award["old_level"]:
-            await self.apply_text_rewards(member, award["text_level"], settings)
+            granted_roles = await self.apply_text_rewards(
+                member, award["text_level"], settings
+            )
+            for role in granted_roles:
+                promotion = RolePromotionEvent(
+                    member.guild, member, role, award["old_level"],
+                    award["text_level"], award["text_xp"],
+                )
+                self.bot.dispatch("lona_role_promotion", promotion)
+                self.bot.dispatch("prime_role_promotion", promotion)
             self.emit_level_up(TextLevelUp(
                 member.guild, member, award["old_level"], award["text_level"],
                 award["text_xp"], progress["xp_required"], progress["next_level_total_xp"],
@@ -306,6 +325,15 @@ class Levels(EngagementXP, commands.Cog):
         self.bot.dispatch("lona_text_milestone", event)
 
     async def _send_leveling_notice(self, guild, channel_id, template, values, settings=None, kind=None, users=None):
+        prime_config = {}
+        if settings is not None and kind:
+            prime_config = controls_with_defaults(
+                settings.get("prime_controls"), settings
+            )["notifications"].get(kind, {}) or {}
+            if "enabled" in prime_config and not prime_config["enabled"]:
+                return
+            channel_id = prime_config.get("channel") or channel_id
+            template = prime_config.get("message") or template
         if not channel_id:
             return
         channel = guild.get_channel(int(channel_id))
@@ -318,9 +346,7 @@ class Levels(EngagementXP, commands.Cog):
         content = render_template(template, values)
         if not content:
             return
-        config = controls_with_defaults(
-            (settings or {}).get("prime_controls"), settings or {},
-        )["notifications"].get(kind, {}) if kind in {"milestone", "overtake"} else {}
+        config = prime_config
         role = None
         try:
             if config.get("mentionRole"):
@@ -335,11 +361,17 @@ class Levels(EngagementXP, commands.Cog):
                 color = int(str(config.get("embedColor") or "#12D6FF").lstrip("#"), 16)
             except (TypeError, ValueError):
                 color = 0x12D6FF
+            embed_description = render_template(
+                config.get("embedDescription") or "{message}",
+                {**values, "message": content},
+            ) or content
             embed = discord.Embed(
                 title=str(config.get("embedTitle") or "PRIME")[:256],
-                description=content[:4000],
+                description=embed_description[:4000],
                 color=discord.Color(color),
             )
+            if config.get("embedImage"):
+                embed.set_image(url=str(config["embedImage"]))
             if config.get("embedFooter"):
                 embed.set_footer(text=str(config["embedFooter"])[:2048])
             if config.get("timestamp"):
@@ -358,12 +390,13 @@ class Levels(EngagementXP, commands.Cog):
             logger.warning("Cannot send leveling announcement guild=%s channel=%s",
                            guild.id, channel_id, exc_info=True)
 
-    async def _send_level_up_card(self, guild, member, settings, mode, template):
+    async def _send_level_up_card(self, guild, member, settings, mode, template, event=None):
         controls = controls_with_defaults(settings.get("prime_controls"), settings)
         config = controls["levelup"]
         if not config["sendNotification"]:
             return
-        channel_id = (
+        configured_channel = str(config.get("channel") or "")
+        channel_id = configured_channel or (
             settings.get("levelup_channel_id")
             if mode == "text"
             else settings.get("levelup_voice_channel_id")
@@ -397,9 +430,23 @@ class Levels(EngagementXP, commands.Cog):
         snapshot = await database.get_command_rank_snapshot(
             guild.id, member.id, list(humans), mode=mode,
         )
-        current_xp = max(0, int(snapshot.get("xp") or 0))
+        event_old_level = int(getattr(event, "old_level", 0)) if event is not None else None
+        event_new_level = int(getattr(event, "new_level", 0)) if event is not None else None
+        event_xp = int(getattr(event, "current_xp", 0)) if event is not None else None
+        current_xp = max(
+            0,
+            event_xp if event_xp is not None and event_xp > 0
+            else int(snapshot.get("xp") or 0),
+        )
         current = text_progress(current_xp)
-        level = int(current["level"])
+        level = max(
+            0,
+            event_new_level if event_new_level is not None else int(current["level"]),
+        )
+        old_level = max(
+            0,
+            event_old_level if event_old_level is not None else level - 1,
+        )
         rank = snapshot.get("rank")
         total_members = int(snapshot.get("total_members") or len(humans))
         card_settings = dict(settings)
@@ -421,7 +468,7 @@ class Levels(EngagementXP, commands.Cog):
             "mention": getattr(member, "mention", ""),
             "username": getattr(member, "display_name", getattr(member, "name", "")),
             "level": level,
-            "old_level": max(0, level - 1),
+            "old_level": old_level,
             "xp": current_xp,
             "required_xp": xp_required(level),
             "progress": text_progress(current_xp)["percentage"],
@@ -436,7 +483,8 @@ class Levels(EngagementXP, commands.Cog):
         if not config["mentionUser"]:
             values["user"] = values["username"]
             values["mention"] = values["username"]
-        description = render_template(template, values) or (
+        notification_template = config.get("message") or template
+        description = render_template(notification_template, values) or (
             f"Congratulations {values['user']} — level {level}."
         )
         title = str(config.get("embedTitle") or settings.get("levelup_title") or "🎉 Level Up!")[:256]
@@ -487,12 +535,16 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_text_level_up(self, event: TextLevelUp):
         settings = await database.get_level_settings(event.guild.id)
-        if not settings or not settings.get("is_enabled") or not settings.get("levelup_enabled", True):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        if not controls["levelup"].get("sendNotification", True):
             return
         try:
             await self._send_level_up_card(
                 event.guild, event.member, settings, "text",
                 settings.get("levelup_template"),
+                event=event,
             )
         except Exception:
             logger.exception(
@@ -503,15 +555,16 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_voice_level_up(self, event: VoiceLevelUp):
         settings = await database.get_level_settings(event.guild.id)
-        if (
-            not settings or not settings.get("is_enabled")
-            or not settings.get("levelup_voice_enabled", True)
-        ):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        if not controls["levelup"].get("sendNotification", True):
             return
         try:
             await self._send_level_up_card(
                 event.guild, event.member, settings, "voice",
                 settings.get("levelup_voice_template"),
+                event=event,
             )
         except Exception:
             logger.exception(
@@ -522,7 +575,11 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_text_milestone(self, event: TextMilestone):
         settings = await database.get_level_settings(event.guild.id)
-        if not settings or not settings.get("is_enabled") or not settings.get("milestone_alert_enabled"):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        config = controls["notifications"].get("milestone", {})
+        if not config.get("enabled"):
             return
         await self._send_leveling_notice(
             event.guild, settings.get("milestone_channel_id"), settings.get("milestone_template"),
@@ -535,7 +592,11 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_text_overtake(self, event: OvertakeEvent):
         settings = await database.get_level_settings(event.guild.id)
-        if not settings or not settings.get("is_enabled") or not settings.get("overtake_alert_enabled"):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        config = controls["notifications"].get("overtake", {})
+        if not config.get("enabled"):
             return
         await self._send_leveling_notice(
             event.guild, settings.get("overtake_channel_id"), settings.get("overtake_template"),
@@ -546,20 +607,61 @@ class Levels(EngagementXP, commands.Cog):
             settings, "overtake", [event.passer, event.passed],
         )
 
+    @commands.Cog.listener()
+    async def on_prime_role_promotion(self, event: RolePromotionEvent):
+        settings = await database.get_level_settings(event.guild.id) or {}
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        config = controls["notifications"].get("role_promotion", {})
+        if not config.get("enabled"):
+            return
+        role = event.role
+        progress = text_progress(event.xp)
+        values = {
+            "user": getattr(event.member, "mention", f"<@{event.member.id}>"),
+            "mention": getattr(event.member, "mention", f"<@{event.member.id}>"),
+            "username": getattr(event.member, "display_name", getattr(event.member, "name", "")),
+            "level": event.new_level,
+            "old_level": event.old_level,
+            "xp": event.xp,
+            "required_xp": xp_required(event.new_level),
+            "progress": progress["percentage"],
+            "rank": "",
+            "total_members": "",
+            "messages": "",
+            "voice_time": "",
+            "streak": "",
+            "server": getattr(event.guild, "name", "PRIME"),
+            "period": "",
+            "role": getattr(role, "name", "الرتبة"),
+        }
+        await self._send_leveling_notice(
+            event.guild,
+            config.get("channel"),
+            config.get("message"),
+            values,
+            settings,
+            "role_promotion",
+            [event.member],
+        )
+
     async def apply_text_rewards(self, member: discord.Member, level: int, settings: dict):
         try:
-            await self._apply_text_rewards(member, level, settings)
+            return await self._apply_text_rewards(member, level, settings)
         except Exception:
             logger.exception("Text reward failure guild=%s member=%s", member.guild.id, member.id)
+            return []
 
     async def _apply_text_rewards(self, member: discord.Member, level: int, settings: dict):
-        await self._apply_level_rewards(member, level, settings, "text")
+        return await self._apply_level_rewards(member, level, settings, "text")
 
     async def apply_voice_rewards(self, member: discord.Member, level: int, settings: dict):
         try:
-            await self._apply_level_rewards(member, level, settings, "voice")
+            return await self._apply_level_rewards(member, level, settings, "voice")
         except Exception:
             logger.exception("Voice reward failure guild=%s member=%s", member.guild.id, member.id)
+            return []
 
     async def _apply_level_rewards(self, member, level, settings, reward_type):
         all_rewards = await database.get_level_rewards(member.guild.id)
@@ -568,12 +670,13 @@ class Levels(EngagementXP, commands.Cog):
             if row["reward_type"] == reward_type and row["level_required"] <= level
         ]
         if not rewards:
-            return
+            return []
         rewards.sort(key=lambda row: (row["level_required"], row["id"]))
         single = bool(settings["rewards_single_highest"])
         selected = rewards[-1:] if single else rewards
         held = {role.id for role in member.roles}
         highest_granted = False
+        granted_roles = []
         for reward in selected:
             role = member.guild.get_role(reward["role_id"])
             if role is None:
@@ -588,6 +691,7 @@ class Levels(EngagementXP, commands.Cog):
             try:
                 await member.add_roles(role, reason=f"Lona {reward_type} level reward")
                 held.add(role.id)
+                granted_roles.append(role)
                 highest_granted = True
             except discord.HTTPException:
                 logger.warning("Cannot grant %s reward role %s", reward_type, role.id, exc_info=True)
@@ -611,6 +715,7 @@ class Levels(EngagementXP, commands.Cog):
                         await member.remove_roles(role, reason=f"Lona highest {reward_type} reward")
                     except discord.HTTPException:
                         logger.warning("Cannot remove %s reward role %s", reward_type, role_id, exc_info=True)
+        return granted_roles
 
     async def cog_load(self):
         if not self.voice_xp_worker.is_running():
@@ -877,8 +982,9 @@ class Levels(EngagementXP, commands.Cog):
         if channel is None or not callable(getattr(channel, "send", None)):
             logger.warning("Periodic TOP channel missing guild=%s period=%s", guild.id, period)
             return
+        mode = str(config.get("mode") or "both")
         rows = await database.get_level_periodic_top_leaderboard(
-            guild.id, list(humans), "text",
+            guild.id, list(humans), mode,
             start_local.astimezone(timezone.utc),
             end_local.astimezone(timezone.utc),
             limit=int(config["winners"]),
@@ -898,17 +1004,23 @@ class Levels(EngagementXP, commands.Cog):
                 name = member.mention if config["mentionWinners"] else discord.utils.escape_markdown(
                     getattr(member, "display_name", getattr(member, "name", "عضو"))
                 )
+                level = int(row.get("level") or 0)
+                total_xp = int(row.get("total_xp") or 0)
+                progress = text_progress(total_xp)
                 values = {
                     "user": getattr(member, "display_name", getattr(member, "name", "")),
                     "username": getattr(member, "name", ""),
                     "mention": member.mention if config["mentionWinners"] else name,
-                    "level": int(row.get("level") or 0),
+                    "level": level,
+                    "old_level": max(0, level - 1),
                     "xp": int(row.get("xp") or 0),
+                    "required_xp": int(progress["xp_required"]),
+                    "progress": int(progress["percentage"]),
                     "rank": position,
                     "total_members": len(humans),
-                    "messages": "",
-                    "voice_time": "",
-                    "streak": "",
+                    "messages": int(row.get("total_messages") or 0),
+                    "voice_time": int(row.get("total_voice_seconds") or 0),
+                    "streak": int(row.get("current_streak") or 0),
                     "server": guild.name,
                     "period": period,
                 }
@@ -957,6 +1069,7 @@ class Levels(EngagementXP, commands.Cog):
                             "Cannot assign periodic TOP role guild=%s member=%s",
                             guild.id, member.id, exc_info=True,
                         )
+            delivered = False
             try:
                 allowed_mentions = discord.AllowedMentions(
                     users=winners if config["mentionWinners"] else [],
@@ -967,15 +1080,17 @@ class Levels(EngagementXP, commands.Cog):
                     embed=embed,
                     allowed_mentions=allowed_mentions,
                 )
+                delivered = True
             except discord.HTTPException:
                 logger.warning(
-                    "Periodic TOP delivery failed guild=%s period=%s",
+                    "Periodic TOP delivery failed guild=%s period=%s; leaving run retryable",
                     guild.id, period, exc_info=True,
                 )
         finally:
-            await database.complete_level_periodic_top_run(
-                guild.id, period, period_key,
-            )
+            if delivered:
+                await database.complete_level_periodic_top_run(
+                    guild.id, period, period_key,
+                )
 
     @tasks.loop(seconds=60)
     async def periodic_top_worker(self):
@@ -1144,7 +1259,16 @@ class Levels(EngagementXP, commands.Cog):
             member = guild.get_member(key[1])
             if member:
                 if award["voice_level"] > award["old_voice_level"]:
-                    await self.apply_voice_rewards(member, award["voice_level"], settings)
+                    granted_roles = await self.apply_voice_rewards(
+                        member, award["voice_level"], settings
+                    )
+                    for role in granted_roles:
+                        promotion = RolePromotionEvent(
+                            guild, member, role, award["old_voice_level"],
+                            award["voice_level"], award["voice_xp"],
+                        )
+                        self.bot.dispatch("lona_role_promotion", promotion)
+                        self.bot.dispatch("prime_role_promotion", promotion)
                     self.bot.dispatch("lona_voice_level_up", VoiceLevelUp(
                         guild, member, award["old_voice_level"], award["voice_level"], award["voice_xp"]))
                 if text_xp:

@@ -3220,8 +3220,8 @@ async def get_level_periodic_top_leaderboard(
         "text": ("text_xp", "text_level"),
         "voice": ("voice_xp", "voice_level"),
     }
-    if mode not in columns:
-        raise ValueError("leaderboard mode must be text or voice")
+    if mode not in {"text", "voice", "both"}:
+        raise ValueError("leaderboard mode must be text, voice, or both")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
         raise ValueError("leaderboard limit must be from 1 to 20")
     if not human_ids:
@@ -3229,18 +3229,32 @@ async def get_level_periodic_top_leaderboard(
     start_utc, end_utc = _level_utc(start), _level_utc(end)
     if end_utc <= start_utc:
         raise ValueError("leaderboard period end must be after start")
-    xp_column, level_column = columns[mode]
     eligible = json.dumps(sorted({int(value) for value in human_ids}))
+    if mode == "both":
+        select_xp = "SUM(e.text_xp + e.voice_xp)"
+        where_xp = "(e.text_xp > 0 OR e.voice_xp > 0)"
+        period_level = "MAX(u.text_level, u.voice_level)"
+        lifetime_xp = "(u.text_xp + u.voice_xp)"
+    else:
+        xp_column, level_column = columns[mode]
+        select_xp = f"SUM(e.{xp_column})"
+        where_xp = f"e.{xp_column} > 0"
+        period_level = f"u.{level_column}"
+        lifetime_xp = f"u.{xp_column}"
     async with connect(aiosqlite.Row) as db:
         async with db.execute(
             f"""
-            SELECT e.user_id, u.{level_column} AS level,
-                   CAST(SUM(e.{xp_column}) AS INTEGER) AS xp,
-                   u.{xp_column} AS total_xp
+            SELECT e.user_id,
+                   {period_level} AS level,
+                   CAST({select_xp} AS INTEGER) AS xp,
+                   {lifetime_xp} AS total_xp,
+                   COALESCE(u.total_messages, 0) AS total_messages,
+                   COALESCE(u.total_voice_seconds, 0) AS total_voice_seconds,
+                   COALESCE(u.current_streak, 0) AS current_streak
             FROM level_xp_events e
             JOIN user_levels u
               ON u.guild_id = e.guild_id AND u.user_id = e.user_id
-            WHERE e.guild_id = ? AND e.{xp_column} > 0
+            WHERE e.guild_id = ? AND {where_xp}
               AND e.awarded_at >= ? AND e.awarded_at < ?
               AND e.user_id IN (SELECT value FROM json_each(?))
             GROUP BY e.user_id
@@ -3257,22 +3271,60 @@ async def get_level_periodic_top_leaderboard(
 async def claim_level_periodic_top_run(
     guild_id: int, period: str, period_key: str,
 ) -> bool:
+    """Claim a scheduled TOP run once, with crash-recovery for stale claims."""
     if period not in {"daily", "weekly", "monthly"}:
         raise ValueError("invalid periodic TOP period")
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    stale_before = now - timedelta(minutes=15)
     async with connect(aiosqlite.Row) as db:
-        cursor = await db.execute(
-            """
-            INSERT OR IGNORE INTO level_periodic_top_runs
-                (guild_id, period, period_key, claimed_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                int(guild_id), period, str(period_key),
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        await db.commit()
-        return cursor.rowcount == 1
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await db.execute(
+                """
+                INSERT OR IGNORE INTO level_periodic_top_runs
+                    (guild_id, period, period_key, claimed_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (int(guild_id), period, str(period_key), now_iso),
+            )
+            if cursor.rowcount == 1:
+                await db.commit()
+                return True
+            async with db.execute(
+                """
+                SELECT claimed_at, completed_at
+                FROM level_periodic_top_runs
+                WHERE guild_id = ? AND period = ? AND period_key = ?
+                """,
+                (int(guild_id), period, str(period_key)),
+            ) as cur:
+                row = await cur.fetchone()
+            if row is None or row["completed_at"]:
+                await db.commit()
+                return False
+            claimed_at = datetime.fromisoformat(
+                str(row["claimed_at"]).replace("Z", "+00:00")
+            )
+            if claimed_at.tzinfo is None:
+                claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+            if claimed_at > stale_before:
+                await db.commit()
+                return False
+            await db.execute(
+                """
+                UPDATE level_periodic_top_runs
+                SET claimed_at = ?, completed_at = NULL
+                WHERE guild_id = ? AND period = ? AND period_key = ?
+                """,
+                (now_iso, int(guild_id), str(period), str(period_key)),
+            )
+            await db.commit()
+            return True
+        except BaseException:
+            if db.in_transaction:
+                await db.rollback()
+            raise
 
 
 async def complete_level_periodic_top_run(

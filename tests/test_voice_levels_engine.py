@@ -384,7 +384,10 @@ class VoiceEngineTests(unittest.IsolatedAsyncioTestCase):
         await self.move()
         await self.tick()
         self.assertEqual([call.args[0].id for call in self.members[123].add_roles.await_args_list], [10])
-        self.assertEqual(self.bot.dispatch.call_count, 1)
+        event_names = [call.args[0] for call in self.bot.dispatch.call_args_list]
+        self.assertIn("lona_role_promotion", event_names)
+        self.assertIn("prime_role_promotion", event_names)
+        self.assertNotIn("lona_voice_level_up", event_names)
 
     async def test_deleted_permission_hierarchy_and_api_failures_safe(self):
         await self.settings(voice_xp_per_minute=500, rewards_single_highest=False)

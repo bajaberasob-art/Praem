@@ -34,21 +34,17 @@ class CommandInteraction:
 
 
 class LeaderboardView(discord.ui.View):
-    def __init__(self, cog, owner_id, guild_id, mode, period):
+    def __init__(self, cog, owner_id, guild_id, mode):
         super().__init__(timeout=120)
         self.cog, self.owner_id, self.guild_id = cog, owner_id, guild_id
         self.message = None
         self.busy = False
-        self.mode, self.period = mode, period
+        self.mode = mode
         self.set_selection()
 
     def set_selection(self):
         for child in self.children:
-            selected = child.label.casefold() == self.period
-            if child.label.casefold() == "all":
-                selected = self.period == "all_time"
-            if child.label.casefold() in {"text", "voice"}:
-                selected = child.label.casefold() == self.mode
+            selected = child.label.casefold() == self.mode
             child.style = (
                 discord.ButtonStyle.primary if selected
                 else discord.ButtonStyle.secondary
@@ -61,7 +57,7 @@ class LeaderboardView(discord.ui.View):
             return False
         return True
 
-    async def switch(self, interaction, *, mode=None, period=None):
+    async def switch(self, interaction, *, mode=None):
         try:
             guild = self.cog.guild_for(interaction)
             if guild.id != self.guild_id:
@@ -81,11 +77,10 @@ class LeaderboardView(discord.ui.View):
                         return
                 settings = await self.cog.settings_for(interaction, "top")
                 next_mode = mode or self.mode
-                next_period = period or self.period
                 embeds = await self.cog.leaderboard_embeds(
-                    guild, next_mode, next_period, settings
+                    guild, next_mode, "all_time", settings
                 )
-                self.mode, self.period = next_mode, next_period
+                self.mode = next_mode
                 self.set_selection()
                 top_config = controls_with_defaults(
                     settings.get("prime_controls"), settings,
@@ -108,27 +103,11 @@ class LeaderboardView(discord.ui.View):
             await send_interaction_message(
                 interaction, "تعذر تحديث المتصدرين الآن؛ حاول مجدداً لاحقاً.", ephemeral=True)
 
-    @discord.ui.button(label="DAILY", style=discord.ButtonStyle.primary, row=0)
-    async def daily_button(self, interaction, button):
-        await self.switch(interaction, period="daily")
-
-    @discord.ui.button(label="WEEKLY", style=discord.ButtonStyle.secondary, row=0)
-    async def weekly_button(self, interaction, button):
-        await self.switch(interaction, period="weekly")
-
-    @discord.ui.button(label="MONTHLY", style=discord.ButtonStyle.secondary, row=0)
-    async def monthly_button(self, interaction, button):
-        await self.switch(interaction, period="monthly")
-
-    @discord.ui.button(label="ALL", style=discord.ButtonStyle.secondary, row=0)
-    async def all_time_button(self, interaction, button):
-        await self.switch(interaction, period="all_time")
-
-    @discord.ui.button(label="TEXT", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="TEXT", style=discord.ButtonStyle.primary, row=0)
     async def text_button(self, interaction, button):
         await self.switch(interaction, mode="text")
 
-    @discord.ui.button(label="VOICE", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="VOICE", style=discord.ButtonStyle.secondary, row=0)
     async def voice_button(self, interaction, button):
         await self.switch(interaction, mode="voice")
 
@@ -234,8 +213,11 @@ class RankCommands(commands.Cog):
             card_settings = dict(settings)
             for key in ("total_messages", "total_voice_seconds", "current_streak"):
                 card_settings[key] = row.get(key, 0)
+            # imageOnly is a hard delivery contract. Even a contradictory legacy
+            # setting (showCard=false + imageOnly=true) must still produce the PNG.
+            should_render_card = bool(rank_config["showCard"] or rank_config["imageOnly"])
             image = None
-            if rank_config["showCard"]:
+            if should_render_card:
                 image = await generate_rank_card(
                     target, row["text_level"], row["text_xp"], xp_required(row["text_level"]),
                     row["rank"], row["total_members"], card_settings)
@@ -287,7 +269,8 @@ class RankCommands(commands.Cog):
             finally:
                 if attachment:
                     attachment.close()
-                image.close()
+                if image:
+                    image.close()
         except RankUnavailable as error:
             await send_interaction_message(interaction, str(error), ephemeral=True)
         except Exception:
@@ -295,11 +278,12 @@ class RankCommands(commands.Cog):
             await send_interaction_message(
                 interaction, "تعذر إنشاء بطاقة PRIME الآن؛ حاول مجدداً لاحقاً.", ephemeral=True)
 
-    async def leaderboard_embeds(self, guild, mode, period, settings):
+    async def leaderboard_embeds(self, guild, mode, period="all_time", settings=None):
         if mode not in {"text", "voice"}:
             raise RankUnavailable("اختر TEXT أو VOICE.")
-        if period not in {"daily", "weekly", "monthly", "all_time"}:
-            raise RankUnavailable("اختر DAILY أو WEEKLY أو MONTHLY أو ALL.")
+        if period != "all_time":
+            raise RankUnavailable("أمر /top يعرض الترتيب الدائم فقط؛ TOP اليومي والأسبوعي والشهري منفصل.")
+        settings = settings or {}
         humans = await self.human_members(guild)
         top_config = controls_with_defaults(
             settings.get("prime_controls"), settings,
@@ -309,7 +293,7 @@ class RankCommands(commands.Cog):
             limit=int(top_config["count"]),
         )
         palette = (0x12D6FF, 0x4263EB, 0x6366F1, 0x8B5CF6)
-        period_label = "ALL" if period == "all_time" else period.upper()
+        period_label = ""
         embeds = []
         eligible_rows = []
         for row in rows:
@@ -337,7 +321,7 @@ class RankCommands(commands.Cog):
             avatar_url = getattr(avatar, "url", None)
             embed = discord.Embed(
                 title=(
-                    f"{top_config['embedTitle']} · {period_label}"
+                    top_config["embedTitle"]
                     if position == 1 else None
                 ),
                 description=(
@@ -360,11 +344,11 @@ class RankCommands(commands.Cog):
                     value=top_config["embedMessage"][:1024],
                     inline=False,
                 )
-                embed.set_footer(text="حدود الفترات بتوقيت UTC • البوتات والأعضاء المغادرون مستبعدون")
+                embed.set_footer(text="ترتيب PRIME الدائم • البوتات والأعضاء المغادرون مستبعدون")
             embeds.append(embed)
         if not embeds:
             embeds.append(discord.Embed(
-                title=f"🏆 PRIME TOP · {period_label}",
+                title="🏆 PRIME TOP",
                 description="لا يوجد أعضاء لديهم XP في هذه القائمة بعد.",
                 color=0x12D6FF,
             ))
@@ -379,7 +363,7 @@ class RankCommands(commands.Cog):
             lines.append(f"**{name}**\n{description}")
         return "\n\n".join(lines)[:1900]
 
-    async def show_top(self, interaction, mode=None, period="daily"):
+    async def show_top(self, interaction, mode=None):
         view = None
         try:
             guild = self.guild_for(interaction)
@@ -392,9 +376,9 @@ class RankCommands(commands.Cog):
                 settings.get("prime_controls"), settings,
             )["top"]
             mode = mode or top_config["defaultMode"]
-            embeds = await self.leaderboard_embeds(guild, mode, period, settings)
+            embeds = await self.leaderboard_embeds(guild, mode, "all_time", settings)
             view = LeaderboardView(
-                self, interaction.user.id, guild.id, mode, period
+                self, interaction.user.id, guild.id, mode
             )
             payload = {
                 "view": view,
@@ -438,26 +422,19 @@ class RankCommands(commands.Cog):
             app_commands.Choice(name="TEXT", value="text"),
             app_commands.Choice(name="VOICE", value="voice"),
         ],
-        period=[
-            app_commands.Choice(name="DAILY", value="daily"),
-            app_commands.Choice(name="WEEKLY", value="weekly"),
-            app_commands.Choice(name="MONTHLY", value="monthly"),
-            app_commands.Choice(name="ALL TIME", value="all_time"),
-        ],
     )
     async def top_slash(
         self,
         interaction: discord.Interaction,
         mode: str | None = None,
-        period: str = "daily",
     ):
-        await self.show_top(interaction, mode, period)
+        await self.show_top(interaction, mode)
 
     @commands.command(name="top", aliases=["توب", "متصدرين"], ignore_extra=True)
     @commands.guild_only()
     async def top_prefix(self, ctx: commands.Context):
         await self.show_top(
-            ShortcutInteraction(ctx.message, self.top_slash), None, "daily"
+            ShortcutInteraction(ctx.message, self.top_slash), None
         )
 
     async def cog_command_error(self, ctx, error):

@@ -167,7 +167,7 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.generated), 5)
         self.assertEqual(self.channel.send.await_count, 5)
 
-    async def test_top_prefix_aliases_use_the_same_daily_text_flow(self):
+    async def test_top_prefix_aliases_use_the_same_lifetime_flow(self):
         top = self.bot.get_command("top")
         for alias in ("top", "توب", "متصدرين"):
             self.assertIs(self.bot.get_command(alias), top)
@@ -178,10 +178,15 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.channel.send.await_count, 3)
         for call in self.channel.send.await_args_list:
             kwargs = call.kwargs
-            self.assertIn("DAILY", kwargs["embeds"][0].title)
+            self.assertIn("PRIME TOP", kwargs["embeds"][0].title)
             self.assertEqual(kwargs["view"].mode, "text")
-            self.assertEqual(kwargs["view"].period, "daily")
-
+            self.assertEqual(len(kwargs["view"].children), 2)
+    async def test_image_only_contract_never_allows_an_empty_response(self):
+        await database.update_level_settings(888, {"prime_controls": {"rank": {
+            "imageOnly": True, "showCard": False, "showCustomMessage": False, "sendEmbed": False,
+        }}})
+        await self.rank(self.interaction())
+        self.assertEqual(len(self.generated), 1)
     async def test_rank_cooldown_shared_between_slash_and_arabic_prefix(self):
         await self.rank(self.interaction())
         message = SimpleNamespace(author=self.members[1], guild=self.guild, channel=self.channel, _state=None)
@@ -248,7 +253,7 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("عضو 2", names)
         text = "\n".join(embed.description for embed in text_embeds)
         self.assertNotIn("100,000", text)
-        self.assertIn("DAILY", text_embeds[0].title)
+        self.assertIn("PRIME TOP", text_embeds[0].title)
         self.clock += 5
         voice_embeds = self.embeds(await self.top(self.interaction(), "voice"))
         self.assertEqual(len(voice_embeds), 10)
@@ -363,7 +368,8 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
         await database.award_voice_xp(888, 1, 1000, 0, 0, awarded_at=now)
         reply = await self.top(self.interaction())
         view = reply["view"]
-        self.assertEqual(view.period, "daily")
+        self.assertEqual(view.mode, "text")
+        self.assertEqual(len(view.children), 2)
         other = self.interaction(2)
         self.assertFalse(await view.interaction_check(other))
         click = self.interaction()
@@ -378,26 +384,8 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
         self.clock += 2
         await view.text_button.callback(self.interaction())
         self.assertEqual(view.text_button.style, discord.ButtonStyle.primary)
-        self.clock += 2
-        weekly_click = self.interaction()
-        await view.weekly_button.callback(weekly_click)
-        self.assertEqual(view.period, "weekly")
-        self.assertEqual(view.weekly_button.style, discord.ButtonStyle.primary)
-        self.assertIn("WEEKLY", weekly_click.message.edit.call_args.kwargs["embeds"][0].title)
-        self.clock += 2
-        monthly_click = self.interaction()
-        await view.monthly_button.callback(monthly_click)
-        self.assertEqual(view.period, "monthly")
-        self.assertEqual(view.monthly_button.style, discord.ButtonStyle.primary)
-        self.clock += 2
-        all_click = self.interaction()
-        await view.all_time_button.callback(all_click)
-        self.assertEqual(view.period, "all_time")
-        self.assertEqual(view.all_time_button.style, discord.ButtonStyle.primary)
-        self.assertIn("ALL", all_click.message.edit.call_args.kwargs["embeds"][0].title)
         await view.on_timeout()
         self.assertTrue(all(child.disabled for child in view.children))
-
     async def test_level_up_notice_attaches_stat_card_for_text_and_voice(self):
         await self.seed(
             1, text=155, voice=270, total_messages=41,

@@ -392,7 +392,6 @@ def _validate_draft(guild, draft, current_settings):
         "card_animated_bar": int(_bool(card.get("animated"), "animated")),
         "card_show_stats": int(_bool(card.get("showStats"), "showStats")),
     }
-    settings["command_rank_channels"] = settings["prime_controls"]["rank"]["channels"]
     minimum, maximum = settings["text_xp_min"], settings["text_xp_max"]
     if minimum > maximum:
         raise ValueError("minXp cannot exceed maxXp")

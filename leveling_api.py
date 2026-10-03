@@ -14,7 +14,7 @@ import database
 from cogs.card_generator import generate_rank_card
 from cogs.card_images import validate_url
 from level_progression import text_progress, xp_required
-from prime_level_controls import controls_with_defaults, validate_controls
+from prime_level_controls import TEMPLATE_VARIABLES, controls_with_defaults, validate_controls
 
 
 SNOWFLAKE_RE = re.compile(r"^\d{15,22}$")
@@ -22,9 +22,10 @@ PUBLIC_SLUG_RE = re.compile(r"^(?=.{3,40}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYOUTS = {"vertical", "stats", "minimal", "ring", "classic"}
 PARTICLES = {"none", "sparks", "shine", "embers", "snow", "petals", "neon"}
 TEMPLATE_FIELDS = {
-    "levelup": {"user", "level", "server"},
-    "milestone": {"user", "level"},
-    "overtake": {"passer", "passed", "rank"},
+    "levelup": set(TEMPLATE_VARIABLES),
+    "milestone": set(TEMPLATE_VARIABLES),
+    "overtake": set(TEMPLATE_VARIABLES),
+    "role_promotion": set(TEMPLATE_VARIABLES),
 }
 BOOL_FIELDS = {
     "enabled", "text", "reaction", "streak",
@@ -304,7 +305,6 @@ async def _dashboard_snapshot(guild_id):
             },
         },
     }
-    draft["prime"] = controls_with_defaults(settings.get("prime_controls"), settings)
     draft["prime"] = controls_with_defaults(settings.get("prime_controls"), settings)
     return {
         "revision": int(settings.get("revision", 0) or 0),

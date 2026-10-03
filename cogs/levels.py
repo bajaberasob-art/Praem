@@ -278,7 +278,16 @@ class Levels(EngagementXP, commands.Cog):
         """Common post-commit text rewards/events for every XP source."""
         progress = text_progress(award["text_xp"])
         if award["text_level"] > award["old_level"]:
-            await self.apply_text_rewards(member, award["text_level"], settings)
+            granted_roles = await self.apply_text_rewards(
+                member, award["text_level"], settings
+            )
+            for role in granted_roles:
+                promotion = RolePromotionEvent(
+                    member.guild, member, role, award["old_level"],
+                    award["text_level"], award["text_xp"],
+                )
+                self.bot.dispatch("lona_role_promotion", promotion)
+                self.bot.dispatch("prime_role_promotion", promotion)
             self.emit_level_up(TextLevelUp(
                 member.guild, member, award["old_level"], award["text_level"],
                 award["text_xp"], progress["xp_required"], progress["next_level_total_xp"],

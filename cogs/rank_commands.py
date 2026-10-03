@@ -44,11 +44,7 @@ class LeaderboardView(discord.ui.View):
 
     def set_selection(self):
         for child in self.children:
-            selected = child.label.casefold() == self.period
-            if child.label.casefold() == "all":
-                selected = self.period == "all_time"
-            if child.label.casefold() in {"text", "voice"}:
-                selected = child.label.casefold() == self.mode
+            selected = child.label.casefold() == self.mode
             child.style = (
                 discord.ButtonStyle.primary if selected
                 else discord.ButtonStyle.secondary
@@ -81,11 +77,10 @@ class LeaderboardView(discord.ui.View):
                         return
                 settings = await self.cog.settings_for(interaction, "top")
                 next_mode = mode or self.mode
-                next_period = period or self.period
                 embeds = await self.cog.leaderboard_embeds(
-                    guild, next_mode, next_period, settings
+                    guild, next_mode, "all_time", settings
                 )
-                self.mode, self.period = next_mode, next_period
+                self.mode, self.period = next_mode, "all_time"
                 self.set_selection()
                 top_config = controls_with_defaults(
                     settings.get("prime_controls"), settings,

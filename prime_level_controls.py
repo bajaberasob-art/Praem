@@ -29,6 +29,8 @@ DEFAULT_CONTROLS = {
         "mentionRole": "",
         "channel": "",
         "message": "مبروك {mention}! وصلت إلى المستوى {level} في {server}.",
+        "messages": [{"id": "default", "name": "الافتراضي", "template": "مبروك {mention}! وصلت إلى المستوى {level} في {server}."}],
+        "activeMessageId": "default",
         "embedTitle": "🎉 Level Up!",
         "embedColor": "#12D6FF",
         "embedFooter": "",
@@ -57,6 +59,8 @@ DEFAULT_CONTROLS = {
             "mentionRole": "",
             "embedTitle": "إنجاز جديد",
             "embedDescription": "{message}",
+            "messages": [{"id": "default", "name": "الافتراضي", "template": "{mention} حقق إنجازاً جديداً عند المستوى {level}."}],
+            "activeMessageId": "default",
             "embedColor": "#12D6FF",
             "embedFooter": "",
             "embedImage": "",
@@ -71,6 +75,8 @@ DEFAULT_CONTROLS = {
             "mentionRole": "",
             "embedTitle": "تجاوز في PRIME TOP",
             "embedDescription": "{message}",
+            "messages": [{"id": "default", "name": "الافتراضي", "template": "{mention} تجاوز {passed} وأصبح في المركز {rank}."}],
+            "activeMessageId": "default",
             "embedColor": "#12D6FF",
             "embedFooter": "",
             "embedImage": "",
@@ -85,6 +91,8 @@ DEFAULT_CONTROLS = {
             "mentionRole": "",
             "embedTitle": "🎖️ ترقية رتبة",
             "embedDescription": "{message}",
+            "messages": [{"id": "default", "name": "الافتراضي", "template": "مبروك {mention}! حصلت على رتبة {role}."}],
+            "activeMessageId": "default",
             "embedColor": "#6366F1",
             "embedFooter": "",
             "embedImage": "",
@@ -134,6 +142,19 @@ def controls_with_defaults(value=None, settings=None):
                 else:
                     result[section].update(source)
     settings = settings or {}
+    # Migrate legacy single-message controls into the new preset manager
+    # without changing the currently active message.
+    for name in ("levelup", "milestone", "overtake", "role_promotion"):
+        item = result["levelup"] if name == "levelup" else result["notifications"][name]
+        source = value.get("levelup" if name == "levelup" else "notifications", {}).get(name) if isinstance(value, dict) else None
+        if not isinstance(source, dict) or not isinstance(source.get("messages"), list):
+            current_message = str(item.get("message") or "")
+            item["messages"] = [{
+                "id": "default",
+                "name": "الافتراضي",
+                "template": current_message,
+            }]
+            item["activeMessageId"] = "default"
     if not isinstance(value, dict) or "channels" not in value.get("rank", {}):
         result["rank"]["channels"] = [
             str(item) for item in settings.get("command_rank_channels", [])
@@ -221,6 +242,35 @@ def validate_controls(
     channel = levelup.get("channel")
     levelup["channel"] = str(validate_channel(channel, messageable=True)) if channel else ""
     levelup["message"] = _text(levelup.get("message"), "levelup.message", 1000)
+    profiles = levelup.get("messages")
+    if not isinstance(profiles, list) or not profiles or len(profiles) > 20:
+        raise ValueError("levelup.messages must contain 1-20 presets")
+    seen_message_ids = set()
+    active_id = str(levelup.get("activeMessageId") or "")
+    active_profile = None
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            raise ValueError("invalid levelup message preset")
+        profile_id = str(profile.get("id") or "").strip()
+        profile_name = str(profile.get("name") or "").strip()
+        profile_template = _text(profile.get("template"), "levelup.preset.template", 500)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", profile_id) or profile_id in seen_message_ids:
+            raise ValueError("invalid or duplicate levelup message preset id")
+        if not profile_name or len(profile_name) > 80:
+            raise ValueError("levelup preset name must contain 1-80 characters")
+        for token in re.findall(r"\{[^{}]+\}", profile_template):
+            if token[1:-1] not in TEMPLATE_VARIABLES:
+                raise ValueError(f"unsupported variable {token} in levelup preset")
+        seen_message_ids.add(profile_id)
+        profile["id"] = profile_id
+        profile["name"] = profile_name
+        profile["template"] = profile_template
+        if profile_id == active_id:
+            active_profile = profile
+    if active_profile is None:
+        active_profile = profiles[0]
+        levelup["activeMessageId"] = active_profile["id"]
+    levelup["message"] = active_profile["template"]
     role = levelup.get("mentionRole")
     levelup["mentionRole"] = str(validate_role(role)) if role else ""
     levelup["embedTitle"] = _text(levelup.get("embedTitle"), "levelup.embedTitle", 256)
@@ -253,6 +303,37 @@ def validate_controls(
         item["embedImage"] = _text(item.get("embedImage", ""), f"notifications.{name}.embedImage", 400)
         if item["embedImage"] and not item["embedImage"].startswith("https://"):
             raise ValueError(f"notifications.{name}.embedImage must use HTTPS")
+        profiles = item.get("messages")
+        if not isinstance(profiles, list) or not profiles or len(profiles) > 20:
+            raise ValueError(f"notifications.{name}.messages must contain 1-20 presets")
+        seen_message_ids = set()
+        active_id = str(item.get("activeMessageId") or "")
+        active_profile = None
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                raise ValueError(f"invalid notifications.{name} message preset")
+            profile_id = str(profile.get("id") or "").strip()
+            profile_name = str(profile.get("name") or "").strip()
+            profile_template = profile.get("template")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", profile_id) or profile_id in seen_message_ids:
+                raise ValueError(f"invalid or duplicate notifications.{name} message preset id")
+            if not profile_name or len(profile_name) > 80:
+                raise ValueError(f"notifications.{name} preset name must contain 1-80 characters")
+            profile_template = _text(profile_template, f"notifications.{name}.preset.template", 500)
+            if profile_id not in seen_message_ids:
+                seen_message_ids.add(profile_id)
+            profile["id"] = profile_id
+            profile["name"] = profile_name
+            profile["template"] = profile_template
+            for token in re.findall(r"\{[^{}]+\}", profile_template):
+                if token[1:-1] not in TEMPLATE_VARIABLES:
+                    raise ValueError(f"unsupported variable {token} in notifications.{name} preset")
+            if profile_id == active_id:
+                active_profile = profile
+        if active_profile is None:
+            active_profile = profiles[0]
+            item["activeMessageId"] = active_profile["id"]
+        item["message"] = active_profile["template"]
         role = item.get("mentionRole")
         item["mentionRole"] = str(validate_role(role)) if role else ""
         item["embedTitle"] = _text(item.get("embedTitle"), f"{name}.embedTitle", 256)

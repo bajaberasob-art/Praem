@@ -361,9 +361,13 @@ class Levels(EngagementXP, commands.Cog):
                 color = int(str(config.get("embedColor") or "#12D6FF").lstrip("#"), 16)
             except (TypeError, ValueError):
                 color = 0x12D6FF
+            embed_description = render_template(
+                config.get("embedDescription") or "{message}",
+                {**values, "message": content},
+            ) or content
             embed = discord.Embed(
                 title=str(config.get("embedTitle") or "PRIME")[:256],
-                description=content[:4000],
+                description=embed_description[:4000],
                 color=discord.Color(color),
             )
             if config.get("embedImage"):

@@ -592,7 +592,6 @@
         type: "button",
         "data-nav-view": view,
         "aria-current": state.activeView === view ? "page" : "false",
-        onPointerDown: closeNavigationOverlays,
         onClick: () => navigateView(view),
       },
       el("span", { class: "nav-icon", text: meta.icon, "aria-hidden": "true" }),

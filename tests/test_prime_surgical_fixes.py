@@ -97,7 +97,7 @@ class PrimeSurgicalFixTests(unittest.IsolatedAsyncioTestCase):
 
         await database.create_default_level_settings(888)
         await database.add_level_reward(888, "text", 1, 10)
-        await database.update_user_level(888, 123, {"text_xp": 95})
+        await database.update_user_level(888, 123, {"text_xp": 100})
 
         await cog.on_message(message)
 

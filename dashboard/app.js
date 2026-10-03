@@ -6762,10 +6762,15 @@
     target.id = id;
     return el("div", { class: "leveling-field" }, el("label", { for: id, text: label }), control, hint ? el("small", { text: hint }) : null);
   }
-  function lvSwitch(path, label, hint) {
+  function lvSwitch(path, label, hint, onChange) {
     const id = lvId();
     const b = el("button", { class: "leveling-switch", id, type: "button", role: "switch", "aria-checked": String(Boolean(lvGet(path))), "aria-labelledby": `${id}-l` }, el("i"));
-    b.addEventListener("click", () => { const v = !lvGet(path); lvSet(path, v); b.setAttribute("aria-checked", String(v)); });
+    b.addEventListener("click", () => {
+      const v = !lvGet(path);
+      lvSet(path, v);
+      b.setAttribute("aria-checked", String(v));
+      onChange?.(v);
+    });
     return el("div", { class: "leveling-row" }, el("span", { class: "leveling-row-copy" }, el("b", { id: `${id}-l`, text: label }), hint ? el("small", { text: hint }) : null), b);
   }
   function lvNum(path, label, min, max, hint, slider) {
@@ -6782,10 +6787,13 @@
     n.addEventListener("input", () => lvSet(path, n.value));
     return lvField(label, n, hint);
   }
-  function lvArea(path, label, hint) {
+  function lvArea(path, label, hint, onChange) {
     const n = el("textarea", { rows: 3, maxlength: 500, dir: "auto" });
     n.value = lvGet(path);
-    n.addEventListener("input", () => lvSet(path, n.value));
+    n.addEventListener("input", () => {
+      lvSet(path, n.value);
+      onChange?.(n.value);
+    });
     return lvField(label, n, hint);
   }
   function lvSelect(path, label, opts, hint, onChange) {
@@ -7337,11 +7345,11 @@
       title,
       `يدعم: ${vars}`,
       el("div", { class: "leveling-message-toolbar" },
-        lvSwitch(["messages", key, "on"], "تفعيل الإشعار", "يتزامن مع إعداد PRIME الفعلي"),
+        lvSwitch(["messages", key, "on"], "تفعيل الإشعار", "يتزامن مع إعداد PRIME الفعلي", (value) => lvMessageSet(key, "on", value)),
       ),
       lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"),
         state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", () => lvMessageSet(key, "channel", lvGet(["messages", key, "channel"]))),
-      lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف"),
+      lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف", (value) => lvMessageSet(key, "tpl", value)),
       el("div", { class: "leveling-template-vars" }, ...LV_TEMPLATE_VARS.map((token) =>
         el("button", { type: "button", class: "leveling-chip", text: token, title: "نسخ المتغير" ,
           onClick: async () => {
@@ -7368,6 +7376,7 @@
         lvGrid(
           lvSelect([...key, "channel"], "قناة النشر", lvChanOpts("اختر قناة")),
           lvSelect([...key, "rewardRole"], "رتبة الفائزين", lvRoleOpts("بدون مكافأة")),
+          lvSelect([...key, "mode"], "مصدر XP للفترة", [["both", "النص + الصوت"], ["text", "النص فقط"], ["voice", "الصوت فقط"]]),
           lvText([...key, "time"], "وقت النشر", { type: "time" }),
           lvText([...key, "timezone"], "المنطقة الزمنية", { dir: "ltr", placeholder: "UTC" }),
           lvNum([...key, "winners"], "عدد الفائزين", 1, 20),
@@ -7505,10 +7514,10 @@
     if (d.public.slug && !PUBLIC_SLUG_RE.test(d.public.slug)) e.push("أدخل معرّف رابط من 3 إلى 40 حرفاً: أحرف إنجليزية صغيرة وأرقام وشرطة مفردة بين الكلمات.");
     if (d.public.enabled && !d.public.slug) e.push("أدخل معرّف الرابط قبل إتاحة اللوحة للعامة.");
     if (!lvBgOk(String(d.card.bg).trim())) e.push("رابط الخلفية يجب أن يبدأ بـ https://.");
-    const allowed = { levelup: ["user", "level", "server"], milestone: ["user", "level"], overtake: ["passer", "passed", "rank"] };
+    const allowed = new Set(LV_TEMPLATE_VARS.map((token) => token.slice(1, -1)));
     Object.entries(d.messages).forEach(([k, m]) => {
       if (!String(m.tpl).trim() || m.tpl.length > 500) e.push("قوالب الرسائل مطلوبة وبحد أقصى 500 حرف.");
-      (String(m.tpl).match(/\{[^{}]*\}/g) || []).forEach((t) => { if (!allowed[k].includes(t.slice(1, -1))) e.push(`متغير غير مدعوم ${t} في قالب ${k}.`); });
+      (String(m.tpl).match(/\{[^{}]*\}/g) || []).forEach((t) => { if (!allowed.has(t.slice(1, -1))) e.push(`متغير غير مدعوم ${t} في قالب ${k}.`); });
     });
     return [...new Set(e)];
   }

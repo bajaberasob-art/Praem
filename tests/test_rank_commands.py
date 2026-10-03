@@ -181,6 +181,12 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("PRIME TOP", kwargs["embeds"][0].title)
             self.assertEqual(kwargs["view"].mode, "text")
             self.assertEqual(len(kwargs["view"].children), 2)
+    async def test_image_only_contract_never_allows_an_empty_response(self):
+        await database.update_level_settings(888, {"prime_controls": {"rank": {
+            "imageOnly": True, "showCard": False, "showCustomMessage": False, "sendEmbed": False,
+        }}})
+        await self.rank(self.interaction())
+        self.assertEqual(len(self.generated), 1)
     async def test_rank_cooldown_shared_between_slash_and_arabic_prefix(self):
         await self.rank(self.interaction())
         message = SimpleNamespace(author=self.members[1], guild=self.guild, channel=self.channel, _state=None)

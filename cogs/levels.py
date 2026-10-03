@@ -1065,6 +1065,7 @@ class Levels(EngagementXP, commands.Cog):
                             "Cannot assign periodic TOP role guild=%s member=%s",
                             guild.id, member.id, exc_info=True,
                         )
+            delivered = False
             try:
                 allowed_mentions = discord.AllowedMentions(
                     users=winners if config["mentionWinners"] else [],
@@ -1075,15 +1076,17 @@ class Levels(EngagementXP, commands.Cog):
                     embed=embed,
                     allowed_mentions=allowed_mentions,
                 )
+                delivered = True
             except discord.HTTPException:
                 logger.warning(
-                    "Periodic TOP delivery failed guild=%s period=%s",
+                    "Periodic TOP delivery failed guild=%s period=%s; leaving run retryable",
                     guild.id, period, exc_info=True,
                 )
         finally:
-            await database.complete_level_periodic_top_run(
-                guild.id, period, period_key,
-            )
+            if delivered:
+                await database.complete_level_periodic_top_run(
+                    guild.id, period, period_key,
+                )
 
     @tasks.loop(seconds=60)
     async def periodic_top_worker(self):

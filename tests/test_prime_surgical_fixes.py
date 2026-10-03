@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import database
 from cogs.levels import Levels, RolePromotionEvent
@@ -97,9 +97,21 @@ class PrimeSurgicalFixTests(unittest.IsolatedAsyncioTestCase):
 
         await database.create_default_level_settings(888)
         await database.add_level_reward(888, "text", 1, 10)
-        await database.update_user_level(888, 123, {"text_xp": 100})
 
-        await cog.on_message(message)
+        award = {
+            "text_level": 1,
+            "old_level": 0,
+            "text_xp": 120,
+            "old_xp": 0,
+            "overtakes": [],
+        }
+        settings = {
+            "rewards_single_highest": True,
+            "milestone_alert_enabled": False,
+            "overtake_alert_enabled": False,
+        }
+        with patch.object(Levels, "_manageable", return_value=True):
+            await cog._handle_text_award(member, settings, award)
 
         promotions = [
             call.args[1]

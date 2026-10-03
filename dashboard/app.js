@@ -6920,7 +6920,13 @@
   }
   function lvPreviews() {
     const d = lvState().draft, me = state.session?.username || "عضو تجريبي";
-    const vars = { user: me, level: "12", server: state.guild?.name || "السيرفر", passer: me, passed: "ياسر", rank: "3" };
+    const vars = {
+      user: me, username: me, mention: `<@${state.session?.id || "123"}>`,
+      level: "12", old_level: "11", xp: "1,250", required_xp: "2,000",
+      progress: "62", rank: "3", total_members: "250", messages: "84",
+      voice_time: "3.5 س", streak: "7", server: state.guild?.name || "السيرفر",
+      period: "weekly", role: "Elite", passer: me, passed: "ياسر",
+    };
     document.querySelectorAll(".leveling-msg-preview").forEach((box) => {
       const m = d.messages[box.dataset.msgKey];
       if (!m) return;

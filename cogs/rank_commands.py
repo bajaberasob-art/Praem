@@ -39,7 +39,7 @@ class LeaderboardView(discord.ui.View):
         self.cog, self.owner_id, self.guild_id = cog, owner_id, guild_id
         self.message = None
         self.busy = False
-        self.mode, self.period = mode, "all_time"
+        self.mode = mode
         self.set_selection()
 
     def set_selection(self):
@@ -57,7 +57,7 @@ class LeaderboardView(discord.ui.View):
             return False
         return True
 
-    async def switch(self, interaction, *, mode=None, period=None):
+    async def switch(self, interaction, *, mode=None):
         try:
             guild = self.cog.guild_for(interaction)
             if guild.id != self.guild_id:
@@ -80,7 +80,7 @@ class LeaderboardView(discord.ui.View):
                 embeds = await self.cog.leaderboard_embeds(
                     guild, next_mode, "all_time", settings
                 )
-                self.mode, self.period = next_mode, "all_time"
+                self.mode = next_mode
                 self.set_selection()
                 top_config = controls_with_defaults(
                     settings.get("prime_controls"), settings,

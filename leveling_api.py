@@ -306,6 +306,20 @@ async def _dashboard_snapshot(guild_id):
         },
     }
     draft["prime"] = controls_with_defaults(settings.get("prime_controls"), settings)
+    prime = draft["prime"]
+    levelup = prime["levelup"]
+    draft["messages"]["levelup"] = {
+        "on": bool(levelup.get("sendNotification", True)),
+        "channel": str(levelup.get("channel") or ""),
+        "tpl": str(levelup.get("message") or ""),
+    }
+    for key in ("milestone", "overtake", "role_promotion"):
+        item = prime["notifications"].get(key, {})
+        draft["messages"][key] = {
+            "on": bool(item.get("enabled", False)),
+            "channel": str(item.get("channel") or ""),
+            "tpl": str(item.get("message") or ""),
+        }
     return {
         "revision": int(settings.get("revision", 0) or 0),
         "draft": draft,

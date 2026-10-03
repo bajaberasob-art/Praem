@@ -293,7 +293,7 @@ class RankCommands(commands.Cog):
             limit=int(top_config["count"]),
         )
         palette = (0x12D6FF, 0x4263EB, 0x6366F1, 0x8B5CF6)
-        period_label = "ALL" if period == "all_time" else period.upper()
+        period_label = ""
         embeds = []
         eligible_rows = []
         for row in rows:
@@ -321,7 +321,7 @@ class RankCommands(commands.Cog):
             avatar_url = getattr(avatar, "url", None)
             embed = discord.Embed(
                 title=(
-                    f"{top_config['embedTitle']} · {period_label}"
+                    top_config["embedTitle"]
                     if position == 1 else None
                 ),
                 description=(
@@ -344,11 +344,11 @@ class RankCommands(commands.Cog):
                     value=top_config["embedMessage"][:1024],
                     inline=False,
                 )
-                embed.set_footer(text="حدود الفترات بتوقيت UTC • البوتات والأعضاء المغادرون مستبعدون")
+                embed.set_footer(text="ترتيب PRIME الدائم • البوتات والأعضاء المغادرون مستبعدون")
             embeds.append(embed)
         if not embeds:
             embeds.append(discord.Embed(
-                title=f"🏆 PRIME TOP · {period_label}",
+                title="🏆 PRIME TOP",
                 description="لا يوجد أعضاء لديهم XP في هذه القائمة بعد.",
                 color=0x12D6FF,
             ))

@@ -4,6 +4,13 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
+TEMPLATE_VARIABLES = frozenset({
+    "user", "username", "mention", "level", "old_level", "xp",
+    "required_xp", "progress", "rank", "total_members", "messages",
+    "voice_time", "streak", "server", "period", "message",
+    "passer", "passed",
+})
+
 DEFAULT_CONTROLS = {
     "rank": {
         "enabled": True,
@@ -20,6 +27,8 @@ DEFAULT_CONTROLS = {
         "showRankCard": True,
         "mentionUser": True,
         "mentionRole": "",
+        "channel": "",
+        "message": "مبروك {mention}! وصلت إلى المستوى {level} في {server}.",
         "embedTitle": "🎉 Level Up!",
         "embedColor": "#12D6FF",
         "embedFooter": "",
@@ -40,35 +49,59 @@ DEFAULT_CONTROLS = {
     },
     "notifications": {
         "milestone": {
+            "enabled": True,
+            "channel": "",
+            "message": "{mention} حقق إنجازاً جديداً عند المستوى {level}.",
             "sendAsEmbed": False,
             "mentionUser": True,
             "mentionRole": "",
             "embedTitle": "إنجاز جديد",
+            "embedDescription": "{message}",
             "embedColor": "#12D6FF",
             "embedFooter": "",
+            "embedImage": "",
             "timestamp": False,
         },
         "overtake": {
+            "enabled": False,
+            "channel": "",
+            "message": "{mention} تجاوز {passed} وأصبح في المركز {rank}.",
             "sendAsEmbed": False,
             "mentionUser": True,
             "mentionRole": "",
             "embedTitle": "تجاوز في PRIME TOP",
+            "embedDescription": "{message}",
             "embedColor": "#12D6FF",
             "embedFooter": "",
+            "embedImage": "",
+            "timestamp": False,
+        },
+        "role_promotion": {
+            "enabled": False,
+            "channel": "",
+            "message": "مبروك {mention}! حصلت على رتبة {role}.",
+            "sendAsEmbed": True,
+            "mentionUser": True,
+            "mentionRole": "",
+            "embedTitle": "🎖️ ترقية رتبة",
+            "embedDescription": "{message}",
+            "embedColor": "#6366F1",
+            "embedFooter": "",
+            "embedImage": "",
             "timestamp": False,
         },
     },
     "periodic": {
         "daily": {
             "enabled": False, "channel": "", "time": "09:00", "timezone": "UTC",
-            "rewardRole": "", "winners": 1, "message": "🏆 الفائز بـ TOP اليوم: {mention} · {xp} XP",
+            "rewardRole": "", "winners": 1, "mode": "both", "message": "🏆 الفائز بـ TOP اليوم: {mention} · {xp} XP",
             "embed": True, "embedTitle": "🏆 PRIME Daily TOP",
             "embedDescription": "{message}", "embedColor": "#12D6FF",
             "mentionWinners": True, "showXp": True, "showRank": True,
         },
         "weekly": {
             "enabled": False, "channel": "", "time": "18:00", "timezone": "UTC",
-            "weekday": 4, "rewardRole": "", "winners": 1,
+            "weekday": 4, "rewardRole": "", "winners": 1, "mode": "both",
             "message": "🏆 الفائز بـ TOP الأسبوعي: {mention} · {xp} XP",
             "embed": True, "embedTitle": "🏆 PRIME Weekly TOP",
             "embedDescription": "{message}", "embedColor": "#4263EB",
@@ -76,7 +109,7 @@ DEFAULT_CONTROLS = {
         },
         "monthly": {
             "enabled": False, "channel": "", "time": "20:00", "timezone": "UTC",
-            "dayOfMonth": 1, "rewardRole": "", "winners": 1,
+            "dayOfMonth": 1, "rewardRole": "", "winners": 1, "mode": "both",
             "message": "🏆 الفائز بـ TOP الشهري: {mention} · {xp} XP",
             "embed": True, "embedTitle": "🏆 PRIME Monthly TOP",
             "embedDescription": "{message}", "embedColor": "#8B5CF6",
@@ -107,6 +140,26 @@ def controls_with_defaults(value=None, settings=None):
         ]
     if not isinstance(value, dict) or "embedTitle" not in value.get("levelup", {}):
         result["levelup"]["embedTitle"] = settings.get("levelup_title") or "🎉 Level Up!"
+    if not isinstance(value, dict) or "channel" not in value.get("levelup", {}):
+        legacy_channel = settings.get("levelup_channel_id")
+        if legacy_channel:
+            result["levelup"]["channel"] = str(legacy_channel)
+    if not isinstance(value, dict) or "message" not in value.get("levelup", {}):
+        result["levelup"]["message"] = settings.get("levelup_template") or result["levelup"]["message"]
+    for name, enabled_field, channel_field, template_field in (
+        ("milestone", "milestone_alert_enabled", "milestone_channel_id", "milestone_template"),
+        ("overtake", "overtake_alert_enabled", "overtake_channel_id", "overtake_template"),
+    ):
+        item = result["notifications"][name]
+        source = value.get("notifications", {}).get(name) if isinstance(value, dict) else None
+        if not isinstance(source, dict) or "enabled" not in source:
+            item["enabled"] = bool(settings.get(enabled_field, item["enabled"]))
+        if not isinstance(source, dict) or "channel" not in source:
+            legacy_channel = settings.get(channel_field)
+            if legacy_channel:
+                item["channel"] = str(legacy_channel)
+        if not isinstance(source, dict) or "message" not in source:
+            item["message"] = settings.get(template_field) or item["message"]
     return result
 
 
@@ -165,6 +218,9 @@ def validate_controls(
     levelup = result["levelup"]
     for key in ("sendNotification", "sendAsEmbed", "showRankCard", "mentionUser", "timestamp"):
         levelup[key] = _bool(levelup.get(key), f"levelup.{key}")
+    channel = levelup.get("channel")
+    levelup["channel"] = str(validate_channel(channel, messageable=True)) if channel else ""
+    levelup["message"] = _text(levelup.get("message"), "levelup.message", 1000)
     role = levelup.get("mentionRole")
     levelup["mentionRole"] = str(validate_role(role)) if role else ""
     levelup["embedTitle"] = _text(levelup.get("embedTitle"), "levelup.embedTitle", 256)
@@ -186,10 +242,17 @@ def validate_controls(
     top["embedMessage"] = _text(top.get("embedMessage"), "top.embedMessage", 1000)
     top["embedColor"] = _color(top.get("embedColor"), "top.embedColor")
 
-    for name in ("milestone", "overtake"):
+    for name in ("milestone", "overtake", "role_promotion"):
         item = result["notifications"][name]
-        for key in ("sendAsEmbed", "mentionUser", "timestamp"):
+        for key in ("enabled", "sendAsEmbed", "mentionUser", "timestamp"):
             item[key] = _bool(item.get(key), f"notifications.{name}.{key}")
+        channel = item.get("channel")
+        item["channel"] = str(validate_channel(channel, messageable=True)) if channel else ""
+        item["message"] = _text(item.get("message"), f"notifications.{name}.message", 1000)
+        item["embedDescription"] = _text(item.get("embedDescription"), f"notifications.{name}.embedDescription", 4000)
+        item["embedImage"] = _text(item.get("embedImage", ""), f"notifications.{name}.embedImage", 400)
+        if item["embedImage"] and not item["embedImage"].startswith("https://"):
+            raise ValueError(f"notifications.{name}.embedImage must use HTTPS")
         role = item.get("mentionRole")
         item["mentionRole"] = str(validate_role(role)) if role else ""
         item["embedTitle"] = _text(item.get("embedTitle"), f"{name}.embedTitle", 256)
@@ -199,6 +262,9 @@ def validate_controls(
     for period in ("daily", "weekly", "monthly"):
         item = result["periodic"][period]
         item["enabled"] = _bool(item.get("enabled"), f"{period}.enabled")
+        item["mode"] = item.get("mode", "both")
+        if item["mode"] not in {"text", "voice", "both"}:
+            raise ValueError(f"{period}.mode must be text, voice, or both")
         for key in ("embed", "mentionWinners", "showXp", "showRank"):
             item[key] = _bool(item.get(key), f"{period}.{key}")
         channel = item.get("channel")

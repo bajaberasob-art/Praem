@@ -167,7 +167,7 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.generated), 5)
         self.assertEqual(self.channel.send.await_count, 5)
 
-    async def test_top_prefix_aliases_use_the_same_daily_text_flow(self):
+    async def test_top_prefix_aliases_use_the_same_lifetime_flow(self):
         top = self.bot.get_command("top")
         for alias in ("top", "توب", "متصدرين"):
             self.assertIs(self.bot.get_command(alias), top)
@@ -178,10 +178,9 @@ class RankCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.channel.send.await_count, 3)
         for call in self.channel.send.await_args_list:
             kwargs = call.kwargs
-            self.assertIn("DAILY", kwargs["embeds"][0].title)
+            self.assertIn("PRIME TOP", kwargs["embeds"][0].title)
             self.assertEqual(kwargs["view"].mode, "text")
-            self.assertEqual(kwargs["view"].period, "daily")
-
+            self.assertEqual(len(kwargs["view"].children), 2)
     async def test_rank_cooldown_shared_between_slash_and_arabic_prefix(self):
         await self.rank(self.interaction())
         message = SimpleNamespace(author=self.members[1], guild=self.guild, channel=self.channel, _state=None)

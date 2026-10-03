@@ -108,6 +108,16 @@ class OvertakeEvent:
     previous_rank: int
 
 
+@dataclass(frozen=True)
+class RolePromotionEvent:
+    guild: Any
+    member: Any
+    role: Any
+    old_level: int
+    new_level: int
+    xp: int
+
+
 def bounded_multiplier(value: Any) -> float:
     try:
         value = float(value)

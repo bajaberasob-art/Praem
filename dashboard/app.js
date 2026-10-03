@@ -7327,24 +7327,123 @@
     "{required_xp}", "{progress}", "{rank}", "{total_members}", "{messages}",
     "{voice_time}", "{streak}", "{server}", "{period}", "{role}", "{passer}", "{passed}",
   ];
+  const LV_DEFAULT_MESSAGE_TEXTS = {
+    levelup: "مبروك {mention}! وصلت إلى المستوى {level} في {server}.",
+    milestone: "{mention} حقق إنجازاً جديداً عند المستوى {level}.",
+    overtake: "{mention} تجاوز {passed} وأصبح في المركز {rank}.",
+    role_promotion: "مبروك {mention}! حصلت على رتبة {role}.",
+  };
+  const lvPrimeMessageConfig = (key) => {
+    const s = lvState();
+    s.draft.prime ||= {};
+    const cfg = key === "levelup"
+      ? (s.draft.prime.levelup ||= {})
+      : ((s.draft.prime.notifications ||= {})[key] ||= {});
+    const fallback = LV_DEFAULT_MESSAGE_TEXTS[key] || "{message}";
+    cfg.message = typeof cfg.message === "string" ? cfg.message : fallback;
+    cfg.messages = Array.isArray(cfg.messages) && cfg.messages.length
+      ? cfg.messages : [{ id: "default", name: "الافتراضي", template: cfg.message }];
+    cfg.activeMessageId = cfg.activeMessageId || cfg.messages[0]?.id || "default";
+    return cfg;
+  };
+  const lvSyncActiveMessage = (key) => {
+    const cfg = lvPrimeMessageConfig(key);
+    let active = cfg.messages.find((item) => String(item.id) === String(cfg.activeMessageId));
+    if (!active) {
+      active = cfg.messages[0];
+      cfg.activeMessageId = active.id;
+    }
+    cfg.message = String(active.template || "");
+    const s = lvState();
+    if (!s.draft.messages[key]) s.draft.messages[key] = { on: false, channel: "", tpl: "" };
+    s.draft.messages[key].tpl = cfg.message;
+  };
   const lvMessageSet = (key, field, value) => {
     const s = lvState();
     if (!s.draft.messages[key]) s.draft.messages[key] = { on: false, channel: "", tpl: "" };
     s.draft.messages[key][field] = value;
-    const p = s.draft.prime || (s.draft.prime = {});
-    if (key === "levelup") {
-      p.levelup = p.levelup || {};
-      if (field === "on") p.levelup.sendNotification = Boolean(value);
-      if (field === "channel") p.levelup.channel = String(value || "");
-      if (field === "tpl") p.levelup.message = String(value || "");
-    } else {
-      p.notifications = p.notifications || {};
-      p.notifications[key] = p.notifications[key] || {};
-      if (field === "on") p.notifications[key].enabled = Boolean(value);
-      if (field === "channel") p.notifications[key].channel = String(value || "");
-      if (field === "tpl") p.notifications[key].message = String(value || "");
+    const cfg = lvPrimeMessageConfig(key);
+    if (field === "on") {
+      if (key === "levelup") cfg.sendNotification = Boolean(value);
+      else cfg.enabled = Boolean(value);
+    }
+    if (field === "channel") cfg.channel = String(value || "");
+    if (field === "tpl") {
+      cfg.message = String(value || "");
+      const active = cfg.messages.find((item) => String(item.id) === String(cfg.activeMessageId));
+      if (active) active.template = cfg.message;
     }
     lvTouch();
+  };
+  const lvMessageManager = (key) => {
+    const cfg = lvPrimeMessageConfig(key);
+    const currentId = String(cfg.activeMessageId || cfg.messages[0]?.id || "default");
+    const select = el("select", {});
+    cfg.messages.forEach((item) => {
+      select.append(el("option", { value: String(item.id), text: String(item.name || item.id) }));
+    });
+    select.value = currentId;
+    select.addEventListener("change", () => {
+      cfg.activeMessageId = select.value;
+      lvSyncActiveMessage(key);
+      lvTouch();
+    });
+    const button = (label, handler, title) => el("button", {
+      type: "button", class: "btn leveling-msg-manager-btn", text: label, title,
+      onClick: handler,
+    });
+    return el("div", { class: "leveling-message-manager" },
+      el("div", { class: "leveling-manager-row" },
+        el("strong", { text: "مدير الرسائل" }),
+        select,
+        button("＋ إضافة", () => {
+          const name = window.prompt("اسم الرسالة الجديدة:");
+          if (!name?.trim()) return;
+          const template = window.prompt("نص الرسالة:", cfg.message || LV_DEFAULT_MESSAGE_TEXTS[key]);
+          if (template === null || !template.trim()) return;
+          if (cfg.messages.length >= 20) {
+            toast("الحد الأقصى 20 رسالة محفوظة.", "warn");
+            return;
+          }
+          const id = `m-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          cfg.messages.push({ id, name: name.trim().slice(0, 80), template: template.trim().slice(0, 500) });
+          cfg.activeMessageId = id;
+          lvSyncActiveMessage(key);
+          lvTouch();
+        }, "إضافة رسالة محفوظة"),
+        button("✎ تعديل الاسم", () => {
+          const active = cfg.messages.find((item) => String(item.id) === String(select.value));
+          if (!active) return;
+          const name = window.prompt("الاسم الجديد:", active.name || "");
+          if (!name?.trim()) return;
+          active.name = name.trim().slice(0, 80);
+          lvTouch();
+        }, "تعديل اسم الرسالة الحالية"),
+        button("🗑 حذف", () => {
+          if (select.value === "default") {
+            toast("لا يمكن حذف الرسالة الافتراضية.", "warn");
+            return;
+          }
+          if (!window.confirm("حذف الرسالة المحفوظة؟")) return;
+          cfg.messages = cfg.messages.filter((item) => String(item.id) !== String(select.value));
+          cfg.activeMessageId = cfg.messages[0]?.id || "default";
+          lvSyncActiveMessage(key);
+          lvTouch();
+        }, "حذف الرسالة الحالية"),
+        button("↩ الافتراضي", () => {
+          const defaultText = LV_DEFAULT_MESSAGE_TEXTS[key];
+          let active = cfg.messages.find((item) => String(item.id) === "default");
+          if (!active) {
+            active = { id: "default", name: "الافتراضي", template: defaultText };
+            cfg.messages.unshift(active);
+          }
+          active.template = defaultText;
+          cfg.activeMessageId = "default";
+          lvSyncActiveMessage(key);
+          lvTouch();
+        }, "استعادة الرسالة الافتراضية"),
+      ),
+    );
   };
   function lvTabMessages() {
     const mk = (key, title, vars) => lvCard(
@@ -7353,6 +7452,7 @@
       el("div", { class: "leveling-message-toolbar" },
         lvSwitch(["messages", key, "on"], "تفعيل الإشعار", "يتزامن مع إعداد PRIME الفعلي", (value) => lvMessageSet(key, "on", value)),
       ),
+      lvMessageManager(key),
       lvSelect(["messages", key, "channel"], "القناة", lvChanOpts("القناة الحالية / غير محددة"),
         state.meta?.channels?.length ? "" : "غير متاح: قائمة القنوات لم تصل.", () => lvMessageSet(key, "channel", lvGet(["messages", key, "channel"]))),
       lvArea(["messages", key, "tpl"], "القالب", "الحد الأقصى 500 حرف", (value) => lvMessageSet(key, "tpl", value)),

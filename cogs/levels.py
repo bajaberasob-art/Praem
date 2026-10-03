@@ -531,7 +531,10 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_text_level_up(self, event: TextLevelUp):
         settings = await database.get_level_settings(event.guild.id)
-        if not settings or not settings.get("is_enabled") or not settings.get("levelup_enabled", True):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        if not controls["levelup"].get("sendNotification", True):
             return
         try:
             await self._send_level_up_card(
@@ -548,10 +551,10 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_voice_level_up(self, event: VoiceLevelUp):
         settings = await database.get_level_settings(event.guild.id)
-        if (
-            not settings or not settings.get("is_enabled")
-            or not settings.get("levelup_voice_enabled", True)
-        ):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        if not controls["levelup"].get("sendNotification", True):
             return
         try:
             await self._send_level_up_card(
@@ -568,7 +571,11 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_text_milestone(self, event: TextMilestone):
         settings = await database.get_level_settings(event.guild.id)
-        if not settings or not settings.get("is_enabled") or not settings.get("milestone_alert_enabled"):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        config = controls["notifications"].get("milestone", {})
+        if not config.get("enabled"):
             return
         await self._send_leveling_notice(
             event.guild, settings.get("milestone_channel_id"), settings.get("milestone_template"),
@@ -581,7 +588,11 @@ class Levels(EngagementXP, commands.Cog):
     @commands.Cog.listener()
     async def on_lona_text_overtake(self, event: OvertakeEvent):
         settings = await database.get_level_settings(event.guild.id)
-        if not settings or not settings.get("is_enabled") or not settings.get("overtake_alert_enabled"):
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        config = controls["notifications"].get("overtake", {})
+        if not config.get("enabled"):
             return
         await self._send_leveling_notice(
             event.guild, settings.get("overtake_channel_id"), settings.get("overtake_template"),

@@ -3220,7 +3220,7 @@ async def get_level_periodic_top_leaderboard(
         "text": ("text_xp", "text_level"),
         "voice": ("voice_xp", "voice_level"),
     }
-    if mode not in (*columns, "both"):
+    if mode not in {"text", "voice", "both"}:
         raise ValueError("leaderboard mode must be text, voice, or both")
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
         raise ValueError("leaderboard limit must be from 1 to 20")

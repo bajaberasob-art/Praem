@@ -516,9 +516,19 @@ def _validate_draft(guild, draft, current_settings):
             _owned_channel(guild, channel, messageable=True) if channel else None
         )
         template = _format_template(item.get("tpl"), key)
-        settings[enabled_field] = int(enabled)
-        settings[channel_field] = channel_id
-        settings[template_field] = template
+        if enabled_field:
+            settings[enabled_field] = int(enabled)
+            settings[channel_field] = channel_id
+            settings[template_field] = template
+        if key == "levelup":
+            prime_draft["levelup"]["sendNotification"] = enabled
+            prime_draft["levelup"]["channel"] = str(channel_id or "")
+            prime_draft["levelup"]["message"] = template
+        else:
+            prime_item = prime_draft["notifications"][key]
+            prime_item["enabled"] = enabled
+            prime_item["channel"] = str(channel_id or "")
+            prime_item["message"] = template
     return settings, clean_rewards, multipliers, blacklist
 
 

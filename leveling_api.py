@@ -499,10 +499,12 @@ def _validate_draft(guild, draft, current_settings):
     settings["timed_xp_boosts"] = _parse_boosts(
         current_settings, points.get("boosts"), now
     )
+    prime_draft = controls_with_defaults(draft.get("prime"), current_settings)
     message_fields = (
         ("levelup", "levelup_enabled", "levelup_channel_id", "levelup_template"),
         ("milestone", "milestone_alert_enabled", "milestone_channel_id", "milestone_template"),
         ("overtake", "overtake_alert_enabled", "overtake_channel_id", "overtake_template"),
+        ("role_promotion", None, None, None),
     )
     for key, enabled_field, channel_field, template_field in message_fields:
         item = messages.get(key)

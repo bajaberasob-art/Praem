@@ -377,12 +377,13 @@ class Levels(EngagementXP, commands.Cog):
             logger.warning("Cannot send leveling announcement guild=%s channel=%s",
                            guild.id, channel_id, exc_info=True)
 
-    async def _send_level_up_card(self, guild, member, settings, mode, template):
+    async def _send_level_up_card(self, guild, member, settings, mode, template, event=None):
         controls = controls_with_defaults(settings.get("prime_controls"), settings)
         config = controls["levelup"]
         if not config["sendNotification"]:
             return
-        channel_id = (
+        configured_channel = str(config.get("channel") or "")
+        channel_id = configured_channel or (
             settings.get("levelup_channel_id")
             if mode == "text"
             else settings.get("levelup_voice_channel_id")
@@ -416,9 +417,23 @@ class Levels(EngagementXP, commands.Cog):
         snapshot = await database.get_command_rank_snapshot(
             guild.id, member.id, list(humans), mode=mode,
         )
-        current_xp = max(0, int(snapshot.get("xp") or 0))
+        event_old_level = int(getattr(event, "old_level", 0)) if event is not None else None
+        event_new_level = int(getattr(event, "new_level", 0)) if event is not None else None
+        event_xp = int(getattr(event, "current_xp", 0)) if event is not None else None
+        current_xp = max(
+            0,
+            event_xp if event_xp is not None and event_xp > 0
+            else int(snapshot.get("xp") or 0),
+        )
         current = text_progress(current_xp)
-        level = int(current["level"])
+        level = max(
+            0,
+            event_new_level if event_new_level is not None else int(current["level"]),
+        )
+        old_level = max(
+            0,
+            event_old_level if event_old_level is not None else level - 1,
+        )
         rank = snapshot.get("rank")
         total_members = int(snapshot.get("total_members") or len(humans))
         card_settings = dict(settings)
@@ -440,7 +455,7 @@ class Levels(EngagementXP, commands.Cog):
             "mention": getattr(member, "mention", ""),
             "username": getattr(member, "display_name", getattr(member, "name", "")),
             "level": level,
-            "old_level": max(0, level - 1),
+            "old_level": old_level,
             "xp": current_xp,
             "required_xp": xp_required(level),
             "progress": text_progress(current_xp)["percentage"],
@@ -455,7 +470,8 @@ class Levels(EngagementXP, commands.Cog):
         if not config["mentionUser"]:
             values["user"] = values["username"]
             values["mention"] = values["username"]
-        description = render_template(template, values) or (
+        notification_template = config.get("message") or template
+        description = render_template(notification_template, values) or (
             f"Congratulations {values['user']} — level {level}."
         )
         title = str(config.get("embedTitle") or settings.get("levelup_title") or "🎉 Level Up!")[:256]
@@ -512,6 +528,7 @@ class Levels(EngagementXP, commands.Cog):
             await self._send_level_up_card(
                 event.guild, event.member, settings, "text",
                 settings.get("levelup_template"),
+                event=event,
             )
         except Exception:
             logger.exception(
@@ -531,6 +548,7 @@ class Levels(EngagementXP, commands.Cog):
             await self._send_level_up_card(
                 event.guild, event.member, settings, "voice",
                 settings.get("levelup_voice_template"),
+                event=event,
             )
         except Exception:
             logger.exception(

@@ -390,17 +390,6 @@ def _validate_draft(guild, draft, current_settings):
         "card_animated_bar": int(_bool(card.get("animated"), "animated")),
         "card_show_stats": int(_bool(card.get("showStats"), "showStats")),
     }
-    settings["prime_controls"] = validate_controls(
-        draft.get("prime"),
-        current_settings,
-        validate_channel=lambda raw, messageable=False: _owned_channel(
-            guild, raw, messageable=messageable,
-        ),
-        validate_role=lambda raw: _owned_role(guild, raw),
-        validate_assignable_role=lambda raw: _owned_role(
-            guild, raw, assignable=True,
-        ),
-    )
     settings["command_rank_channels"] = settings["prime_controls"]["rank"]["channels"]
     minimum, maximum = settings["text_xp_min"], settings["text_xp_max"]
     if minimum > maximum:

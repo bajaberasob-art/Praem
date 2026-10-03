@@ -595,6 +595,7 @@ class Levels(EngagementXP, commands.Cog):
         selected = rewards[-1:] if single else rewards
         held = {role.id for role in member.roles}
         highest_granted = False
+        granted_roles = []
         for reward in selected:
             role = member.guild.get_role(reward["role_id"])
             if role is None:
@@ -607,8 +608,9 @@ class Levels(EngagementXP, commands.Cog):
                 logger.warning("Cannot manage %s reward role %s in guild %s", reward_type, role.id, member.guild.id)
                 continue
             try:
-                await member.add_roles(role, reason=f"Lona {reward_type} level reward")
+                await member.add_roles(role, reason=f"PRIME {reward_type} level reward")
                 held.add(role.id)
+                granted_roles.append(role)
                 highest_granted = True
             except discord.HTTPException:
                 logger.warning("Cannot grant %s reward role %s", reward_type, role.id, exc_info=True)
@@ -629,9 +631,10 @@ class Levels(EngagementXP, commands.Cog):
                 role = member.guild.get_role(role_id)
                 if role and role_id in held and self._manageable(member.guild, role):
                     try:
-                        await member.remove_roles(role, reason=f"Lona highest {reward_type} reward")
+                        await member.remove_roles(role, reason=f"PRIME highest {reward_type} reward")
                     except discord.HTTPException:
                         logger.warning("Cannot remove %s reward role %s", reward_type, role_id, exc_info=True)
+        return granted_roles
 
     async def cog_load(self):
         if not self.voice_xp_worker.is_running():

@@ -325,6 +325,15 @@ class Levels(EngagementXP, commands.Cog):
         self.bot.dispatch("lona_text_milestone", event)
 
     async def _send_leveling_notice(self, guild, channel_id, template, values, settings=None, kind=None, users=None):
+        prime_config = {}
+        if settings is not None and kind:
+            prime_config = controls_with_defaults(
+                settings.get("prime_controls"), settings
+            )["notifications"].get(kind, {}) or {}
+            if "enabled" in prime_config and not prime_config["enabled"]:
+                return
+            channel_id = prime_config.get("channel") or channel_id
+            template = prime_config.get("message") or template
         if not channel_id:
             return
         channel = guild.get_channel(int(channel_id))
@@ -337,9 +346,7 @@ class Levels(EngagementXP, commands.Cog):
         content = render_template(template, values)
         if not content:
             return
-        config = controls_with_defaults(
-            (settings or {}).get("prime_controls"), settings or {},
-        )["notifications"].get(kind, {}) if kind in {"milestone", "overtake"} else {}
+        config = prime_config
         role = None
         try:
             if config.get("mentionRole"):
@@ -359,6 +366,8 @@ class Levels(EngagementXP, commands.Cog):
                 description=content[:4000],
                 color=discord.Color(color),
             )
+            if config.get("embedImage"):
+                embed.set_image(url=str(config["embedImage"]))
             if config.get("embedFooter"):
                 embed.set_footer(text=str(config["embedFooter"])[:2048])
             if config.get("timestamp"):
@@ -581,6 +590,45 @@ class Levels(EngagementXP, commands.Cog):
              "username": event.passer.display_name, "rank": event.new_rank,
              "server": event.guild.name},
             settings, "overtake", [event.passer, event.passed],
+        )
+
+    @commands.Cog.listener()
+    async def on_prime_role_promotion(self, event: RolePromotionEvent):
+        settings = await database.get_level_settings(event.guild.id) or {}
+        if not settings or not settings.get("is_enabled", True):
+            return
+        controls = controls_with_defaults(settings.get("prime_controls"), settings)
+        config = controls["notifications"].get("role_promotion", {})
+        if not config.get("enabled"):
+            return
+        role = event.role
+        progress = text_progress(event.xp)
+        values = {
+            "user": getattr(event.member, "mention", f"<@{event.member.id}>"),
+            "mention": getattr(event.member, "mention", f"<@{event.member.id}>"),
+            "username": getattr(event.member, "display_name", getattr(event.member, "name", "")),
+            "level": event.new_level,
+            "old_level": event.old_level,
+            "xp": event.xp,
+            "required_xp": xp_required(event.new_level),
+            "progress": progress["percentage"],
+            "rank": "",
+            "total_members": "",
+            "messages": "",
+            "voice_time": "",
+            "streak": "",
+            "server": getattr(event.guild, "name", "PRIME"),
+            "period": "",
+            "role": getattr(role, "name", "الرتبة"),
+        }
+        await self._send_leveling_notice(
+            event.guild,
+            config.get("channel"),
+            config.get("message"),
+            values,
+            settings,
+            "role_promotion",
+            [event.member],
         )
 
     async def apply_text_rewards(self, member: discord.Member, level: int, settings: dict):

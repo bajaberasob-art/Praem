@@ -304,7 +304,10 @@ class LevelsEngineTests(unittest.IsolatedAsyncioTestCase):
         await self.settings(xp_multiplier=100)
         await self.send()
         self.assertEqual([call.args[0].id for call in self.member.remove_roles.await_args_list], [10])
-        self.bot.dispatch.assert_called_once()
+        event_names = [call.args[0] for call in self.bot.dispatch.call_args_list]
+        self.assertIn("lona_role_promotion", event_names)
+        self.assertIn("prime_role_promotion", event_names)
+        self.assertIn("lona_text_level_up", event_names)
 
     async def test_milestone_90_percent_no_repeated_events(self):
         await database.update_user_level(888, 123, {"text_xp": 70})

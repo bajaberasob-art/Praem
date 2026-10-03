@@ -11669,6 +11669,15 @@ body.leveling-route .nav-item.active[data-nav-view="leveling"] { color: #e6f4ff;
 .leveling-meter i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22d3ee, #6366f1, #a855f7); }
 .leveling-recent { margin: 0; padding: 0 18px 0 0; display: grid; gap: 6px; color: #b9cdf3; font-size: 13px; }
 .leveling-msg-preview { display: grid; gap: 6px; }
+.leveling-message-manager { display: grid; gap: 10px; padding: 10px 12px; border: 1px solid var(--lv-line); border-radius: 14px; background: #061022aa; }
+.leveling-manager-row { display: grid; grid-template-columns: auto minmax(150px, 1fr) repeat(4, auto); gap: 8px; align-items: center; }
+.leveling-manager-row strong { font-size: 13px; color: #d8ecff; }
+.leveling-manager-row select { min-height: 40px; }
+.leveling-msg-manager-btn { min-height: 38px; padding: 7px 10px; }
+@media (max-width: 760px) {
+  .leveling-manager-row { grid-template-columns: 1fr 1fr; }
+  .leveling-manager-row strong, .leveling-manager-row select { grid-column: 1 / -1; }
+}
 .leveling-mock-tag { color: #d4c2ff; }
 .leveling-discord { display: flex; gap: 10px; padding: 12px; border-radius: 12px; background: #0b1020; border: 1px solid #1b2a55; }
 .leveling-discord.is-off { opacity: .5; }
